@@ -14,17 +14,17 @@ const upStreamUrl: string = "https://dashscope.aliyuncs.com/compatible-mode/v1/c
 
 class CustomPromise {
     private promise: Promise<unknown>;
-    private resolve: (value: (PromiseLike<unknown> | unknown)) => void;
-    private reject: (reason?: any) => void;
+    resolve!: (value?: any) => void ;
+    reject!: (reason?: any) => void ;
 
     constructor() {
-        let that = this;
         this.promise = new Promise((resolve, reject) => {
-            that.resolve = resolve;
-            that.reject = reject;
+            this.resolve = resolve;
+            this.reject = reject;
         });
     }
 }
+
 
 async function chatCompletions(c: Context) {
 
@@ -45,7 +45,7 @@ async function chatCompletions(c: Context) {
         headers: {
             'accept': "*/*",
             'Content-Type': 'application/json',
-            "Authorization": authToken
+            "Authorization": authToken,
         },
         body: body,
     }
