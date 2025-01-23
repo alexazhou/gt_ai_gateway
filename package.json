@@ -6,7 +6,9 @@
   },
   "dependencies": {
     "@fortaine/fetch-event-source": "^3.0.6",
-    "hono": "^4.6.17"
+    "hono": "^4.6.17",
+    "knex-cloudflare-d1": "^0.1.1",
+    "sutando": "^1.7.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250109.0",

@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { chatCompletions } from './web/openai'
+import { chatCompletions } from './web/aiApiEntry'
 
 const app = new Hono()
 

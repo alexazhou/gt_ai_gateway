@@ -1,51 +1,32 @@
-import { Context } from "hono";
-import { stream, streamText, streamSSE, SSEStreamingApi} from 'hono/streaming'
-import {EventStreamContentType, fetchEventSource} from '@fortaine/fetch-event-source';
+import {Context} from "hono";
+import {ModelConfig} from "../model/modelConfig";
 import {StatusCode} from "hono/dist/types/utils/http-status";
-import {raw} from "hono/dist/types/utils/html";
+import {CustomPromise} from "../util/enhanced";
+import { streamSSE, SSEStreamingApi} from 'hono/streaming'
+import {EventStreamContentType, fetchEventSource} from "@fortaine/fetch-event-source";
+import {User} from "../model/user";
 
 
-let id = 0
+async function sendRequest (c:Context, user:User, modelConfig:ModelConfig):Promise<Response>{
 
-const upStreamUrl: string = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
-
-//const upStreamUrl:string = "http://127.0.0.1:8080/compatible-mode/v1/chat/completions"
-
-
-class CustomPromise {
-    private promise: Promise<unknown>;
-    resolve!: (value?: any) => void ;
-    reject!: (reason?: any) => void ;
-
-    constructor() {
-        this.promise = new Promise((resolve, reject) => {
-            this.resolve = resolve;
-            this.reject = reject;
-        });
-    }
-}
-
-
-async function chatCompletions(c: Context) {
+    console.log("sendRequest: modelConfig={}", modelConfig);
 
     let streamResponse: boolean = true;
 
     let failedStatusCode: StatusCode | null = null;
     let failedMessage: string | null = null;
 
-    let getResponseHeaderPromise: CustomPromise = new CustomPromise();
+    let getResponseHeaderPromise: CustomPromise<void> = new CustomPromise();
 
     let body: string = await c.req.text();
     console.log("body:", body);
-
-    let authToken:string|undefined = c.req.header('Authorization');
 
     let requestOptions = {
         method: 'POST',
         headers: {
             'accept': "*/*",
             'Content-Type': 'application/json',
-            "Authorization": authToken!,
+            "Authorization": user.token!,
         },
         body: body,
     }
@@ -65,7 +46,7 @@ async function chatCompletions(c: Context) {
     console.log("do fetch upstream");
 
     //upstreamReqPromise =
-    upstreamReqPromise = fetchEventSource(upStreamUrl, {
+    upstreamReqPromise = fetchEventSource(modelConfig!.url!, {
         ...requestOptions,
         async onopen(response:Response) {
             if (response.ok && response.headers.get('content-type')?.startsWith(EventStreamContentType)) {
@@ -95,7 +76,6 @@ async function chatCompletions(c: Context) {
                 }
 
                 console.log("fallback to json response");
-
                 getResponseHeaderPromise.resolve(null);
 
             } else {
@@ -127,8 +107,8 @@ async function chatCompletions(c: Context) {
         }
     });
 
+    console.log("before getResponseHeaderPromise");
     await getResponseHeaderPromise;
-
     console.log("after getResponseHeaderPromise");
     console.log("streamResponse:", streamResponse);
 
@@ -141,6 +121,6 @@ async function chatCompletions(c: Context) {
     }
 }
 
-export {
-    chatCompletions
+export default {
+    sendRequest,
 }

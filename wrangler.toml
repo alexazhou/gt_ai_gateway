@@ -15,10 +15,10 @@ compatibility_date = "2025-01-19"
 # binding = "MY_BUCKET"
 # bucket_name = "my-bucket"
 
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "my-database"
-# database_id = ""
+[[d1_databases]]
+binding = "DB"
+database_name = "test-sutando"
+database_id = "18a3d248-e4c8-481b-8f1d-2bff94a8b356"
 
 # [ai]
 # binding = "AI"
