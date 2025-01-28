@@ -1,14 +1,18 @@
+import {Model} from "sutando";
 
-class ModelConfig {
 
-    token:string | null = null;
+class ModelConfig extends Model {
+    table = 'model_config';
+
+    id!: number;
+
     name:string | null = null;
-    vender:string | null = null;
+    vendor:string | null = null;  // vendor impl class
     url:string | null = null;
 
-    constructor() {
+    created_at!: Date;
+    updated_at!: Date;
 
-    }
 }
 
 export {
