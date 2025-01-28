@@ -1,6 +1,6 @@
 create table user
 (
-    id                                             not null,
+    id         INTEGER                             not null constraint user_pk primary key autoincrement,
     name       TEXT                                not null,
     token      text                                not null,
     created_at TIMESTAMP default CURRENT_TIMESTAMP not null,
@@ -10,5 +10,3 @@ create table user
 create unique index token_index
     on user (token);
 
-create unique index user_id_uindex
-    on user (id);
