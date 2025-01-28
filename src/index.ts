@@ -2,7 +2,7 @@ import {Context, Hono, Next} from 'hono'
 import ClientD1 from 'knex-cloudflare-d1';
 import { ModelNotFoundError, sutando } from 'sutando';
 
-
+import {User} from "./model/user";
 import { chatCompletions } from './web/aiApiEntry'
 
 
@@ -34,10 +34,17 @@ app.use(prepareDBConnection);
 
 app.get('/', (c) => {
   return c.text('Hello, welcome to serverless ai gateway!')
-})
+});
 
-app.get('/testORM.json', async (c) => {
-})
+app.get('/initDatabase.json', async (c) => {
+  return c.text('init database');
+
+});
+
+app.get('/users', async (c) => {
+  const users = await User.query().withCount().get();
+  return c.json(users);
+});
 
 app.post('/v1/chat/completions', chatCompletions);
 
