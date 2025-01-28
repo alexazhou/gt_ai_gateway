@@ -3,6 +3,7 @@ import ClientD1 from 'knex-cloudflare-d1';
 import { ModelNotFoundError, sutando } from 'sutando';
 
 import {User} from "./model/user";
+import {ModelConfig} from "./model/modelConfig";
 import { chatCompletions } from './web/aiApiEntry'
 
 
@@ -40,6 +41,20 @@ app.get('/initDatabase.json', async (c) => {
   return c.text('init database');
 
 });
+
+app.post('/model/create.json', async (c) => {
+  const body = await c.req.json();
+  const { name, vendor, url } = body;
+
+  const post = await ModelConfig.query().create({
+    name,
+    vendor,
+    url,
+  });
+
+  return c.json(post);
+});
+
 
 app.get('/users', async (c) => {
   const users = await User.query().withCount().get();
