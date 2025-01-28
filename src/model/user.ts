@@ -1,12 +1,22 @@
-class User {
+import { Model, HasUniqueIds } from 'sutando';
+import { v4 as uuid } from 'uuid';
 
-    name:string | null = null;
-    token:string | null = null;
+const BaseModel = HasUniqueIds(Model) as typeof Model;
 
-    constructor() {
+class User extends BaseModel {
+    table = 'user';
 
+    id!: string;
+    name!: string;
+    token!: string;
+    created_at!: Date;
+    updated_at!: Date;
+
+    newUniqueId(): string {
+        return uuid();
     }
 }
+
 
 export {
     User
