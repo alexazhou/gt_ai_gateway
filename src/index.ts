@@ -56,9 +56,14 @@ app.post('/model/create.json', async (c) => {
 });
 
 
-app.get('/users', async (c) => {
-  const users = await User.query().withCount().get();
+app.get('/user/list.json', async (c) => {
+  const users = await User.query().get();
   return c.json(users);
+});
+
+app.get('/model/list.json', async (c) => {
+  const modelConfigs = await ModelConfig.query().get();
+  return c.json(modelConfigs);
 });
 
 app.post('/v1/chat/completions', chatCompletions);
