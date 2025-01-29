@@ -12,10 +12,27 @@ async function chatCompletions(c: Context) {
     console.log("body:", body);
 
     //获取用户
-    let authToken:string|undefined = c.req.header('Authorization');
-    let user:User|null = await userService.getUser(authToken!);
+    const authHeader = c.req.header('Authorization');
+
+    if (!authHeader) {
+        return c.json({ error: 'Authorization header is missing' }, 401);
+    }
+
+    // 检查 Authorization header 是否以 "Bearer " 开头
+    if (!authHeader.startsWith('Bearer ')) {
+        return c.json({ error: 'Invalid token format' }, 401);
+    }
+
+    // 提取 token
+    const token = authHeader.split(' ')[1];
+
+    let user:User|null = await userService.getUser(token!);
     console.log("user:", user);
 
+    if(user == null){
+        return c.json({ error: 'Invalid token (user not found)' }, 401);
+    }
+    
     //解析请求
     let bodyDict = JSON.parse(body);
     console.log("bodyDict:", bodyDict, typeof bodyDict);
