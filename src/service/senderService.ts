@@ -1,13 +1,13 @@
 import {Context} from "hono";
-import {ModelConfig} from "../model/modelConfig";
+import {SgModel} from "../model/sgModel";
 import {StatusCode} from "hono/dist/types/utils/http-status";
 import {CustomPromise} from "../util/enhanced";
 import { streamSSE, SSEStreamingApi} from 'hono/streaming'
 import {EventStreamContentType, fetchEventSource} from "@fortaine/fetch-event-source";
-import {User} from "../model/user";
+import {SgUser} from "../model/sgUser";
 
 
-async function sendRequest (c:Context, user:User, modelConfig:ModelConfig):Promise<Response>{
+async function sendRequest (c:Context, user:SgUser, modelConfig:SgModel):Promise<Response>{
 
     console.log("sendRequest: modelConfig={}", modelConfig);
 

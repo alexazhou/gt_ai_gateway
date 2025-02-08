@@ -1,14 +1,14 @@
-import {User} from "../model/user";
+import {SgUser} from "../model/sgUser";
 
 
-async function getUser(token:string):Promise<User | null> {
+async function getUser(token:string):Promise<SgUser | null> {
 
     console.log("getUser",token);
 
     if(token != null){
-        //let user:User = new User();
+        //let user:SgUser = new SgUser();
 
-        const user = await User.query().where('token', token).first();
+        const user = await SgUser.query().where('token', token).first();
         console.log("user:", user);
 
         //user.name = "default";

@@ -1,9 +1,9 @@
 import { Context } from "hono";
 import modelService from "../service/modelService";
 import userService from "../service/userService";
-import { ModelConfig } from "../model/modelConfig";
+import { SgModel } from "../model/sgModel";
 import sender from "../service/senderService";
-import {User} from "../model/user";
+import {SgUser} from "../model/sgUser";
 
 
 async function chatCompletions(c: Context) {
@@ -26,7 +26,7 @@ async function chatCompletions(c: Context) {
     // 提取 token
     const token = authHeader.split(' ')[1];
 
-    let user:User|null = await userService.getUser(token!);
+    let user:SgUser|null = await userService.getUser(token!);
     console.log("user:", user);
 
     if(user == null){
@@ -39,7 +39,7 @@ async function chatCompletions(c: Context) {
 
     //获取后端模型配置
     let modelName = bodyDict.model;
-    let modelConfig:ModelConfig | null = await modelService.getModel(modelName);
+    let modelConfig:SgModel | null = await modelService.getModel(modelName);
     console.log("modelConfig:", modelConfig);
 
     return sender.sendRequest(c, user!, modelConfig!);

@@ -1,7 +1,7 @@
 import {Model} from "sutando";
 
 
-class ModelConfig extends Model {
+class SgModel extends Model {
     table = 'model';
 
     id!: number;
@@ -15,5 +15,5 @@ class ModelConfig extends Model {
 }
 
 export {
-    ModelConfig
+    SgModel
 }

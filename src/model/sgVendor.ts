@@ -2,7 +2,7 @@ import { Model } from 'sutando';
 import { v4 as uuid } from 'uuid';
 
 
-class VendorConfig extends Model {
+class SgVendor extends Model {
     table = 'vendor';
 
     id!: number;
@@ -17,5 +17,5 @@ class VendorConfig extends Model {
 
 
 export {
-    VendorConfig
+    SgVendor
 }

@@ -2,7 +2,7 @@ import { Model } from 'sutando';
 import { v4 as uuid } from 'uuid';
 
 
-class User extends Model {
+class SgUser extends Model {
     table = 'user';
 
     id!: number;
@@ -16,5 +16,5 @@ class User extends Model {
 
 
 export {
-    User
+    SgUser
 }

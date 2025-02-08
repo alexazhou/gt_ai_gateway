@@ -2,8 +2,9 @@ import {Context, Hono, Next} from 'hono'
 import ClientD1 from 'knex-cloudflare-d1';
 import { ModelNotFoundError, sutando } from 'sutando';
 
-import {User} from "./model/user";
-import {ModelConfig} from "./model/modelConfig";
+import {SgUser} from "./model/sgUser";
+import {SgModel} from "./model/sgModel";
+import {SgVendor} from "./model/sgVendor";
 import { chatCompletions } from './web/aiApiEntry'
 
 
@@ -46,7 +47,7 @@ app.post('/model/create.json', async (c) => {
   const body = await c.req.json();
   const { name, vendor, url } = body;
 
-  const instance = await ModelConfig.query().create({
+  const instance = await SgModel.query().create({
     name,
     vendor,
     url,
@@ -56,12 +57,12 @@ app.post('/model/create.json', async (c) => {
 });
 
 app.get('/model/list.json', async (c) => {
-  const modelConfigs = await ModelConfig.query().get();
+  const modelConfigs = await SgModel.query().get();
   return c.json(modelConfigs);
 });
 
 app.get('/user/list.json', async (c) => {
-  const users = await User.query().get();
+  const users = await SgUser.query().get();
   return c.json(users);
 });
 
@@ -71,9 +72,28 @@ app.post('/user/create.json', async (c) => {
 
   const token:String = crypto.randomUUID();
 
-  const instance = await User.query().create({
+  const instance = await SgUser.query().create({
     name,
     token,
+  });
+
+  return c.json(instance);
+});
+
+app.get('/vendor/list.json', async (c) => {
+  const users = await SgVendor.query().get();
+  return c.json(users);
+});
+
+app.post('/vendor/create.json', async (c) => {
+  const body = await c.req.json();
+  const { type,name,token,url } = body;
+
+  const instance = await SgVendor.query().create({
+    type,
+    name,
+    token,
+    url,
   });
 
   return c.json(instance);
