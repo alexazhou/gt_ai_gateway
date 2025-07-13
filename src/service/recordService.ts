@@ -15,7 +15,12 @@ async function update(recordId: number, data: Partial<SgRecord>) {
     return SgRecord.query().where('id', recordId).update(data);
 }
 
+async function latest(limit: number = 10) {
+    return SgRecord.query().orderBy('id', 'desc').limit(limit).get();
+}
+
 export default {
     create,
     update,
+    latest,
 }

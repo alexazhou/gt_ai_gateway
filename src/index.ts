@@ -6,6 +6,7 @@ import {SgUser} from "./model/sgUser";
 import {SgModel} from "./model/sgModel";
 import {SgVendor} from "./model/sgVendor";
 import {SgRecord} from "./model/sgRecord";
+import recordService from "./service/recordService";
 import { chatCompletions } from './web/aiApiEntry'
 
 
@@ -120,6 +121,13 @@ app.post('/vendor/create.json', async (c) => {
 app.get('/record/list.json', async (c) => {
   const records = await SgRecord.query().get();
   return c.json(records);
+});
+
+app.get('/record/latest.json', async (c) => {
+    const { limit } = c.req.query();
+    const limitNumber = limit ? parseInt(limit, 10) : 10;
+    const records = await recordService.latest(limitNumber);
+    return c.json(records);
 });
 
 app.get('/record/:id', async (c) => {
