@@ -41,7 +41,7 @@ async function chatCompletions(c: Context) {
     //获取后端模型配置
     let modelName = bodyDict.model;
     let modelConfig:SgModel | null = await modelService.getModel(modelName);
-    console.log("modelConfig:", modelConfig);
+    console.log("modelConfig:", JSON.stringify(modelConfig, null, 4));
 
     if(modelConfig == null){
         return c.json({ error: 'model not found' }, 401);
@@ -49,7 +49,7 @@ async function chatCompletions(c: Context) {
 
     //获取 vendor 配置
     const vendor:SgVendor|null = await SgVendor.query().findOrFail(modelConfig!.vendor_id!);
-    console.log("vendor:", vendor);
+    console.log("vendor:", JSON.stringify(vendor, null, 4));
 
     if(vendor == null){
         return c.json({ error: 'vendor not found' }, 401);

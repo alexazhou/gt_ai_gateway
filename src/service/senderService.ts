@@ -14,7 +14,7 @@ async function sendRequest (c:Context, user:SgUser, modelConfig:SgModel, vendor:
     const record = await recordService.create(user.id, modelConfig.id);
     const recordId = record.id;
 
-    console.log("sendRequest: modelConfig={}", modelConfig);
+    console.log("sendRequest: modelConfig={}", JSON.stringify(modelConfig, null, 4));
 
     let streamResponse: boolean = true;
 
@@ -42,7 +42,7 @@ async function sendRequest (c:Context, user:SgUser, modelConfig:SgModel, vendor:
 
     let streamSSEResponse = streamSSE(c, async (stream: SSEStreamingApi) => {
         streamOutputPipe = stream;
-        console.log("set outputStream",upstreamReqPromise);
+        console.log("set upstreamReqPromise",upstreamReqPromise);
         await getResponseHeaderPromise;
         await upstreamReqPromise;
         console.log("upstreamReqPromise finished");
@@ -77,7 +77,6 @@ async function sendRequest (c:Context, user:SgUser, modelConfig:SgModel, vendor:
 
                     failedStatusCode = response.status as StatusCode;
                     failedMessage = responseText;
-
                 }
 
                 console.log("fallback to json response");
