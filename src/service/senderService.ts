@@ -18,9 +18,8 @@ async function sendRequest (c:Context, user:SgUser, modelConfig:SgModel, vendor:
     console.log("sendRequest: modelConfig={}", modelConfig);
 
     let streamResponse: boolean = true;
-
-    let failedStatusCode: StatusCode | null = null;
-    let failedMessage: string | null = null;
+    let upstreamStatusCode: StatusCode | null = null;
+    let responseText: string | null = null;
 
     let getResponseHeaderPromise: CustomPromise<void> = new CustomPromise();
 
@@ -44,29 +43,25 @@ async function sendRequest (c:Context, user:SgUser, modelConfig:SgModel, vendor:
     upstreamReqPromise = fetchEventSource(vendor!.url!, {
         ...requestOptions,
         async onopen(response:Response) {
+            upstreamStatusCode = response.status as StatusCode;
+
             if (response.ok && response.headers.get('content-type')?.startsWith(EventStreamContentType)) {
                 console.log("onOpen:", response);
 
                 getResponseHeaderPromise.resolve(null);
-
                 return; // everything's good
-
             } else if (response.status >= 400 && response.status < 500 && response.status !== 429) {
                 // client-side errors are usually non-retriable:
                 console.log("onOpen, but has error:", response);
-
                 streamResponse = false;
 
                 const contentType = response.headers.get("content-type");
                 console.log("upstream response content type: ", contentType);
 
                 if (contentType?.startsWith("text/plain") || contentType?.startsWith("application/json")) {
-                    let responseText:string = await response.clone().text();
+                    responseText = await response.clone().text();
                     console.log("statusCode:",response.status);
                     console.log("responseText:",responseText);
-
-                    failedStatusCode = response.status as StatusCode;
-                    failedMessage = responseText;
                 }
 
                 console.log("fallback to json response");
@@ -74,7 +69,8 @@ async function sendRequest (c:Context, user:SgUser, modelConfig:SgModel, vendor:
 
             } else {
                 console.log("onOpen, but content-type not except:", response);
-                let responseText:string = await response.clone().text();
+                streamResponse = false;
+                responseText = await response.clone().text();
                 console.log("statusCode:",response.status);
                 console.log("responseText:",responseText);
 
@@ -116,9 +112,9 @@ async function sendRequest (c:Context, user:SgUser, modelConfig:SgModel, vendor:
     if(streamResponse === true){
         return streamSSEResponse;
     }else{
-        c.status(failedStatusCode!);
+        c.status(upstreamStatusCode!);
         c.res.headers.set("Content-Type","application/json");
-        return c.text(failedMessage!)
+        return c.text(responseText!)
     }
 }
 
