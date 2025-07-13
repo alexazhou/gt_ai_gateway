@@ -112,6 +112,10 @@ async function sendRequest (c:Context, user:SgUser, modelConfig:SgModel, vendor:
     if(streamResponse === true){
         return streamSSEResponse;
     }else{
+        recordService.update(recordId, {
+            response_data:responseText
+        })
+
         c.status(upstreamStatusCode!);
         c.res.headers.set("Content-Type","application/json");
         return c.text(responseText!)
