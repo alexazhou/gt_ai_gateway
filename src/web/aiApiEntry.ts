@@ -1,10 +1,10 @@
 import { Context } from "hono";
 import modelService from "../service/modelService";
 import userService from "../service/userService";
-import { SgModel } from "../model/sgModel";
 import sender from "../service/senderService";
-import {SgUser} from "../model/sgUser";
-import {SgVendor} from "../model/sgVendor";
+import { SgModel } from "../model/sgModel";
+import { SgUser } from "../model/sgUser";
+import { SgVendor } from "../model/sgVendor";
 
 
 async function chatCompletions(c: Context) {
@@ -43,10 +43,17 @@ async function chatCompletions(c: Context) {
     let modelConfig:SgModel | null = await modelService.getModel(modelName);
     console.log("modelConfig:", modelConfig);
 
+    if(modelConfig == null){
+        return c.json({ error: 'model not found' }, 401);
+    }
+
     //获取 vendor 配置
-    //find vendor
     const vendor:SgVendor|null = await SgVendor.query().findOrFail(modelConfig!.vendor_id!);
     console.log("vendor:", vendor);
+
+    if(vendor == null){
+        return c.json({ error: 'vendor not found' }, 401);
+    }
 
     if(vendor?.url == null){
         if(vendor?.type == "aliyun"){
