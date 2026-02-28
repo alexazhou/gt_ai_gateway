@@ -2,7 +2,9 @@
   "name": "serverless_ai_gateway",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy --minify"
+    "deploy": "wrangler deploy --minify",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage"
   },
   "dependencies": {
     "@fortaine/fetch-event-source": "^3.0.6",
@@ -15,6 +17,8 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250712.0",
     "@types/uuid": "^10.0.0",
+    "@vitest/coverage-v8": "^4.0.18",
+    "vitest": "^4.0.18",
     "wrangler": "^4.24.3"
   }
 }
