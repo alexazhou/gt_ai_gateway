@@ -2,22 +2,31 @@
   "name": "serverless_ai_gateway",
   "scripts": {
     "dev": "wrangler dev",
+    "dev:local": "npx tsx src/local.ts",
+    "start": "npx tsx src/local.ts",
     "deploy": "wrangler deploy --minify",
     "test": "vitest",
     "test:coverage": "vitest --coverage"
   },
   "dependencies": {
     "@fortaine/fetch-event-source": "^3.0.6",
+    "@hono/node-server": "^1.19.9",
     "@types/node": "^24.0.13",
-    "hono": "^4.8.4",
+    "better-sqlite3": "^12.6.2",
+    "hono": "^4.12.3",
     "knex-cloudflare-d1": "^0.1.1",
     "sutando": "^1.7.2",
+    "tsx": "^4.20.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250712.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/sqlite3": "^3.1.11",
     "@types/uuid": "^10.0.0",
     "@vitest/coverage-v8": "^4.0.18",
+    "better-sqlite3": "^12.6.2",
+    "sqlite3": "^5.1.7",
     "vitest": "^4.0.18",
     "wrangler": "^4.24.3"
   }
