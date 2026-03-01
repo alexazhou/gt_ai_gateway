@@ -1,4 +1,3 @@
-DROP TABLE IF EXISTS record;
 
 create table record
 (

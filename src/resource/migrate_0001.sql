@@ -1,8 +1,3 @@
-DROP TABLE IF EXISTS user;
-DROP TABLE IF EXISTS model;
-DROP TABLE IF EXISTS vendor;
-
-
 
 create table user
 (
