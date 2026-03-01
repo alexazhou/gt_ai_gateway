@@ -1,7 +1,7 @@
 import { ormService } from './ormService'
 import fileService from './fileService'
 
-const RESOURCE_DIR = 'src/resource'
+const RESOURCE_DIR = 'src/resource/migrate'
 
 export interface Migration {
   id?: number
