@@ -14,7 +14,7 @@ npm run deploy
 
 ## 初始化 DB
 ```
-wrangler d1 execute serverless_ai_gateway --local --file=src/resource/init.sql
+wrangler d1 execute serverless_ai_gateway --local --file=src/resource/migrate_001.sql
 ```
 
 ## 查看已有数据表
