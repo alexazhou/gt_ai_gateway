@@ -52,13 +52,7 @@ class ORMService {
         connection: {
           database: db
         },
-        useNullAsDefault: true,
-        pool: {
-          min: 0,
-          max: 10, // 允许一定程度的并发
-          idleTimeoutMillis: 0, // 请求结束尽量快释放，不留给后台处理
-          reapIntervalMillis: 2147483647, // 实际上禁用后台清理扫描
-        }
+        useNullAsDefault: true
       });
       this._cloudConnected = true;
     }
