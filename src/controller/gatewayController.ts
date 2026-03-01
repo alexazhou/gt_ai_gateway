@@ -59,12 +59,6 @@ async function chatCompletions(c: Context) {
         return c.json({ error: 'vendor api_format must be openai' }, 400);
     }
 
-    if (vendor?.url == null) {
-        if (vendor?.type == "aliyun") {
-            vendor.url = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
-        }
-    }
-
     return sender.sendRequest(c, user!, modelConfig!, vendor!);
 }
 
@@ -119,14 +113,6 @@ async function anthropicMessages(c: Context) {
 
     if (vendor.api_format !== ApiFormat.ANTHROPIC) {
         return c.json({ error: 'vendor api_format must be anthropic' }, 400);
-    }
-
-    if (vendor?.url == null) {
-        if (vendor?.api_format === ApiFormat.ANTHROPIC) {
-            vendor.url = 'https://api.anthropic.com/v1/messages';
-        } else if (vendor?.type == "aliyun") {
-            vendor.url = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
-        }
     }
 
     return await sender.sendRequest(c, user!, modelConfig!, vendor!);

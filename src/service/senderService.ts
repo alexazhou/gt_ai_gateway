@@ -7,9 +7,21 @@ import { EventStreamContentType, fetchEventSource } from "@fortaine/fetch-event-
 import { SgUser } from "../model/sgUser";
 import { SgVendor } from "../model/sgVendor";
 import recordService from "./recordService";
-import { SgRecordStatus, ApiFormat } from "../constants";
+import { SgRecordStatus, ApiFormat, VendorType } from "../constants";
 import { SSEAccumulator } from "../util/sseAccumulator";
 
+
+/**
+ * 为 Vendor 填充默认 URL
+ * 如果 url 为空，先按 type 填充，如果还为空，按 api_format 填充
+ */
+function fillDefaultUrl(vendor: SgVendor) {
+    if (!vendor?.url) {
+        if (vendor?.type === VendorType.ALIYUN) {
+            vendor.url = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+        }
+    }
+}
 
 /**
  * 发送请求到上游 AI 服务
@@ -21,6 +33,12 @@ import { SSEAccumulator } from "../util/sseAccumulator";
  * @returns Promise<Response> - 响应对象
  */
 async function sendRequest(c: Context, user: SgUser, modelConfig: SgModel, vendor: SgVendor): Promise<Response> {
+
+    fillDefaultUrl(vendor);
+
+    if (!vendor?.url) {
+        return c.json({ error: 'vendor url is empty and no default can be applied' }, 400);
+    }
 
     // 1. 获取请求体，并创建数据库记录
     let body: string = await c.req.text();
