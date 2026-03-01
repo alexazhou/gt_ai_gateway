@@ -1,5 +1,5 @@
 import { Hono, MiddlewareHandler } from 'hono'
-import { chatCompletions } from './controller/gatewayController'
+import { chatCompletions, anthropicMessages } from './controller/gatewayController'
 import * as ModelController from './controller/modelController'
 import * as UserController from './controller/userController'
 import * as VendorController from './controller/vendorController'
@@ -52,6 +52,7 @@ app.get('/record/:id', RecordController.getRecord)
 
 // AI
 app.post('/v1/chat/completions', chatCompletions)
+app.post('/v1/messages', anthropicMessages)
 
 // File
 app.get('/file/list', FileController.list)
