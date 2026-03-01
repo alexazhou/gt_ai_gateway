@@ -7,7 +7,7 @@ import { EventStreamContentType, fetchEventSource } from "@fortaine/fetch-event-
 import { SgUser } from "../model/sgUser";
 import { SgVendor } from "../model/sgVendor";
 import recordService from "./recordService";
-import { SgRecordStatus } from "../constants";
+import { SgRecordStatus, ApiFormat } from "../constants";
 import { SSEAccumulator } from "../util/sseAccumulator";
 
 
@@ -42,13 +42,21 @@ async function sendRequest(c: Context, user: SgUser, modelConfig: SgModel, vendo
     console.log("body:", body);
 
     // 3. 构建上游请求选项
+    let headers: Record<string, string> = {
+        'accept': "*/*",
+        'Content-Type': 'application/json',
+    };
+
+    if (vendor.api_format === ApiFormat.ANTHROPIC) {
+        headers['x-api-key'] = vendor!.token!;
+        headers['anthropic-version'] = '2023-06-01';
+    } else {
+        headers['Authorization'] = vendor!.token!;
+    }
+
     let requestOptions = {
         method: 'POST',
-        headers: {
-            'accept': "*/*",
-            'Content-Type': 'application/json',
-            "Authorization": vendor!.token!,
-        },
+        headers: headers,
         body: body,
     }
     console.log("requestOptions:", requestOptions);
