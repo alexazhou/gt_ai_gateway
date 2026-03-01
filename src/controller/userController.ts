@@ -1,12 +1,12 @@
 import { Context } from 'hono'
 import { SgUser } from '../model/sgUser'
 
-const listUsers = async (c: Context) => {
+async function listUsers(c: Context) {
   const users = await SgUser.query().get()
   return c.json(users)
 }
 
-const getUser = async (c: Context) => {
+async function getUser(c: Context) {
   const { id } = c.req.param()
 
   const user = await SgUser.query().findOrFail(id)
@@ -14,7 +14,7 @@ const getUser = async (c: Context) => {
   return c.json(user)
 }
 
-const createUser = async (c: Context) => {
+async function createUser(c: Context) {
   const body = await c.req.json()
   let { name, token } = body
 

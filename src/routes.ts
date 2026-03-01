@@ -1,6 +1,6 @@
 import { Hono, MiddlewareHandler } from 'hono'
 import { DatabaseAdapter } from './service/dbAdapter'
-import { chatCompletions } from './web/aiApiEntry'
+import { chatCompletions } from './controller/gatewayController'
 import * as ModelController from './controller/modelController'
 import * as UserController from './controller/userController'
 import * as VendorController from './controller/vendorController'

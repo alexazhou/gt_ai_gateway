@@ -1,7 +1,7 @@
 import { Context } from 'hono'
 import { SgModel } from '../model/sgModel'
 
-const createModel = async (c: Context) => {
+async function createModel(c: Context) {
   const body = await c.req.json()
   const { name, vendor_id } = body
 
@@ -13,7 +13,7 @@ const createModel = async (c: Context) => {
   return c.json(instance)
 }
 
-const listModels = async (c: Context) => {
+async function listModels(c: Context) {
   const modelConfigs = await SgModel.query().get()
   return c.json(modelConfigs)
 }
