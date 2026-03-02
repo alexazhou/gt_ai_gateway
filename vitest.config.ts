@@ -9,11 +9,7 @@ export default defineConfig({
     globalSetup: ['./tests/globalSetup.ts'],
     // Run tests sequentially to avoid database and port conflicts
     pool: 'forks',
-    poolOptions: {
-      forks: {
-        singleFork: true,
-      },
-    },
+    fileParallelism: false,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

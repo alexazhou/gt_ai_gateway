@@ -114,9 +114,9 @@ export async function cleanup(): Promise<void> {
  * Truncate tables - remove all data but keep structure
  */
 export async function truncate(): Promise<void> {
+  // Auto-connect if not initialized
   if (!db) {
-    console.log('Database not initialized, nothing to truncate')
-    return
+    db = new Database(DB_CONFIG.path)
   }
 
   console.log('Truncating tables...')

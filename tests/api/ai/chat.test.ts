@@ -3,6 +3,7 @@ import { post } from '../../helpers/requestHelper'
 import { generateUser, generateOpenAIChatRequest, generateAnthropicMessageRequest } from '../../helpers/mockHelper'
 import { VENDOR_FIXTURES } from '../../fixtures/vendorFixtures'
 import { createRandomModel } from '../../fixtures/modelFixtures'
+import { truncateDatabase } from '../../testHelpers'
 
 /**
  * AI Chat Endpoint Tests
@@ -16,6 +17,8 @@ let anthropicModelName: string
 
 describe('AI Chat API', () => {
   beforeAll(async () => {
+    await truncateDatabase()
+
     // Create test user
     const userResponse = await post('/user/create.json', generateUser())
     testUserToken = userResponse.body.token

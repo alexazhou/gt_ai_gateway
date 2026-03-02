@@ -1,11 +1,15 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll } from 'vitest'
 import { get, post } from '../../helpers/requestHelper'
+import { truncateDatabase } from '../../testHelpers'
 
 /**
  * Vendor Endpoint Negative Tests
  */
 
 describe('Vendor API (Negative)', () => {
+    beforeAll(async () => {
+        await truncateDatabase()
+    })
   describe('POST /vendor/create.json', () => {
     it('should return error when required fields are missing', async () => {
       const vendorData = {

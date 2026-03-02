@@ -3,6 +3,7 @@ import { get, post } from '../../helpers/requestHelper'
 import { generateUser } from '../../helpers/mockHelper'
 import { VENDOR_FIXTURES } from '../../fixtures/vendorFixtures'
 import { createRandomModel } from '../../fixtures/modelFixtures'
+import { truncateDatabase } from '../../testHelpers'
 
 /**
  * Record Endpoint Tests
@@ -15,6 +16,8 @@ let testModelId: number
 
 describe('Record API', () => {
   beforeAll(async () => {
+    await truncateDatabase()
+
     // Create test user
     const user = await post('/user/create.json', generateUser())
     testUserId = user.body.id

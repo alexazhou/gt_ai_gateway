@@ -3,6 +3,7 @@ import { get, post, postWithApiKey } from '../../helpers/requestHelper'
 import { generateUser, generateAnthropicMessageRequest } from '../../helpers/mockHelper'
 import { VENDOR_FIXTURES } from '../../fixtures/vendorFixtures'
 import { createRandomModel } from '../../fixtures/modelFixtures'
+import { truncateDatabase } from '../../testHelpers'
 
 /**
  * AI Messages Endpoint Tests (Anthropic)
@@ -14,6 +15,8 @@ let anthropicModelName: string
 
 describe('AI Messages API (Anthropic)', () => {
   beforeAll(async () => {
+    await truncateDatabase()
+
     // Create test user
     const userResponse = await post('/user/create.json', generateUser())
     testUserToken = userResponse.body.token

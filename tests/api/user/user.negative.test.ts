@@ -1,12 +1,16 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll } from 'vitest'
 import { get, post } from '../../helpers/requestHelper'
 import { generateUser } from '../../helpers/mockHelper'
+import { truncateDatabase } from '../../testHelpers'
 
 /**
  * User Endpoint Negative Tests
  */
 
 describe('User API (Negative)', () => {
+    beforeAll(async () => {
+        await truncateDatabase()
+    })
   describe('POST /user/create.json', () => {
     it('should return error when name is missing', async () => {
       const userData = { token: 'some-token' }

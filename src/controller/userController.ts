@@ -15,7 +15,6 @@ async function getUser(c: Context) {
     return c.json({ error: 'User not found' }, 404)
   }
 
-  console.log("user", user)
   return c.json(user)
 }
 

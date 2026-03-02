@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import { get, post } from '../../helpers/requestHelper'
 import { generateUser } from '../../helpers/mockHelper'
 import { USER_FIXTURES } from '../../fixtures/userFixtures'
+import { truncateDatabase } from '../../testHelpers'
 
 /**
  * User Endpoint Positive Tests
@@ -11,6 +12,9 @@ let createdUserId: number
 let createdUserToken: string
 
 describe('User API (Positive)', () => {
+    beforeAll(async () => {
+        await truncateDatabase()
+    })
   describe('POST /user/create.json', () => {
     it('should create a user with specified token', async () => {
       const userData = USER_FIXTURES.withCustomToken

@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll } from 'vitest'
 import { get, post } from '../../helpers/requestHelper'
 import { VENDOR_FIXTURES, createRandomVendor } from '../../fixtures/vendorFixtures'
+import { truncateDatabase } from '../../testHelpers'
 
 /**
  * Vendor Endpoint Positive Tests
@@ -9,6 +10,9 @@ import { VENDOR_FIXTURES, createRandomVendor } from '../../fixtures/vendorFixtur
 let createdVendorId: number
 
 describe('Vendor API (Positive)', () => {
+    beforeAll(async () => {
+        await truncateDatabase()
+    })
   describe('POST /vendor/create.json', () => {
     it('should create an OpenAI vendor', async () => {
       const vendorData = VENDOR_FIXTURES.openai

@@ -4,3 +4,4 @@
  */
 
 export { query, execute } from './helpers/dbHelper'
+export { truncate as truncateDatabase } from './helpers/dbHelper'

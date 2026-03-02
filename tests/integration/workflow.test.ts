@@ -3,12 +3,17 @@ import { get, post } from '../helpers/requestHelper'
 import { generateUser, generateOpenAIChatRequest } from '../helpers/mockHelper'
 import { VENDOR_FIXTURES } from '../fixtures/vendorFixtures'
 import { createRandomModel } from '../fixtures/modelFixtures'
+import { truncateDatabase } from '../testHelpers'
 
 /**
  * Integration Tests - Complete Workflows
  */
 
 describe('Integration Tests', () => {
+  beforeAll(async () => {
+    await truncateDatabase()
+  })
+
   describe('Complete User -> Vendor -> Model -> Request Workflow', () => {
     let userId: number
     let userToken: string
