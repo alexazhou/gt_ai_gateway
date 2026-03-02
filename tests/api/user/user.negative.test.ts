@@ -1,0 +1,55 @@
+import { describe, it, expect } from 'vitest'
+import { get, post } from '../../helpers/requestHelper'
+import { generateUser } from '../../helpers/mockHelper'
+
+/**
+ * User Endpoint Negative Tests
+ */
+
+describe('User API (Negative)', () => {
+  describe('POST /user/create.json', () => {
+    it('should return error when name is missing', async () => {
+      const userData = { token: 'some-token' }
+      const response = await post('/user/create.json', userData)
+
+      expect(response.status).toBeGreaterThanOrEqual(400)
+    })
+
+    it('should return error when both name and token are missing', async () => {
+      const userData = {}
+      const response = await post('/user/create.json', userData)
+
+      expect(response.status).toBeGreaterThanOrEqual(400)
+    })
+  })
+
+  describe('GET /user/:id', () => {
+    it('should return error for non-existent user ID', async () => {
+      const response = await get('/user/99999')
+
+      expect(response.status).toBeGreaterThanOrEqual(400)
+      expect(response.body).toHaveProperty('error')
+    })
+
+    it('should return error for invalid ID format (string)', async () => {
+      const response = await get('/user/invalid-id')
+
+      expect(response.status).toBeGreaterThanOrEqual(400)
+      expect(response.body).toHaveProperty('error')
+    })
+
+    it('should return error for negative ID', async () => {
+      const response = await get('/user/-1')
+
+      expect(response.status).toBeGreaterThanOrEqual(400)
+      expect(response.body).toHaveProperty('error')
+    })
+
+    it('should return error for zero ID', async () => {
+      const response = await get('/user/0')
+
+      expect(response.status).toBeGreaterThanOrEqual(400)
+      expect(response.body).toHaveProperty('error')
+    })
+  })
+})
