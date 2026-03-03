@@ -17,10 +17,18 @@ export interface Migration {
 // 解析命令行参数
 let command = "";
 let env = "local"; // default
+let dbConfigPath = ""; // optional custom wrangler config
+let dbName = "serverless_ai_gateway"; // default database name
 
 for (let i = 0; i < args.length; i++) {
     if (args[i] === "--env" || args[i] === "-e") {
         env = args[i + 1];
+        i++;
+    } else if (args[i] === "--config" || args[i] === "-c") {
+        dbConfigPath = args[i + 1];
+        i++;
+    } else if (args[i] === "--db-name") {
+        dbName = args[i + 1];
         i++;
     } else if (!command) {
         command = args[i];
@@ -77,13 +85,21 @@ class LocalDBAdapter implements DBAdapter {
 
 class WranglerDBAdapter implements DBAdapter {
     private target: "--local" | "--remote";
+    private configPath: string;
+    private dbName: string;
 
-    constructor(target: "--local" | "--remote") {
+    constructor(target: "--local" | "--remote", configPath: string = "", dbName: string = "serverless_ai_gateway") {
         this.target = target;
+        this.configPath = configPath;
+        this.dbName = dbName;
     }
 
     private runWrangler(args: string[]): string {
-        const cmd = `npx wrangler d1 execute serverless_ai_gateway ${this.target} ${args.join(" ")}`;
+        let cmd = `npx wrangler d1 execute ${this.dbName} ${this.target}`;
+        if (this.configPath) {
+            cmd += ` --config ${this.configPath}`;
+        }
+        cmd += ` ${args.join(" ")}`;
         console.log(`> ${cmd}`);
         try {
             const output = execSync(cmd, { encoding: "utf-8", stdio: "pipe" });
@@ -147,9 +163,9 @@ function getAdapter(env: string): DBAdapter {
     if (env === "local") {
         return new LocalDBAdapter(LOCAL_DB_PATH);
     } else if (env === "worker-local") {
-        return new WranglerDBAdapter("--local");
+        return new WranglerDBAdapter("--local", dbConfigPath, dbName);
     } else if (env === "worker-cloud") {
-        return new WranglerDBAdapter("--remote");
+        return new WranglerDBAdapter("--remote", dbConfigPath, dbName);
     } else {
         throw new Error(`Unknown env: ${env}`);
     }
@@ -209,7 +225,11 @@ export async function migrate(adapter: DBAdapter, env: string) {
             if (adapter instanceof WranglerDBAdapter) {
                 // 对于 wrangler，由于 SQL 可能非常长，最好使用 --file 参数
                 // 我们利用子进程直接执行该文件
-                const cmd = `npx wrangler d1 execute serverless_ai_gateway ${env === "worker-cloud" ? "--remote" : "--local"} --file="${sqlPath}"`;
+                let cmd = `npx wrangler d1 execute ${dbName} ${env === "worker-cloud" ? "--remote" : "--local"}`;
+                if (dbConfigPath) {
+                    cmd += ` --config ${dbConfigPath}`;
+                }
+                cmd += ` --file="${sqlPath}"`;
                 console.log(`> ${cmd}`);
                 execSync(cmd, { stdio: "inherit" });
             } else {

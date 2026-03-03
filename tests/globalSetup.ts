@@ -1,21 +1,41 @@
 import { join } from "path";
 import { spawn, ChildProcess, execSync } from "child_process";
-import { existsSync, unlinkSync } from "fs";
+import { existsSync, unlinkSync, rmSync } from "fs";
 import config from "./config";
 import dbHelper from "./helpers/dbHelper";
 import mockServer from "./helpers/mockServer";
 import requestHelper from "./helpers/requestHelper";
 
-// Worker mode configuration
-const DB_ID = "serverless_ai_gateway";
+// Worker mode configuration - use test database
+const TEST_DB_NAME = "serverless_ai_gateway_test";
+const TEST_WRANGLER_CONFIG = "wrangler.test.toml";
+const WRANGLER_D1_DIR = join(process.cwd(), ".wrangler", "state", "v3", "d1");
 
 let testServerProcess: ChildProcess | null = null;
 let mockServerProcess: any | null = null;
 
 // Helper to run wrangler D1 commands (worker mode only)
 function runD1Command(args: string[]): string {
-    const cmd = `npx wrangler d1 execute ${DB_ID} --local ${args.join(" ")}`;
+    const cmd = `npx wrangler d1 execute ${TEST_DB_NAME} --local --config ${TEST_WRANGLER_CONFIG} ${args.join(" ")}`;
     return execSync(cmd, { encoding: "utf-8", stdio: "pipe" });
+}
+
+// Clear D1 local database file - worker mode only
+function clearD1LocalDatabase(): void {
+    console.log("[WORKER_SETUP] Clearing D1 test database...");
+
+    try {
+        // D1 local databases are stored in .wrangler/state/v3/d1/{database_name}
+        const dbDir = join(WRANGLER_D1_DIR, TEST_DB_NAME);
+        if (existsSync(dbDir)) {
+            rmSync(dbDir, { recursive: true, force: true });
+            console.log("[WORKER_SETUP] D1 test database deleted");
+        } else {
+            console.log("[WORKER_SETUP] D1 test database not found, skipping");
+        }
+    } catch (e) {
+        console.error("[WORKER_SETUP] Failed to clear D1 test database:", e);
+    }
 }
 
 // Clear D1 database tables (but keep schema) - worker mode only
@@ -73,15 +93,16 @@ export async function setup(): Promise<void> {
 
     if (isWorkerMode) {
         console.log("[GLOBAL_SETUP] Worker mode: D1 database managed by wrangler");
-        // Run pending migrations for D1 using script/db.ts
+        // Clear D1 test database for clean test environment
+        clearD1LocalDatabase();
+        // Run migrations for D1 using command line with test config
         console.log("[GLOBAL_SETUP] Running migrations for D1...");
-        const adapter = new WranglerDBAdapter("--local");
         try {
-            await runMigrations(adapter, "worker-local");
+            execSync(`npx tsx script/db.ts migrate --env worker-local --db-name ${TEST_DB_NAME} --config ${TEST_WRANGLER_CONFIG}`, {
+                stdio: "inherit",
+            });
         } catch (e) {
             console.error("[GLOBAL_SETUP] Failed to run migrations:", e);
-        } finally {
-            adapter.close();
         }
     } else {
         cleanupTestDatabaseFile();
@@ -139,9 +160,9 @@ export async function teardown(): Promise<void> {
         const isWorkerMode = config.TEST_MODE === "worker";
 
         if (isWorkerMode) {
-            console.log(
-                "[GLOBAL_TEARDOWN] Worker mode: D1 database cleanup skipped (managed by wrangler)",
-            );
+            console.log("[GLOBAL_TEARDOWN] Worker mode: Cleaning up D1 local database...");
+            clearD1LocalDatabase();
+            console.log("[GLOBAL_TEARDOWN] D1 local database cleaned up");
         } else {
             console.log("Cleaning up test database...");
             await dbHelper.cleanup();
@@ -164,11 +185,13 @@ function startTestServer(): Promise<void> {
         const startupTimeout = isWorkerMode ? 30000 : 3000;
 
         if (isWorkerMode) {
-            // Worker mode: use wrangler dev
+            // Worker mode: use wrangler dev with test config
             command = [
                 "wrangler",
                 "dev",
                 "--local",
+                "--config",
+                TEST_WRANGLER_CONFIG,
                 "--port",
                 config.SERVER_CONFIG.port.toString(),
             ];
