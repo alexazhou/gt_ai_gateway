@@ -135,7 +135,7 @@ function startTestServer(): Promise<void> {
                         resolve();
                     }
                 } else {
-                    if (output.includes("Starting server on")) {
+                    if (output.includes("Server listening")) {
                         serverStarted = true;
                         resolve();
                     }

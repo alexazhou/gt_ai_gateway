@@ -14,12 +14,13 @@ async function startServer() {
 
     // 启动服务器
     const port = parseInt(process.env.PORT || "3000", 10);
-    console.log(`Starting server on http://localhost:${port}`);
 
     serve({
         fetch: app.fetch,
         port,
     });
+
+    console.log(`Server listening on http://localhost:${port}`);
 }
 
 startServer().catch((err) => {

@@ -52,3 +52,5 @@ export const errorHandler = async (c: Context, next: () => Promise<void>) => {
         );
     }
 };
+
+export default errorHandler;

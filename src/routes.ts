@@ -20,11 +20,11 @@ const dbMiddleware: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
 
 const app = new Hono<{ Bindings: Env }>();
 
+// 注册数据库中间件（最前面）
+app.use("*", dbMiddleware);
+
 // 注册全局错误处理中间件
 app.use("*", errorHandler);
-
-// 注册数据库中间件
-app.use("*", dbMiddleware);
 
 // System
 app.get("/", systemController.welcome);
@@ -52,7 +52,7 @@ app.get("/record/list.json", authMiddleware.requireAdmin, recordController.listR
 app.get("/record/latest.json", authMiddleware.requireAdmin, recordController.latestRecords);
 app.get("/record/:id", authMiddleware.requireAdmin, recordController.getRecord);
 
-// AI
+// AI endpoints (no auth middleware)
 app.post("/v1/chat/completions", gatewayController.chatCompletions);
 app.post("/v1/messages", gatewayController.anthropicMessages);
 
