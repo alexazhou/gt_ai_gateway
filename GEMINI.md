@@ -10,6 +10,10 @@
     5. 常量定义都放在 constants 中
 3. api 使用 rest 风格，url 都以 .json 结尾
 4. 不要用 ORM 内置的 findOrFail 方法（会导致返回 404 而不是 json），需要的时候只使用 find 然后通过 if 判断结果处理
+5. 统一使用默认导出（default export），调用时使用 `模块名.方法名` 的方式，这样可以明确知道调用的是哪个模块的代码
+    - **导入方式**：`import xxxHelper from '../helpers/xxxHelper'`
+    - **调用方式**：`xxxHelper.someMethod()`
+    - 所有代码，包括测试相关的模块（fixtures、helpers、config）都必须遵循此规范
 
 ## 工作技巧
 1. 在执行单条测试用例的时候（如果日志不是特多），不要用 grep 过滤日志，直接查看整个用例的全部输出，这样更容易定位问题

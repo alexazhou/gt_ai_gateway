@@ -75,17 +75,20 @@ class SSEAccumulator {
 
                 // 累积内容
                 if (choice.delta?.content) {
-                    this.response.choices[index].message.content += choice.delta.content;
+                    this.response.choices[index].message.content +=
+                        choice.delta.content;
                 }
 
                 // 保存 role
                 if (choice.delta?.role) {
-                    this.response.choices[index].message.role = choice.delta.role;
+                    this.response.choices[index].message.role =
+                        choice.delta.role;
                 }
 
                 // 更新 finish_reason
                 if (choice.finish_reason !== undefined) {
-                    this.response.choices[index].finish_reason = choice.finish_reason;
+                    this.response.choices[index].finish_reason =
+                        choice.finish_reason;
                 }
             }
         }
@@ -117,7 +120,9 @@ class SSEAccumulator {
      */
     reset(): void {
         this.response = {
-            choices: [{ index: 0, message: { content: "" }, finish_reason: null }],
+            choices: [
+                { index: 0, message: { content: "" }, finish_reason: null },
+            ],
         };
     }
 }

@@ -1,10 +1,10 @@
-import {Model} from "sutando";
-import { inspect, InspectOptions } from 'util';
+import { Model } from "sutando";
+import { inspect, InspectOptions } from "util";
 
-import {SgRecordStatus} from "../constants";
+import { SgRecordStatus } from "../constants";
 
 class SgRecord extends Model {
-    table = 'record';
+    table = "record";
 
     id!: number;
 
@@ -22,6 +22,4 @@ class SgRecord extends Model {
     }
 }
 
-export {
-    SgRecord
-}
+export { SgRecord };

@@ -5,9 +5,9 @@ async function getVendorByName(name: string): Promise<SgVendor | null> {
         return null;
     }
 
-    return await SgVendor.query().where('name', name).first();
+    return await SgVendor.query().where("name", name).first();
 }
 
 export default {
-    getVendorByName
-}
+    getVendorByName,
+};

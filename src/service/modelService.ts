@@ -1,14 +1,11 @@
-import {SgModel} from "../model/sgModel";
+import { SgModel } from "../model/sgModel";
 
+async function getModel(modelName: string): Promise<SgModel | null> {
+    if (modelName == null) return null;
 
-async function getModel(modelName:string):Promise<SgModel | null> {
-
-    if(modelName == null)
-        return null;
-
-    return await SgModel.query().where('name', modelName).first();
+    return await SgModel.query().where("name", modelName).first();
 }
 
 export default {
-    getModel
-}
+    getModel,
+};

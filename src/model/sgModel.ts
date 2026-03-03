@@ -1,13 +1,13 @@
-import {Model} from "sutando";
-import { inspect, InspectOptions } from 'util';
+import { Model } from "sutando";
+import { inspect, InspectOptions } from "util";
 
 class SgModel extends Model {
-    table = 'model';
+    table = "model";
 
     id!: number;
 
     name!: string | null;
-    vendor_id!: number | null;  // vendor id
+    vendor_id!: number | null; // vendor id
 
     created_at!: Date;
     updated_at!: Date;
@@ -17,6 +17,4 @@ class SgModel extends Model {
     }
 }
 
-export {
-    SgModel
-}
+export { SgModel };

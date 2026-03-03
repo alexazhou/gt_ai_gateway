@@ -1,9 +1,9 @@
-import { Model } from 'sutando';
-import { inspect, InspectOptions } from 'util';
-import { VendorType, ApiFormat } from '../constants';
+import { Model } from "sutando";
+import { inspect, InspectOptions } from "util";
+import { VendorType, ApiFormat } from "../constants";
 
 class SgVendor extends Model {
-    table = 'vendor';
+    table = "vendor";
 
     id!: number;
     type!: VendorType;
@@ -20,6 +20,4 @@ class SgVendor extends Model {
     }
 }
 
-export {
-    SgVendor
-}
+export { SgVendor };

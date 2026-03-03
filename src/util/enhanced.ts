@@ -1,4 +1,3 @@
-
 class CustomPromise<T> {
     private _resolve!: (value?: any) => void;
     private _reject!: (reason?: any) => void;
@@ -22,8 +21,14 @@ class CustomPromise<T> {
 
     // 实现 thenable 接口
     then<TResult1 = T, TResult2 = never>(
-        onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null,
-        onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null
+        onfulfilled?:
+            | ((value: T) => TResult1 | PromiseLike<TResult1>)
+            | undefined
+            | null,
+        onrejected?:
+            | ((reason: any) => TResult2 | PromiseLike<TResult2>)
+            | undefined
+            | null,
     ): Promise<TResult1 | TResult2> {
         return this.promise.then(onfulfilled, onrejected);
     }
@@ -33,15 +38,13 @@ class CustomPromise<T> {
     }
 
     // Custom inspection for console.log to delegate to the internal promise.
-    [Symbol.for('nodejs.util.inspect.custom')]() {
+    [Symbol.for("nodejs.util.inspect.custom")]() {
         return this.promise;
     }
 
     get [Symbol.toStringTag]() {
-        return 'Promise';
+        return "Promise";
     }
 }
 
-export {
-    CustomPromise
-}
+export { CustomPromise };

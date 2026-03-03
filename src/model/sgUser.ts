@@ -1,8 +1,8 @@
-import { Model } from 'sutando';
-import { inspect, InspectOptions } from 'util';
+import { Model } from "sutando";
+import { inspect, InspectOptions } from "util";
 
 class SgUser extends Model {
-    table = 'user';
+    table = "user";
 
     id!: number;
     name!: string;
@@ -16,7 +16,4 @@ class SgUser extends Model {
     }
 }
 
-
-export {
-    SgUser
-}
+export { SgUser };
