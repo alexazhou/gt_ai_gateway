@@ -43,47 +43,26 @@ Authorization: Bearer <token>
 
 系统支持两种用户类型：
 
-| 用户类型 | 说明 | 权限 |
-|---------|------|------|
+| 用户类型 | 说明 | 权限             |
+|---------|------|----------------|
 | `normal` | 普通用户 | 可访问 LLM API 端点 |
-| `admin` | 管理员 | 可访问所有 API 端点 |
+| `admin` | 管理员 | 可访问所有 API 端点   |
 
-#### 需要管理员权限的端点
+#### URL 权限说明
 
-以下端点需要管理员权限，普通用户访问将返回 403 错误：
+#### 需要普通用户权限的端点
 
-**用户管理**
-- `POST /user/create.json` - 创建用户
-- `GET /user/list.json` - 获取用户列表
-- `GET /user/:id` - 获取用户详情
+**欢迎 API（无需认证）**
+- `GET /` - 欢迎信息
 
-**供应商管理**
-- `POST /vendor/create.json` - 创建供应商
-- `GET /vendor/list.json` - 获取供应商列表
-- `GET /vendor/:id` - 获取供应商详情
-- `PUT /vendor/:id` - 更新供应商
-
-**模型管理**
-- `POST /model/create.json` - 创建模型
-- `GET /model/list.json` - 获取模型列表
-- `GET /model/:id` - 获取模型详情
-
-**请求记录**
-- `GET /record/list.json` - 获取请求记录列表
-- `GET /record/latest.json` - 获取最新的请求记录
-- `GET /record/:id` - 获取请求记录详情
-
-#### 无需特殊权限的端点
-
-以下端点所有用户（包括普通用户）均可访问：
-
-**LLM API**
+**LLM API（普通用户）** 
 - `POST /v1/chat/completions` - OpenAI 格式聊天请求
 - `POST /v1/messages` - Anthropic 格式消息请求
 
-**系统 API（无需认证）**
-- `GET /` - 欢迎信息
-- `GET /status.json` - 系统状态（返回统计信息）
+
+**LLM API（管理员权限）**
+- 所有其他的 API
+
 
 #### 错误响应
 
