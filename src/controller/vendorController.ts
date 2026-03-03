@@ -1,7 +1,7 @@
 import { Context } from "hono";
 import { SgVendor } from "../model/sgVendor";
 import vendorService from "../service/vendorService";
-import { ValidationError, NotFoundError } from "../util/errorHandler";
+import { AppError, NotFoundError } from "../util/errorHandler";
 
 
 async function listVendors(c: Context) {
@@ -15,7 +15,7 @@ async function getVendor(c: Context) {
     const vendorId = parseInt(id, 10);
 
     if (isNaN(vendorId)) {
-        throw new ValidationError("Invalid ID format");
+        throw new AppError("Invalid ID format");
     }
 
     const vendor = await SgVendor.query().find(vendorId);
@@ -34,13 +34,13 @@ async function createVendor(c: Context) {
 
     // Validation
     if (!type || !name || !token || !url) {
-        throw new ValidationError("Missing required fields");
+        throw new AppError("Missing required fields");
     }
 
     // Validate api_format
     const validFormats = ["openai", "anthropic"];
     if (!api_format || !validFormats.includes(api_format)) {
-        throw new ValidationError("Invalid api_format");
+        throw new AppError("Invalid api_format");
     }
 
     const instance = await SgVendor.query().create({
@@ -60,7 +60,7 @@ async function updateVendor(c: Context) {
     const vendorId = parseInt(id, 10);
 
     if (isNaN(vendorId)) {
-        throw new ValidationError("Invalid ID format");
+        throw new AppError("Invalid ID format");
     }
 
     const body = await c.req.json();

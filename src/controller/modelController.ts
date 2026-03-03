@@ -2,7 +2,7 @@ import { Context } from "hono";
 import { SgModel } from "../model/sgModel";
 import { SgVendor } from "../model/sgVendor";
 import modelService from "../service/modelService";
-import { ValidationError, NotFoundError } from "../util/errorHandler";
+import { AppError, NotFoundError } from "../util/errorHandler";
 
 
 async function checkDuplicateEnabledModel(
@@ -28,7 +28,7 @@ async function createModel(c: Context) {
 
     // Validate required fields
     if (!name || !vendor_id) {
-        throw new ValidationError("Missing required fields");
+        throw new AppError("Missing required fields");
     }
 
     // Validate vendor_id exists
@@ -41,7 +41,7 @@ async function createModel(c: Context) {
     if (enable) {
         const isDuplicate = await checkDuplicateEnabledModel(name);
         if (isDuplicate) {
-            throw new ConflictError("An enabled model with this name already exists");
+            throw new AppError("An enabled model with this name already exists", 409);
         }
     }
 
@@ -67,7 +67,7 @@ async function getModel(c: Context) {
     const modelId = parseInt(id, 10);
 
     if (isNaN(modelId)) {
-        throw new ValidationError("Invalid ID format");
+        throw new AppError("Invalid ID format");
     }
 
     const model = await SgModel.query().find(modelId);
@@ -85,7 +85,7 @@ async function updateModel(c: Context) {
     const modelId = parseInt(id, 10);
 
     if (isNaN(modelId)) {
-        throw new ValidationError("Invalid ID format");
+        throw new AppError("Invalid ID format");
     }
 
     const { name, vendor_id, enable } = await c.req.json();

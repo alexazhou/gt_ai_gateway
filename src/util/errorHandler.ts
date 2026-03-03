@@ -4,7 +4,7 @@ import { Context } from "hono";
 export class AppError extends Error {
     constructor(
         public message: string,
-        public statusCode: number = 500,
+        public statusCode: number = 400,
         public code?: string,
     ) {
         super(message);
@@ -13,34 +13,10 @@ export class AppError extends Error {
 }
 
 
-export class ValidationError extends AppError {
-    constructor(message: string, code?: string) {
-        super(message, 400, code || "VALIDATION_ERROR");
-        this.name = "ValidationError";
-    }
-}
-
-
 export class NotFoundError extends AppError {
     constructor(message: string) {
         super(message, 404, "NOT_FOUND");
         this.name = "NotFoundError";
-    }
-}
-
-
-export class ConflictError extends AppError {
-    constructor(message: string) {
-        super(message, 409, "CONFLICT");
-        this.name = "ConflictError";
-    }
-}
-
-
-export class DuplicateError extends AppError {
-    constructor(message: string) {
-        super(message, 409, "DUPLICATE");
-        this.name = "DuplicateError";
     }
 }
 
