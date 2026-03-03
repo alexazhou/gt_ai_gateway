@@ -36,6 +36,7 @@ app.put("/vendor/:id", authMiddleware.requireAdmin, vendorController.updateVendo
 app.post("/model/create.json", authMiddleware.requireAdmin, modelController.createModel);
 app.get("/model/list.json", authMiddleware.requireAdmin, modelController.listModels);
 app.get("/model/:id", authMiddleware.requireAdmin, modelController.getModel);
+app.put("/model/:id", authMiddleware.requireAdmin, modelController.updateModel);
 
 // User (需要管理员权限)
 app.get("/user/list.json", authMiddleware.requireAdmin, userController.listUsers);

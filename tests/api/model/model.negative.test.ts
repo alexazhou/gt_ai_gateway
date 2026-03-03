@@ -11,6 +11,7 @@ import testHelpers from "../../testHelpers";
 let existingModelId: number;
 let existingModelName: string;
 let existingVendorId: number;
+let updateModelId: number;
 
 describe("Model API (Negative)", () => {
     beforeAll(async () => {
@@ -30,6 +31,13 @@ describe("Model API (Negative)", () => {
         });
         existingModelId = model.body.id;
         existingModelName = "duplicate-model";
+
+        // Create a model for update tests
+        const updateModel = await requestHelper.post("/model/create.json", {
+            name: "update-test-model",
+            vendor_id: existingVendorId,
+        });
+        updateModelId = updateModel.body.id;
     });
 
     describe("POST /model/create.json", () => {
@@ -105,6 +113,58 @@ describe("Model API (Negative)", () => {
 
         it("should return error for zero ID", async () => {
             const response = await requestHelper.get("/model/0");
+
+            expect(response.status).toBeGreaterThanOrEqual(400);
+            expect(response.body).toHaveProperty("error");
+        });
+    });
+
+    describe("PUT /model/:id", () => {
+        it("should return error for non-existent model ID", async () => {
+            const response = await requestHelper.put(
+                "/model/99999",
+                { name: "updated-name" },
+            );
+
+            expect(response.status).toBeGreaterThanOrEqual(400);
+            expect(response.body).toHaveProperty("error");
+        });
+
+        it("should return error for invalid ID format", async () => {
+            const response = await requestHelper.put(
+                "/model/invalid-id",
+                { name: "updated-name" },
+            );
+
+            expect(response.status).toBeGreaterThanOrEqual(400);
+            expect(response.body).toHaveProperty("error");
+        });
+
+        it("should return error for negative ID", async () => {
+            const response = await requestHelper.put(
+                "/model/-1",
+                { name: "updated-name" },
+            );
+
+            expect(response.status).toBeGreaterThanOrEqual(400);
+            expect(response.body).toHaveProperty("error");
+        });
+
+        it("should return error for zero ID", async () => {
+            const response = await requestHelper.put(
+                "/model/0",
+                { name: "updated-name" },
+            );
+
+            expect(response.status).toBeGreaterThanOrEqual(400);
+            expect(response.body).toHaveProperty("error");
+        });
+
+        it("should return error when vendor_id does not exist", async () => {
+            const response = await requestHelper.put(
+                `/model/${updateModelId}`,
+                { vendor_id: 99999 },
+            );
 
             expect(response.status).toBeGreaterThanOrEqual(400);
             expect(response.body).toHaveProperty("error");
