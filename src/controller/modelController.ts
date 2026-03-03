@@ -1,7 +1,8 @@
 import { Context } from "hono";
 import { SgModel } from "../model/sgModel";
 import { SgVendor } from "../model/sgVendor";
-import modelService, { DuplicateModelError } from "../service/modelService";
+import modelService from "../service/modelService";
+import { ValidationError, NotFoundError } from "../util/errorHandler";
 
 
 async function checkDuplicateEnabledModel(
@@ -20,49 +21,38 @@ async function checkDuplicateEnabledModel(
 
 
 async function createModel(c: Context) {
-    try {
-        const body = await c.req.json();
-        const { name, vendor_id, enable = true } = body;
+    const body = await c.req.json();
+    const { name, vendor_id, enable = true } = body;
 
-        console.log("[modelController] Creating model:", { name, vendor_id, enable });
+    console.log("[modelController] Creating model:", { name, vendor_id, enable });
 
-        // Validate required fields
-        if (!name || !vendor_id) {
-            return c.json({ error: "Missing required fields" }, 400);
-        }
-
-        // Validate vendor_id exists
-        const vendor = await SgVendor.query().find(vendor_id);
-        if (!vendor) {
-            return c.json({ error: "Vendor not found" }, 404);
-        }
-
-        // Check for duplicate enabled model
-        if (enable) {
-            const isDuplicate = await checkDuplicateEnabledModel(name);
-            if (isDuplicate) {
-                return c.json(
-                    { error: "An enabled model with this name already exists" },
-                    400,
-                );
-            }
-        }
-
-        const instance = await SgModel.query().create({
-            name,
-            vendor_id,
-            enable,
-        });
-
-        console.log("[modelController] Model created successfully:", instance);
-        return c.json(instance);
-    } catch (error) {
-        console.error("[modelController] Error creating model:", error);
-        return c.json(
-            { error: "Failed to create model", message: String(error) },
-            500,
-        );
+    // Validate required fields
+    if (!name || !vendor_id) {
+        throw new ValidationError("Missing required fields");
     }
+
+    // Validate vendor_id exists
+    const vendor = await SgVendor.query().find(vendor_id);
+    if (!vendor) {
+        throw new NotFoundError("Vendor not found");
+    }
+
+    // Check for duplicate enabled model
+    if (enable) {
+        const isDuplicate = await checkDuplicateEnabledModel(name);
+        if (isDuplicate) {
+            throw new ConflictError("An enabled model with this name already exists");
+        }
+    }
+
+    const instance = await SgModel.query().create({
+        name,
+        vendor_id,
+        enable,
+    });
+
+    console.log("[modelController] Model created successfully:", instance);
+    return c.json(instance);
 }
 
 
@@ -77,13 +67,13 @@ async function getModel(c: Context) {
     const modelId = parseInt(id, 10);
 
     if (isNaN(modelId)) {
-        return c.json({ error: "Invalid ID format" }, 400);
+        throw new ValidationError("Invalid ID format");
     }
 
     const model = await SgModel.query().find(modelId);
 
     if (!model) {
-        return c.json({ error: "Model not found" }, 404);
+        throw new NotFoundError("Model not found");
     }
 
     return c.json(model);
@@ -91,45 +81,34 @@ async function getModel(c: Context) {
 
 
 async function updateModel(c: Context) {
-    try {
-        const id = c.req.param("id");
-        const modelId = parseInt(id, 10);
+    const id = c.req.param("id");
+    const modelId = parseInt(id, 10);
 
-        if (isNaN(modelId)) {
-            return c.json({ error: "Invalid ID format" }, 400);
-        }
-
-        const { name, vendor_id, enable } = await c.req.json();
-
-        console.log("[modelController] Updating model:", {
-            modelId,
-            name,
-            vendor_id,
-            enable,
-        });
-
-        const updatedModel = await modelService.updateModel(modelId, {
-            name,
-            vendor_id,
-            enable,
-        });
-
-        if (!updatedModel) {
-            return c.json({ error: "Model not found" }, 404);
-        }
-
-        console.log("[modelController] Model updated successfully:", updatedModel);
-        return c.json(updatedModel);
-    } catch (error) {
-        console.error("[modelController] Error updating model:", error);
-        if (error instanceof DuplicateModelError) {
-            return c.json({ error: error.message }, 400);
-        }
-        return c.json(
-            { error: "Failed to update model", message: String(error) },
-            500,
-        );
+    if (isNaN(modelId)) {
+        throw new ValidationError("Invalid ID format");
     }
+
+    const { name, vendor_id, enable } = await c.req.json();
+
+    console.log("[modelController] Updating model:", {
+        modelId,
+        name,
+        vendor_id,
+        enable,
+    });
+
+    const updatedModel = await modelService.updateModel(modelId, {
+        name,
+        vendor_id,
+        enable,
+    });
+
+    if (!updatedModel) {
+        throw new NotFoundError("Model not found");
+    }
+
+    console.log("[modelController] Model updated successfully:", updatedModel);
+    return c.json(updatedModel);
 }
 
 export default {

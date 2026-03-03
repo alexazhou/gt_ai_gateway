@@ -7,6 +7,7 @@ import recordController from "./controller/recordController";
 import systemController from "./controller/systemController";
 import ormService from "./service/ormService";
 import authMiddleware from "./middleware/authMiddleware";
+import errorHandler from "./util/errorHandler";
 
 interface Env {
     DB: D1Database;
@@ -18,6 +19,9 @@ const dbMiddleware: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
 };
 
 const app = new Hono<{ Bindings: Env }>();
+
+// 注册全局错误处理中间件
+app.use("*", errorHandler);
 
 // 注册数据库中间件
 app.use("*", dbMiddleware);
