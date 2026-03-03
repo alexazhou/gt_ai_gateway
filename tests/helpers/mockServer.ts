@@ -6,6 +6,11 @@ let server: ReturnType<typeof createServer> | null = null;
 let isRunning = false;
 
 /**
+ * Store received headers for testing
+ */
+let receivedHeaders: Record<string, string> = {};
+
+/**
  * Mock AI Server
  * Simulates OpenAI and Anthropic API responses including SSE streaming
  */
@@ -63,6 +68,15 @@ function isMockServerRunning(): boolean {
  */
 function handleRequest(req: IncomingMessage, res: ServerResponse): void {
     const url = req.url || "";
+
+    // Store received headers for testing
+    receivedHeaders = {};
+    for (const [key, value] of Object.entries(req.headers)) {
+        if (value) {
+            receivedHeaders[key] = value;
+        }
+    }
+    console.log("[MOCK] Received headers:", receivedHeaders);
 
     // Add CORS headers
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -147,6 +161,8 @@ function handleOpenAINonStreamResponse(res: ServerResponse, data: any): void {
             completion_tokens: 15,
             total_tokens: 25,
         },
+        // Include received headers for testing
+        _received_headers: receivedHeaders,
     };
 
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -352,8 +368,24 @@ function handleBadRequest(res: ServerResponse, message: string): void {
     res.end(JSON.stringify({ error: message }));
 }
 
+/**
+ * Get received headers from last request
+ */
+function getReceivedHeaders(): Record<string, string> {
+    return receivedHeaders;
+}
+
+/**
+ * Clear received headers
+ */
+function clearReceivedHeaders(): void {
+    receivedHeaders = {};
+}
+
 export default {
     startMockServer,
     stopMockServer,
     isMockServerRunning,
+    getReceivedHeaders,
+    clearReceivedHeaders,
 };

@@ -72,10 +72,15 @@ async function sendRequest(
     console.log("body:", body);
 
     // 3. 构建上游请求选项
-    let headers: Record<string, string> = {
-        accept: "*/*",
-        "Content-Type": "application/json",
-    };
+    // 过滤掉 Cloudflare 添加的 header（以 cf- 开头）
+    let headers: Record<string, string> = {};
+
+    for (const [key, value] of c.req.raw.headers.entries()) {
+        // 过滤条件：不以 cf- 开头
+        if (!key.toLowerCase().startsWith("cf-")) {
+            headers[key] = value;
+        }
+    }
 
     if (vendor.api_format === ApiFormat.ANTHROPIC) {
         headers["x-api-key"] = vendor!.token!;

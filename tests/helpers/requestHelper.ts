@@ -76,6 +76,7 @@ async function post(
     endpoint: string,
     body: any,
     token?: string,
+    additionalHeaders?: Record<string, string>,
 ): Promise<RequestResponse> {
     const headers: Record<string, string> = {};
     if (token) {
@@ -83,7 +84,7 @@ async function post(
     }
     return request(endpoint, {
         method: "POST",
-        headers,
+        headers: { ...headers, ...additionalHeaders },
         body: JSON.stringify(body),
     });
 }
