@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { getCurrentUpstreamConfig, UPSTREAM_CONFIG } from '../config'
+import { getCurrentUpstreamConfig, isRealMode } from '../config'
 
 /**
  * Vendor Test Data Fixtures
@@ -10,8 +10,8 @@ export const VENDOR_FIXTURES = {
     const config = getCurrentUpstreamConfig()
     return {
       type: 'other',
-      name: UPSTREAM_CONFIG.openai.enabled ? 'OpenAI' : 'Mock OpenAI',
-      token: UPSTREAM_CONFIG.openai.enabled ? config.openai.apiKey : `openai-token-${randomUUID()}`,
+      name: isRealMode ? 'OpenAI' : 'Mock OpenAI',
+      token: isRealMode ? config.openai.apiKey : `openai-token-${randomUUID()}`,
       url: config.openai.url,
       api_format: 'openai',
     }
@@ -20,8 +20,8 @@ export const VENDOR_FIXTURES = {
     const config = getCurrentUpstreamConfig()
     return {
       type: 'other',
-      name: UPSTREAM_CONFIG.anthropic.enabled ? 'Anthropic' : 'Mock Anthropic',
-      token: UPSTREAM_CONFIG.anthropic.enabled ? config.anthropic.apiKey : `anthropic-token-${randomUUID()}`,
+      name: isRealMode ? 'Anthropic' : 'Mock Anthropic',
+      token: isRealMode ? config.anthropic.apiKey : `anthropic-token-${randomUUID()}`,
       url: config.anthropic.url,
       api_format: 'anthropic',
     }
