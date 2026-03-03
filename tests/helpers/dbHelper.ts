@@ -1,11 +1,17 @@
 import Database from "better-sqlite3";
 import { execSync } from "child_process";
+import { join } from "path";
+import { existsSync, unlinkSync, rmSync } from "fs";
 import config from "../config";
 import {
     migrate as runMigrations,
     DBAdapter,
-    MIGRATION_DIR,
 } from "../../script/db";
+
+// Worker mode configuration - use test database
+const TEST_DB_NAME = "serverless_ai_gateway_test";
+const TEST_WRANGLER_CONFIG = "wrangler.test.toml";
+const WRANGLER_D1_DIR = join(process.cwd(), ".wrangler", "state", "v3", "d1");
 
 // Check if we're in worker mode
 const isWorkerMode = process.env.TEST_MODE === "worker";
@@ -111,6 +117,149 @@ function createAdapter(): DBAdapter {
 }
 
 /**
+ * Helper to run wrangler D1 commands (worker mode only)
+ */
+function runD1Command(args: string[]): string {
+    const cmd = `npx wrangler d1 execute ${TEST_DB_NAME} --local --config ${TEST_WRANGLER_CONFIG} ${args.join(" ")}`;
+    return execSync(cmd, { encoding: "utf-8", stdio: "pipe" });
+}
+
+/**
+ * Clear D1 local database file - worker mode only
+ */
+function clearD1LocalDatabase(): void {
+    console.log("[WORKER_SETUP] Clearing D1 test database...");
+
+    try {
+        const dbDir = join(WRANGLER_D1_DIR, TEST_DB_NAME);
+        if (existsSync(dbDir)) {
+            rmSync(dbDir, { recursive: true, force: true });
+            console.log("[WORKER_SETUP] D1 test database deleted");
+        } else {
+            console.log("[WORKER_SETUP] D1 test database not found, skipping");
+        }
+    } catch (e) {
+        console.error("[WORKER_SETUP] Failed to clear D1 test database:", e);
+    }
+}
+
+/**
+ * Clear D1 database tables (but keep schema) - worker mode only
+ */
+function clearD1Tables(): void {
+    console.log("[WORKER_SETUP] Clearing D1 database tables...");
+
+    try {
+        const output = runD1Command([
+            "--json",
+            "--command=\"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'd1_%' AND name != '_migrations'\"",
+        ]);
+
+        const match = output.match(/\[.*\]/s);
+        if (match) {
+            const parsed = JSON.parse(match[0]);
+            const tables =
+                Array.isArray(parsed) &&
+                parsed.length > 0 &&
+                Array.isArray(parsed[0]?.results)
+                    ? (parsed[0].results as { name: string }[])
+                    : [];
+
+            for (const table of tables) {
+                runD1Command([`--command=\"DELETE FROM ${table.name}\"`]);
+            }
+
+            console.log(`[WORKER_SETUP] Cleared ${tables.length} tables`);
+        }
+    } catch (e) {
+        console.error("[WORKER_SETUP] Failed to clear D1 tables:", e);
+    }
+}
+
+/**
+ * Setup admin user in worker mode (for D1 direct operations)
+ */
+function setupAdminUser(): void {
+    console.log("[WORKER_SETUP] Setting up admin user...");
+    const now = new Date().toISOString();
+    try {
+        runD1Command([
+            `--command=\"INSERT INTO user (name, token, type, created_at, updated_at) VALUES ('Admin User', 'admin-token-123', 'admin', '${now}', '${now}')\"`,
+        ]);
+        console.log("[WORKER_SETUP] Admin user created");
+    } catch (e) {
+        console.log("[WORKER_SETUP] Admin user might already exist:", (e as any).message || e);
+    }
+}
+
+/**
+ * Remove local database file - node mode only
+ */
+function removeDatabaseFile(): void {
+    if (existsSync(config.DB_CONFIG.path)) {
+        console.log("Removing test database file:", config.DB_CONFIG.path);
+        unlinkSync(config.DB_CONFIG.path);
+    }
+}
+
+/**
+ * Run migrations for D1 using command line (worker mode only)
+ */
+function runD1Migrations(): void {
+    console.log("[GLOBAL_SETUP] Running migrations for D1...");
+    try {
+        execSync(
+            `npx tsx script/db.ts migrate --env worker-local --db-name ${TEST_DB_NAME} --config ${TEST_WRANGLER_CONFIG}`,
+            {
+                stdio: "inherit",
+            },
+        );
+    } catch (e) {
+        console.error("[GLOBAL_SETUP] Failed to run migrations:", e);
+    }
+}
+
+/**
+ * Global setup for test database - handles both node and worker modes
+ */
+async function globalSetup(): Promise<void> {
+    console.log("[GLOBAL_SETUP] Test mode:", config.TEST_MODE);
+
+    if (isWorkerMode) {
+        console.log("[GLOBAL_SETUP] Worker mode: D1 database managed by wrangler");
+        clearD1LocalDatabase();
+        runD1Migrations();
+    } else {
+        removeDatabaseFile();
+        console.log("[GLOBAL_SETUP] Database file deleted");
+
+        console.log("Initializing test database...");
+        await init();
+        console.log("[GLOBAL_SETUP] Database initialized");
+    }
+}
+
+/**
+ * Global teardown for test database - handles both node and worker modes
+ */
+async function globalTeardown(cleanup: boolean = true): Promise<void> {
+    if (!cleanup) {
+        return;
+    }
+
+    if (isWorkerMode) {
+        console.log("[GLOBAL_TEARDOWN] Worker mode: Cleaning up D1 local database...");
+        clearD1LocalDatabase();
+        console.log("[GLOBAL_TEARDOWN] D1 local database cleaned up");
+    } else {
+        console.log("Cleaning up test database...");
+        await cleanup();
+        removeDatabaseFile();
+        console.log("[GLOBAL_TEARDOWN] Database cleaned up and file deleted");
+    }
+}
+
+/**
  * Initialize test database with migrations
  */
 async function init(): Promise<void> {
@@ -163,6 +312,13 @@ async function cleanup(): Promise<void> {
  * Truncate tables - remove all data but keep structure
  */
 async function truncate(): Promise<void> {
+    if (isWorkerMode) {
+        // In worker mode, clear D1 tables by calling helper function
+        clearD1Tables();
+        setupAdminUser();
+        return;
+    }
+
     // Auto-connect if not initialized
     if (!adapter) {
         adapter = createAdapter();
@@ -182,17 +338,15 @@ async function truncate(): Promise<void> {
         }
     }
 
-    // Recreate admin user after truncation (only for LocalDBAdapter)
-    if (!isWorkerMode && localDb) {
-        const now = new Date().toISOString();
-        try {
-            localDb.prepare(
-                "INSERT INTO user (name, token, type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            ).run("Admin User", "admin-token-123", "admin", now, now);
-            console.log("Admin user recreated");
-        } catch (e) {
-            console.log("Admin user might already exist:", (e as any).message);
-        }
+    // Recreate admin user after truncation
+    const now = new Date().toISOString();
+    try {
+        localDb!.prepare(
+            "INSERT INTO user (name, token, type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        ).run("Admin User", "admin-token-123", "admin", now, now);
+        console.log("Admin user recreated");
+    } catch (e) {
+        console.log("Admin user might already exist:", (e as any).message);
     }
 
     console.log("Tables truncated");
@@ -279,6 +433,8 @@ function close(): void {
 }
 
 export default {
+    globalSetup,
+    globalTeardown,
     init,
     cleanup,
     truncate,
@@ -287,4 +443,6 @@ export default {
     getDB,
     getAdapter,
     close,
+    clearD1Tables,
+    setupAdminUser,
 };

@@ -1,117 +1,23 @@
 import { join } from "path";
-import { spawn, ChildProcess, execSync } from "child_process";
-import { existsSync, unlinkSync, rmSync } from "fs";
+import { spawn, ChildProcess } from "child_process";
+import { existsSync, unlinkSync } from "fs";
 import config from "./config";
 import dbHelper from "./helpers/dbHelper";
 import mockServer from "./helpers/mockServer";
 import requestHelper from "./helpers/requestHelper";
 
-// Worker mode configuration - use test database
-const TEST_DB_NAME = "serverless_ai_gateway_test";
+// Worker mode configuration
 const TEST_WRANGLER_CONFIG = "wrangler.test.toml";
-const WRANGLER_D1_DIR = join(process.cwd(), ".wrangler", "state", "v3", "d1");
 
 let testServerProcess: ChildProcess | null = null;
 let mockServerProcess: any | null = null;
 
-// Helper to run wrangler D1 commands (worker mode only)
-function runD1Command(args: string[]): string {
-    const cmd = `npx wrangler d1 execute ${TEST_DB_NAME} --local --config ${TEST_WRANGLER_CONFIG} ${args.join(" ")}`;
-    return execSync(cmd, { encoding: "utf-8", stdio: "pipe" });
-}
-
-// Clear D1 local database file - worker mode only
-function clearD1LocalDatabase(): void {
-    console.log("[WORKER_SETUP] Clearing D1 test database...");
-
-    try {
-        // D1 local databases are stored in .wrangler/state/v3/d1/{database_name}
-        const dbDir = join(WRANGLER_D1_DIR, TEST_DB_NAME);
-        if (existsSync(dbDir)) {
-            rmSync(dbDir, { recursive: true, force: true });
-            console.log("[WORKER_SETUP] D1 test database deleted");
-        } else {
-            console.log("[WORKER_SETUP] D1 test database not found, skipping");
-        }
-    } catch (e) {
-        console.error("[WORKER_SETUP] Failed to clear D1 test database:", e);
-    }
-}
-
-// Clear D1 database tables (but keep schema) - worker mode only
-function clearD1Tables(): void {
-    console.log("[WORKER_SETUP] Clearing D1 database tables...");
-
-    try {
-        // Get all tables except system tables
-        const output = runD1Command([
-            "--json",
-            "--command=\"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'd1_%' AND name != '_migrations'\"",
-        ]);
-
-        const match = output.match(/\[.*\]/s);
-        if (match) {
-            const parsed = JSON.parse(match[0]);
-            const tables =
-                Array.isArray(parsed) &&
-                parsed.length > 0 &&
-                Array.isArray(parsed[0]?.results)
-                    ? (parsed[0].results as { name: string }[])
-                    : [];
-
-            for (const table of tables) {
-                runD1Command([`--command="DELETE FROM ${table.name}"`]);
-            }
-
-            console.log(`[WORKER_SETUP] Cleared ${tables.length} tables`);
-        }
-    } catch (e) {
-        console.error("[WORKER_SETUP] Failed to clear D1 tables:", e);
-    }
-}
-
-// Setup admin user in worker mode (for D1 direct operations)
-function setupAdminUser(): void {
-    console.log("[WORKER_SETUP] Setting up admin user...");
-    const now = new Date().toISOString();
-    try {
-        runD1Command([
-            `--command="INSERT INTO user (name, token, type, created_at, updated_at) VALUES ('Admin User', 'admin-token-123', 'admin', '${now}', '${now}')"`,
-        ]);
-        console.log("[WORKER_SETUP] Admin user created");
-    } catch (e) {
-        console.log("[WORKER_SETUP] Admin user might already exist:", (e as any).message || e);
-    }
-}
-
 export async function setup(): Promise<void> {
     console.log("=== Test Environment Setup ===");
     console.log("[GLOBAL_SETUP] setup() called at", new Date().toISOString());
-    console.log("[GLOBAL_SETUP] Test mode:", config.TEST_MODE);
 
-    const isWorkerMode = config.TEST_MODE === "worker";
-
-    if (isWorkerMode) {
-        console.log("[GLOBAL_SETUP] Worker mode: D1 database managed by wrangler");
-        // Clear D1 test database for clean test environment
-        clearD1LocalDatabase();
-        // Run migrations for D1 using command line with test config
-        console.log("[GLOBAL_SETUP] Running migrations for D1...");
-        try {
-            execSync(`npx tsx script/db.ts migrate --env worker-local --db-name ${TEST_DB_NAME} --config ${TEST_WRANGLER_CONFIG}`, {
-                stdio: "inherit",
-            });
-        } catch (e) {
-            console.error("[GLOBAL_SETUP] Failed to run migrations:", e);
-        }
-    } else {
-        cleanupTestDatabaseFile();
-        console.log("[GLOBAL_SETUP] Database file deleted");
-
-        console.log("Initializing test database...");
-        await dbHelper.init();
-        console.log("[GLOBAL_SETUP] Database initialized");
-    }
+    // Setup database (handles both node and worker modes)
+    await dbHelper.globalSetup();
 
     if (config.useMockServer) {
         console.log("Starting mock AI server...");
@@ -156,22 +62,8 @@ export async function teardown(): Promise<void> {
         console.log("[GLOBAL_TEARDOWN] Mock AI server stopped");
     }
 
-    if (config.TEST_OPTIONS.cleanup) {
-        const isWorkerMode = config.TEST_MODE === "worker";
-
-        if (isWorkerMode) {
-            console.log("[GLOBAL_TEARDOWN] Worker mode: Cleaning up D1 local database...");
-            clearD1LocalDatabase();
-            console.log("[GLOBAL_TEARDOWN] D1 local database cleaned up");
-        } else {
-            console.log("Cleaning up test database...");
-            await dbHelper.cleanup();
-            cleanupTestDatabaseFile();
-            console.log(
-                "[GLOBAL_TEARDOWN] Database cleaned up and file deleted",
-            );
-        }
-    }
+    // Teardown database (handles both node and worker modes)
+    await dbHelper.globalTeardown(config.TEST_OPTIONS.cleanup);
 
     console.log("Test environment teardown complete!");
 }
@@ -295,21 +187,3 @@ function stopTestServer(): Promise<void> {
         resolve();
     });
 }
-
-function cleanupTestDatabaseFile(): void {
-    const isWorkerMode = config.TEST_MODE === "worker";
-
-    if (isWorkerMode) {
-        // Worker mode uses D1, no local file to delete
-        console.log("[WORKER_MODE] Using D1 database, no local file to delete");
-        return;
-    }
-
-    if (existsSync(config.DB_CONFIG.path)) {
-        console.log("Removing test database file:", config.DB_CONFIG.path);
-        unlinkSync(config.DB_CONFIG.path);
-    }
-}
-
-// Export functions for dbHelper.truncate() to call in worker mode
-export { clearD1Tables, setupAdminUser };
