@@ -5,10 +5,10 @@ import { createInterface } from 'readline';
 import Database from 'better-sqlite3';
 
 const args = process.argv.slice(2);
-const MIGRATION_DIR = join(process.cwd(), 'resource', 'migrate');
+export const MIGRATION_DIR = join(process.cwd(), 'resource', 'migrate');
 const LOCAL_DB_PATH = join(process.cwd(), 'local.db');
 
-interface Migration {
+export interface Migration {
     id?: number;
     name: string;
     applied_at?: string;
@@ -28,7 +28,7 @@ for (let i = 0; i < args.length; i++) {
 }
 
 // 统一的执行 SQL 接口
-interface DBAdapter {
+export interface DBAdapter {
     exec(sql: string): void;
     query<T>(sql: string): T[];
     run(sql: string, ...params: any[]): void;
@@ -150,7 +150,7 @@ function getAdapter(env: string): DBAdapter {
 }
 
 // 命令实现
-async function migrate(adapter: DBAdapter, env: string) {
+export async function migrate(adapter: DBAdapter, env: string) {
     console.log(`Initializing migrations table in ${env}...`);
     adapter.exec('CREATE TABLE IF NOT EXISTS _migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)');
 
@@ -358,4 +358,7 @@ async function main() {
     }
 }
 
-main();
+// Only run main() if this file is executed directly
+if (require.main === module) {
+    main();
+}

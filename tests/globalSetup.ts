@@ -71,20 +71,36 @@ function startTestServer(): Promise<void> {
             stdio: ['ignore', 'pipe', 'pipe'],
         })
 
-        if (TEST_OPTIONS.verbose) {
-            testServerProcess.stdout?.on('data', (data) => {
-                console.log('[SERVER]', data.toString().trim())
-            })
-            testServerProcess.stderr?.on('data', (data) => {
-                console.error('[SERVER ERROR]', data.toString().trim())
-            })
-        }
+        let serverStarted = false
+
+        testServerProcess.stdout?.on('data', (data) => {
+            const output = data.toString().trim()
+            if (TEST_OPTIONS.verbose) {
+                console.log('[SERVER]', output)
+            }
+            // 监听服务器启动成功的消息
+            if (!serverStarted && output.includes('Starting server on')) {
+                serverStarted = true
+                resolve()
+            }
+        })
+
+        testServerProcess.stderr?.on('data', (data) => {
+            const error = data.toString().trim()
+            console.error('[SERVER ERROR]', error)
+            reject(new Error(error))
+        })
 
         testServerProcess.on('error', (err) => {
             reject(err)
         })
 
-        setTimeout(resolve, 12000)
+        // 设置 3 秒超时作为兜底保护
+        setTimeout(() => {
+            if (!serverStarted) {
+                reject(new Error('Server startup timeout'))
+            }
+        }, 3000)
     })
 }
 
