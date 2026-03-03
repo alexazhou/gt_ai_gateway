@@ -19,7 +19,11 @@
     "db:clear:local": "npx tsx script/db.ts clear --env local",
     "db:status:local": "npx tsx script/db.ts status --env local",
     "db:migrate:worker-local": "npx tsx script/db.ts migrate --env worker-local",
-    "db:clear:worker-local": "npx tsx script/db.ts clear --env worker-local"
+    "db:clear:worker-local": "npx tsx script/db.ts clear --env worker-local",
+    "db:status:worker-local": "npx tsx script/db.ts status --env worker-local",
+    "db:migrate:worker-cloud": "npx tsx script/db.ts migrate --env worker-cloud",
+    "db:clear:worker-cloud": "npx tsx script/db.ts clear --env worker-cloud",
+    "db:status:worker-cloud": "npx tsx script/db.ts status --env worker-cloud"
   },
   "dependencies": {
     "@fortaine/fetch-event-source": "^3.0.6",
