@@ -19,7 +19,7 @@ let adminToken: string;
 
 describe("AI Messages API (Anthropic)", () => {
     beforeAll(async () => {
-        await testHelpers.truncateDatabase();
+        await testHelpers.truncate();
 
         adminToken = await testHelpers.setupAdminUser();
 

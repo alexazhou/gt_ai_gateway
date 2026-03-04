@@ -16,7 +16,7 @@ let enabledModelId: number;
 
 describe("Gateway - Model Enable Filter", () => {
     beforeAll(async () => {
-        await testHelpers.truncateDatabase();
+        await testHelpers.truncate();
 
         // Insert normal user via API (admin user already created in globalSetup)
         const normalUserResponse = await requestHelper.post(

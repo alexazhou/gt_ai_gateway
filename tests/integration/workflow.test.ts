@@ -13,7 +13,7 @@ let adminToken: string;
 
 describe("Integration Tests", () => {
     beforeAll(async () => {
-        await testHelpers.truncateDatabase();
+        await testHelpers.truncate();
         adminToken = await testHelpers.setupAdminUser();
     });
 

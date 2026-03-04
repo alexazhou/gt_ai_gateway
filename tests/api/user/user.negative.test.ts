@@ -9,7 +9,7 @@ import testHelpers from "../../testHelpers";
 
 describe("User API (Negative)", () => {
     beforeAll(async () => {
-        await testHelpers.truncateDatabase();
+        await testHelpers.truncate();
     });
     describe("POST /user/create.json", () => {
         it("should return error when name is missing", async () => {

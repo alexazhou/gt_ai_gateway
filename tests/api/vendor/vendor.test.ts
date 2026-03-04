@@ -12,7 +12,7 @@ let adminToken: string;
 
 describe("Vendor API (Positive)", () => {
     beforeAll(async () => {
-        await testHelpers.truncateDatabase();
+        await testHelpers.truncate();
         adminToken = await testHelpers.setupAdminUser();
     });
     describe("POST /vendor/create.json", () => {

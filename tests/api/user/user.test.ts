@@ -14,7 +14,7 @@ let adminToken: string;
 
 describe("User API (Positive)", () => {
     beforeAll(async () => {
-        await testHelpers.truncateDatabase();
+        await testHelpers.truncate();
         adminToken = await testHelpers.setupAdminUser();
     });
     describe("POST /user/create.json", () => {

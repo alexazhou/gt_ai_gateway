@@ -8,10 +8,12 @@ import testHelpers from "../../testHelpers";
  */
 
 let createdVendorId: number;
+let adminToken: string;
 
 describe("Vendor API (Negative)", () => {
     beforeAll(async () => {
-        await testHelpers.truncateDatabase();
+        await testHelpers.truncate();
+        adminToken = await testHelpers.setupAdminUser();
     });
 
     beforeEach(async () => {
@@ -19,6 +21,7 @@ describe("Vendor API (Negative)", () => {
         const response = await requestHelper.post(
             "/vendor/create.json",
             vendorData,
+            adminToken,
         );
         createdVendorId = response.body.id;
     });

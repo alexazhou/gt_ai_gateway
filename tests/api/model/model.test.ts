@@ -15,7 +15,7 @@ let createdModelId: number;
 
 describe("Model API (Positive)", () => {
     beforeAll(async () => {
-        await testHelpers.truncateDatabase();
+        await testHelpers.truncate();
 
         // Create vendors for model tests (admin user already created in globalSetup)
         const openaiVendor = await requestHelper.post(

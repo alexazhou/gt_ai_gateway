@@ -7,11 +7,16 @@ import dbHelper from "./helpers/dbHelper";
 import requestHelper from "./helpers/requestHelper";
 import userFixtures from "./fixtures/userFixtures";
 
-async function truncateAndSetupAdmin() {
+async function truncate() {
     console.log("Truncating database...");
     await dbHelper.truncate();
+}
 
-    // Recreate admin user after truncation
+/**
+ * Setup test admin user
+ * Creates an admin user via API if needed, returns the admin token
+ */
+async function setupAdminUser() {
     const adminUser = userFixtures.USER_FIXTURES.admin;
     console.log("Creating admin user:", adminUser);
     try {
@@ -28,35 +33,12 @@ async function truncateAndSetupAdmin() {
             console.log("Admin user creation info:", e.message || e);
         }
     }
-}
-
-/**
- * Setup test admin user
- * Creates an admin user via API if needed, returns the admin token
- */
-async function setupAdminUser() {
-    const adminUser = userFixtures.USER_FIXTURES.admin;
-
-    // Try to create the admin user (in case it doesn't exist)
-    try {
-        await requestHelper.post("/user/create.json", {
-            name: adminUser.name,
-            token: adminUser.token,
-            type: adminUser.type,
-        });
-    } catch (e: any) {
-        // User might already exist, ignore
-        if (!e.response || e.response.status !== 400) {
-            console.log("Admin user creation info:", e.message || e);
-        }
-    }
-
     return adminUser.token;
 }
 
 export default {
     query: dbHelper.query,
     execute: dbHelper.execute,
-    truncateDatabase: truncateAndSetupAdmin,
+    truncate,
     setupAdminUser,
 };

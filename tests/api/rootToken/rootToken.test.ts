@@ -15,7 +15,8 @@ let adminToken = "admin-token-123";
 
 describe("Root Token Tests", () => {
     beforeAll(async () => {
-        await testHelpers.truncateDatabase();
+        await testHelpers.truncate();
+        await testHelpers.setupAdminUser();
 
         // Create admin user via API
         await requestHelper.post(

@@ -12,15 +12,18 @@ let existingModelId: number;
 let existingModelName: string;
 let existingVendorId: number;
 let updateModelId: number;
+let adminToken: string;
 
 describe("Model API (Negative)", () => {
     beforeAll(async () => {
-        await testHelpers.truncateDatabase();
+        await testHelpers.truncate();
+        adminToken = await testHelpers.setupAdminUser();
 
         // Create a vendor for model tests
         const vendor = await requestHelper.post(
             "/vendor/create.json",
             vendorFixtures.VENDOR_FIXTURES.openai(),
+            adminToken,
         );
         existingVendorId = vendor.body.id;
 
@@ -28,7 +31,7 @@ describe("Model API (Negative)", () => {
         const model = await requestHelper.post("/model/create.json", {
             name: "duplicate-model",
             vendor_id: existingVendorId,
-        });
+        }, adminToken);
         existingModelId = model.body.id;
         existingModelName = "duplicate-model";
 
@@ -36,7 +39,7 @@ describe("Model API (Negative)", () => {
         const updateModel = await requestHelper.post("/model/create.json", {
             name: "update-test-model",
             vendor_id: existingVendorId,
-        });
+        }, adminToken);
         updateModelId = updateModel.body.id;
     });
 

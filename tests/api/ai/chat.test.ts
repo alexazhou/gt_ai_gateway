@@ -22,7 +22,7 @@ let adminToken: string;
 
 describe("AI Chat API", () => {
     beforeAll(async () => {
-        await testHelpers.truncateDatabase();
+        await testHelpers.truncate();
 
         adminToken = await testHelpers.setupAdminUser();
 

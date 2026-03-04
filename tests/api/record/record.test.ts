@@ -17,7 +17,7 @@ let adminToken: string;
 
 describe("Record API", () => {
     beforeAll(async () => {
-        await testHelpers.truncateDatabase();
+        await testHelpers.truncate();
 
         adminToken = await testHelpers.setupAdminUser();
 
