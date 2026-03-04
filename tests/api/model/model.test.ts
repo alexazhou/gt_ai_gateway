@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll } from "vitest";
 import requestHelper from "../../helpers/requestHelper";
 import vendorFixtures from "../../fixtures/vendorFixtures";
 import modelFixtures from "../../fixtures/modelFixtures";
-import testHelpers from "../../testHelpers";
+import dbHelper from "../../helpers/dbHelper"
+import { setupAdminUser } from "../../globalSetup";
 
 /**
  * Model Endpoint Positive Tests
@@ -15,7 +16,7 @@ let createdModelId: number;
 
 describe("Model API (Positive)", () => {
     beforeAll(async () => {
-        await testHelpers.truncate();
+        await dbHelper.truncate();
 
         // Create vendors for model tests (admin user already created in globalSetup)
         const openaiVendor = await requestHelper.post(

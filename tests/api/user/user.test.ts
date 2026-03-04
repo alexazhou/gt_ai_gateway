@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll } from "vitest";
 import requestHelper from "../../helpers/requestHelper";
 import mockHelper from "../../helpers/mockHelper";
 import userFixtures from "../../fixtures/userFixtures";
-import testHelpers from "../../testHelpers";
+import dbHelper from "../../helpers/dbHelper"
+import { setupAdminUser } from "../../globalSetup";
 
 /**
  * User Endpoint Positive Tests
@@ -14,8 +15,8 @@ let adminToken: string;
 
 describe("User API (Positive)", () => {
     beforeAll(async () => {
-        await testHelpers.truncate();
-        adminToken = await testHelpers.setupAdminUser();
+        await dbHelper.truncate();
+        adminToken = await dbHelper.setupAdminUser();
     });
     describe("POST /user/create.json", () => {
         it("should create a user with specified token", async () => {

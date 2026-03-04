@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll } from "vitest";
 import requestHelper from "../../helpers/requestHelper";
 import vendorFixtures from "../../fixtures/vendorFixtures";
 import modelFixtures from "../../fixtures/modelFixtures";
-import testHelpers from "../../testHelpers";
+import dbHelper from "../../helpers/dbHelper"
+import { setupAdminUser } from "../../globalSetup";
 
 /**
  * Model Endpoint Negative Tests
@@ -16,8 +17,8 @@ let adminToken: string;
 
 describe("Model API (Negative)", () => {
     beforeAll(async () => {
-        await testHelpers.truncate();
-        adminToken = await testHelpers.setupAdminUser();
+        await dbHelper.truncate();
+        adminToken = await dbHelper.setupAdminUser();
 
         // Create a vendor for model tests
         const vendor = await requestHelper.post(

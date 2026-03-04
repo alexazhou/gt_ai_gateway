@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll } from "vitest";
 import requestHelper from "../../helpers/requestHelper";
 import mockHelper from "../../helpers/mockHelper";
 import vendorFixtures from "../../fixtures/vendorFixtures";
-import testHelpers from "../../testHelpers";
+import dbHelper from "../../helpers/dbHelper"
+import { setupAdminUser } from "../../globalSetup";
 
 /**
  * Gateway - Model Enable Filter Tests
@@ -16,7 +17,7 @@ let enabledModelId: number;
 
 describe("Gateway - Model Enable Filter", () => {
     beforeAll(async () => {
-        await testHelpers.truncate();
+        await dbHelper.truncate();
 
         // Insert normal user via API (admin user already created in globalSetup)
         const normalUserResponse = await requestHelper.post(

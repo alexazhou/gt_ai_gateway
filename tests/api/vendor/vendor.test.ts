@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import requestHelper from "../../helpers/requestHelper";
 import vendorFixtures from "../../fixtures/vendorFixtures";
-import testHelpers from "../../testHelpers";
+import dbHelper from "../../helpers/dbHelper"
+import { setupAdminUser } from "../../globalSetup";
 
 /**
  * Vendor Endpoint Positive Tests
@@ -12,8 +13,8 @@ let adminToken: string;
 
 describe("Vendor API (Positive)", () => {
     beforeAll(async () => {
-        await testHelpers.truncate();
-        adminToken = await testHelpers.setupAdminUser();
+        await dbHelper.truncate();
+        adminToken = await dbHelper.setupAdminUser();
     });
     describe("POST /vendor/create.json", () => {
         it("should create an OpenAI vendor", async () => {

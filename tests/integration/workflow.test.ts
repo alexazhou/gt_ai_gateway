@@ -13,8 +13,8 @@ let adminToken: string;
 
 describe("Integration Tests", () => {
     beforeAll(async () => {
-        await testHelpers.truncate();
-        adminToken = await testHelpers.setupAdminUser();
+        await dbHelper.truncate();
+        adminToken = await dbHelper.setupAdminUser();
     });
 
     describe("Complete User -> Vendor -> Model -> Request Workflow", () => {

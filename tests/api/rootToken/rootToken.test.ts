@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import requestHelper from "../../helpers/requestHelper";
-import testHelpers from "../../testHelpers";
+import dbHelper from "../../helpers/dbHelper";
+import { setupAdminUser } from "../../globalSetup";
 import userService from "../../../src/service/userService";
 import { ROOT_USER_ID } from "../../../src/constants";
 
@@ -15,8 +16,8 @@ let adminToken = "admin-token-123";
 
 describe("Root Token Tests", () => {
     beforeAll(async () => {
-        await testHelpers.truncate();
-        await testHelpers.setupAdminUser();
+        await dbHelper.truncate();
+        await setupAdminUser();
 
         // Create admin user via API
         await requestHelper.post(

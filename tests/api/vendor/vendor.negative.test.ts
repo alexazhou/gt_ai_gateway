@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import requestHelper from "../../helpers/requestHelper";
 import vendorFixtures from "../../fixtures/vendorFixtures";
-import testHelpers from "../../testHelpers";
+import dbHelper from "../../helpers/dbHelper"
+import { setupAdminUser } from "../../globalSetup";
 
 /**
  * Vendor Endpoint Negative Tests
@@ -12,8 +13,8 @@ let adminToken: string;
 
 describe("Vendor API (Negative)", () => {
     beforeAll(async () => {
-        await testHelpers.truncate();
-        adminToken = await testHelpers.setupAdminUser();
+        await dbHelper.truncate();
+        adminToken = await dbHelper.setupAdminUser();
     });
 
     beforeEach(async () => {

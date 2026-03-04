@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import requestHelper from "../../helpers/requestHelper";
-import testHelpers from "../../testHelpers";
+import dbHelper from "../../helpers/dbHelper"
+import { setupAdminUser } from "../../globalSetup";
 import userFixtures from "../../fixtures/userFixtures";
 
 /**
@@ -18,8 +19,8 @@ let anthropicModelId: number;
 
 describe("Auth API Tests", () => {
     beforeAll(async () => {
-        await testHelpers.truncate();
-        await testHelpers.setupAdminUser();
+        await dbHelper.truncate();
+        await dbHelper.setupAdminUser();
 
         // Create normal user via API (admin user already created in globalSetup)
         await requestHelper.post(

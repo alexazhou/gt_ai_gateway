@@ -3,7 +3,8 @@ import requestHelper from "../../helpers/requestHelper";
 import mockHelper from "../../helpers/mockHelper";
 import vendorFixtures from "../../fixtures/vendorFixtures";
 import modelFixtures from "../../fixtures/modelFixtures";
-import testHelpers from "../../testHelpers";
+import dbHelper from "../../helpers/dbHelper"
+import { setupAdminUser } from "../../globalSetup";
 
 /**
  * Record Endpoint Tests
@@ -17,9 +18,9 @@ let adminToken: string;
 
 describe("Record API", () => {
     beforeAll(async () => {
-        await testHelpers.truncate();
+        await dbHelper.truncate();
 
-        adminToken = await testHelpers.setupAdminUser();
+        adminToken = await dbHelper.setupAdminUser();
 
         // Create test user
         const user = await requestHelper.post(

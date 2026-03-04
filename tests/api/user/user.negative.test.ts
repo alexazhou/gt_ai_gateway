@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import requestHelper from "../../helpers/requestHelper";
 import mockHelper from "../../helpers/mockHelper";
-import testHelpers from "../../testHelpers";
+import dbHelper from "../../helpers/dbHelper"
+import { setupAdminUser } from "../../globalSetup";
 
 /**
  * User Endpoint Negative Tests
@@ -9,7 +10,7 @@ import testHelpers from "../../testHelpers";
 
 describe("User API (Negative)", () => {
     beforeAll(async () => {
-        await testHelpers.truncate();
+        await dbHelper.truncate();
     });
     describe("POST /user/create.json", () => {
         it("should return error when name is missing", async () => {

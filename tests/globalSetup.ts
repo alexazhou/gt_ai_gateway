@@ -12,6 +12,27 @@ const TEST_WRANGLER_CONFIG = "wrangler.test.toml";
 let testServerProcess: ChildProcess | null = null;
 let mockServerProcess: any | null = null;
 
+/**
+ * Setup admin user via API
+ * Creates an admin user via API if needed, returns the admin token
+ */
+async function setupAdminUser(): Promise<string> {
+    const adminToken = "admin-token-123";
+    const adminUser = { name: "Admin User", token: adminToken, type: "admin" };
+    console.log("Creating admin user:", adminUser);
+    try {
+        const response = await requestHelper.post("/user/create.json", adminUser);
+        console.log("Admin user created, response:", response.status);
+    } catch (e: any) {
+        console.log("Admin user creation error:", e.response?.status, e.message || e);
+        // User might already exist, ignore
+        if (!e.response || e.response.status !== 400) {
+            console.log("Admin user creation info:", e.message || e);
+        }
+    }
+    return adminToken;
+}
+
 export async function setup(): Promise<void> {
     console.log("=== Test Environment Setup ===");
     console.log("[GLOBAL_SETUP] setup() called at", new Date().toISOString());
@@ -29,19 +50,8 @@ export async function setup(): Promise<void> {
     console.log("[GLOBAL_SETUP] Test server started");
 
     // Create initial admin user for tests (via API in both modes)
-    try {
-        await requestHelper.post("/user/create.json", {
-            name: "Admin User",
-            token: "admin-token-123",
-            type: "admin",
-        });
-        console.log("[GLOBAL_SETUP] Initial admin user created");
-    } catch (e: any) {
-        // User might already exist, ignore
-        if (!e.response || e.response.status !== 400) {
-            console.log("[GLOBAL_SETUP] Admin user creation info:", e.message || e);
-        }
-    }
+    await setupAdminUser();
+    console.log("[GLOBAL_SETUP] Initial admin user created");
 
     console.log("Test environment ready!");
 }
@@ -67,6 +77,8 @@ export async function teardown(): Promise<void> {
 
     console.log("Test environment teardown complete!");
 }
+
+export { setupAdminUser };
 
 function startTestServer(): Promise<void> {
     return new Promise((resolve, reject) => {
