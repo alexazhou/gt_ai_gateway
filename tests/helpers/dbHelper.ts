@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { execSync } from "child_process";
 import { join } from "path";
-import { existsSync, unlinkSync, rmSync } from "fs";
+import { existsSync, unlinkSync } from "fs";
 import config from "../config";
 import {
     migrate as runMigrations,
@@ -11,7 +11,7 @@ import {
 // Worker mode configuration - use test database
 const TEST_DB_NAME = "serverless_ai_gateway_test";
 const TEST_WRANGLER_CONFIG = "wrangler.test.toml";
-const WRANGLER_D1_DIR = join(process.cwd(), ".wrangler", "state", "v3", "d1");
+
 
 // Check if we're in worker mode
 const isWorkerMode = process.env.TEST_MODE === "worker";
@@ -20,7 +20,7 @@ const isWorkerMode = process.env.TEST_MODE === "worker";
  * LocalDBAdapter wrapper for test database (better-sqlite3)
  */
 class LocalDBAdapter implements DBAdapter {
-    constructor(private db: Database.Database) {}
+    constructor(private db: Database.Database) { }
 
     exec(sql: string): void {
         this.db.exec(sql);
@@ -125,18 +125,41 @@ function runD1Command(args: string[]): string {
 }
 
 /**
- * Clear D1 local database file - worker mode only
+ * Clear D1 local database - worker mode only
+ * Uses wrangler d1 execute to DROP all tables (including _migrations),
+ * so next run will re-apply all migrations from scratch.
  */
 function clearD1LocalDatabase(): void {
-    console.log("[WORKER_SETUP] Clearing D1 test database...");
+    console.log("[WORKER_SETUP] Clearing D1 test database via SQL...");
 
     try {
-        const dbDir = join(WRANGLER_D1_DIR, TEST_DB_NAME);
-        if (existsSync(dbDir)) {
-            rmSync(dbDir, { recursive: true, force: true });
-            console.log("[WORKER_SETUP] D1 test database deleted");
+        // Query all tables
+        const output = runD1Command([
+            "--json",
+            "--command=\"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'd1_%'\"",
+        ]);
+
+        const match = output.match(/\[.*\]/s);
+        if (match) {
+            const parsed = JSON.parse(match[0]);
+            const tables =
+                Array.isArray(parsed) &&
+                    parsed.length > 0 &&
+                    Array.isArray(parsed[0]?.results)
+                    ? (parsed[0].results as { name: string }[])
+                    : [];
+
+            if (tables.length === 0) {
+                console.log("[WORKER_SETUP] No tables to drop");
+                return;
+            }
+
+            const dropStatements = tables.map(t => `DROP TABLE IF EXISTS ${t.name};`).join(" ");
+            runD1Command([`--command="${dropStatements}"`]);
+
+            console.log(`[WORKER_SETUP] Dropped ${tables.length} tables: ${tables.map(t => t.name).join(", ")}`);
         } else {
-            console.log("[WORKER_SETUP] D1 test database not found, skipping");
+            console.log("[WORKER_SETUP] No tables found in database");
         }
     } catch (e) {
         console.error("[WORKER_SETUP] Failed to clear D1 test database:", e);
@@ -160,8 +183,8 @@ function clearD1Tables(): void {
             const parsed = JSON.parse(match[0]);
             const tables =
                 Array.isArray(parsed) &&
-                parsed.length > 0 &&
-                Array.isArray(parsed[0]?.results)
+                    parsed.length > 0 &&
+                    Array.isArray(parsed[0]?.results)
                     ? (parsed[0].results as { name: string }[])
                     : [];
 

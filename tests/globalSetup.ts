@@ -215,26 +215,28 @@ function startTestServer(): Promise<void> {
 
         testServerProcess.stderr?.on("data", (data) => {
             const error = data.toString().trim();
-            // Write to app.log
+            // Write all stderr to app.log
             if (appLogStream) {
                 appLogStream.write(
                     `[${new Date().toISOString()}] [SERVER STDERR] ${error}\n`,
                 );
             }
-            // Some wrangler output goes to stderr but is not an error
-            if (
-                isWorkerMode &&
-                (error.includes("⛅️") ||
-                    error.includes("http://") ||
-                    error.includes("GET"))
-            ) {
+
+            if (isWorkerMode) {
+                // After server is started, don't treat stderr as fatal
+                if (serverStarted) {
+                    if (config.TEST_OPTIONS.verbose) {
+                        console.log("[SERVER STDERR]", error);
+                    }
+                    return;
+                }
+                // Before server is started, check for startup signal in stderr
                 if (config.TEST_OPTIONS.verbose) {
                     console.log("[SERVER INFO]", error);
                 }
                 if (
-                    !serverStarted &&
-                    (error.includes("Ready") ||
-                        error.includes("localhost:" + port))
+                    error.includes("Ready") ||
+                    error.includes("localhost:" + port)
                 ) {
                     serverStarted = true;
                     cleanup();
@@ -243,8 +245,6 @@ function startTestServer(): Promise<void> {
                 return;
             }
             console.error("[SERVER ERROR]", error);
-            cleanup();
-            reject(new Error(error));
         });
 
         testServerProcess.on("error", (err) => {
