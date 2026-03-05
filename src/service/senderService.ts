@@ -37,7 +37,7 @@ async function sendRequest(
     const record = await recordService.create(user.id, modelConfig.id, body);
     await recordService.update(record.id, {
         status: SgRecordStatus.PROCESSING,
-        start_at: new Date(),
+        start_at: new Date().toISOString(),
     });
     const recordId = record.id;
 
@@ -213,14 +213,14 @@ async function sendRequest(
 
                 // 流式响应完成后，保存完整响应到数据库
                 const fullResponse = accumulator.getResponse();
-                const endTime = new Date();
+                const endTime = new Date().toISOString();
 
                 // 提取统计数据
                 const stats = {
                     prompt_tokens: fullResponse.usage?.prompt_tokens ?? null,
                     output_tokens: fullResponse.usage?.completion_tokens ?? null,
                     first_token_latency: firstTokenTime !== null
-                        ? firstTokenTime - record.created_at.getTime()
+                        ? firstTokenTime - new Date(record.created_at as any).getTime()
                         : null,
                     end_at: endTime,
                 };
@@ -236,7 +236,7 @@ async function sendRequest(
 
         // 非流式响应
     } else {
-        const endTime = new Date();
+        const endTime = new Date().toISOString();
 
         // 解析响应数据以提取 token 信息
         let promptTokens: number | null = null;

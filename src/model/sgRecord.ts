@@ -17,11 +17,11 @@ class SgRecord extends Model {
     prompt_tokens!: number | null;
     output_tokens!: number | null;
     first_token_latency!: number | null;
-    start_at!: Date | null;
-    end_at!: Date | null;
+    start_at!: Date | string | null;
+    end_at!: Date | string | null;
 
-    created_at!: Date;
-    updated_at!: Date;
+    created_at!: Date | string;
+    updated_at!: Date | string;
 
     [inspect.custom](depth: number, options: InspectOptions) {
         return JSON.stringify(this.toData(), null, 2);

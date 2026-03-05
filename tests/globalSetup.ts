@@ -40,18 +40,25 @@ async function setupAdminUser(): Promise<string> {
     const adminToken = "admin-token-123";
     const adminUser = { name: "Admin User", token: adminToken, type: "admin" };
     console.log("Creating admin user:", adminUser);
-    try {
-        const response = await requestHelper.post(
-            "/user/create.json",
-            adminUser,
-            rootToken,
-        );
-        console.log("Admin user created, response:", response.status);
-    } catch (e: any) {
-        console.log("Admin user creation error:", e.response?.status, e.message || e);
-        // User might already exist, ignore
-        if (!e.response || e.response.status !== 400) {
-            console.log("Admin user creation info:", e.message || e);
+
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await requestHelper.post(
+                "/user/create.json",
+                adminUser,
+                rootToken,
+            );
+            console.log("Admin user created, response:", response.status);
+            break;
+        } catch (e: any) {
+            console.log(`Admin user creation attempt ${attempt}/${maxRetries} failed:`, e.message || e);
+            if (attempt < maxRetries) {
+                // Wait before retry - D1 database may be locked by wrangler d1 execute
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            } else {
+                console.log("Admin user creation failed after all retries");
+            }
         }
     }
     return adminToken;
