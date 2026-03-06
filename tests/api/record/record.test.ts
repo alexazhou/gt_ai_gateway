@@ -5,6 +5,7 @@ import vendorFixtures from "../../fixtures/vendorFixtures";
 import modelFixtures from "../../fixtures/modelFixtures";
 import dbHelper from "../../helpers/dbHelper"
 import { setupAdminUser } from "../../globalSetup";
+import config from "../../config";
 
 /**
  * Record Endpoint Tests
@@ -326,9 +327,15 @@ describe("Record API", () => {
             expect(recordResponse.body.user_id).toBe(testUserId);
             expect(recordResponse.body.model_id).toBe(openaiModelId);
 
-            // Verify token statistics are populated (mock server returns 10 prompt, 15 completion)
-            expect(recordResponse.body.prompt_tokens).toBe(10);
-            expect(recordResponse.body.output_tokens).toBe(15);
+            // Verify token statistics are populated
+            if (config.isRealMode) {
+                expect(recordResponse.body.prompt_tokens).toBeGreaterThan(0);
+                expect(recordResponse.body.output_tokens).toBeGreaterThan(0);
+            } else {
+                // mock server returns 10 prompt, 15 completion
+                expect(recordResponse.body.prompt_tokens).toBe(10);
+                expect(recordResponse.body.output_tokens).toBe(15);
+            }
 
             // Verify timing fields
             expect(recordResponse.body.start_at).toBeTruthy();
@@ -368,9 +375,15 @@ describe("Record API", () => {
             expect(recordResponse.body.user_id).toBe(testUserId);
             expect(recordResponse.body.model_id).toBe(openaiModelId);
 
-            // Verify token statistics for streaming (mock returns 8 prompt, 12 completion)
-            expect(recordResponse.body.prompt_tokens).toBe(8);
-            expect(recordResponse.body.output_tokens).toBe(12);
+            // Verify token statistics for streaming
+            if (config.isRealMode) {
+                expect(recordResponse.body.prompt_tokens).toBeGreaterThan(0);
+                expect(recordResponse.body.output_tokens).toBeGreaterThan(0);
+            } else {
+                // mock returns 8 prompt, 12 completion
+                expect(recordResponse.body.prompt_tokens).toBe(8);
+                expect(recordResponse.body.output_tokens).toBe(12);
+            }
 
             // Verify first_token_latency is recorded (should be positive for streaming)
             expect(recordResponse.body.first_token_latency).toBeGreaterThan(0);
@@ -408,9 +421,15 @@ describe("Record API", () => {
             expect(recordResponse.body.user_id).toBe(testUserId);
             expect(recordResponse.body.model_id).toBe(anthropicModelId);
 
-            // Verify token statistics (mock returns 10 input, 15 output)
-            expect(recordResponse.body.prompt_tokens).toBe(10);
-            expect(recordResponse.body.output_tokens).toBe(15);
+            // Verify token statistics
+            if (config.isRealMode) {
+                expect(recordResponse.body.prompt_tokens).toBeGreaterThan(0);
+                expect(recordResponse.body.output_tokens).toBeGreaterThan(0);
+            } else {
+                // mock returns 10 input, 15 output
+                expect(recordResponse.body.prompt_tokens).toBe(10);
+                expect(recordResponse.body.output_tokens).toBe(15);
+            }
 
             // Verify timing fields
             expect(recordResponse.body.start_at).toBeTruthy();
@@ -445,9 +464,15 @@ describe("Record API", () => {
             expect(recordResponse.body.user_id).toBe(testUserId);
             expect(recordResponse.body.model_id).toBe(anthropicModelId);
 
-            // Verify token statistics for streaming (mock returns 8 input, 12 output)
-            expect(recordResponse.body.prompt_tokens).toBe(8);
-            expect(recordResponse.body.output_tokens).toBe(12);
+            // Verify token statistics for streaming
+            if (config.isRealMode) {
+                expect(recordResponse.body.prompt_tokens).toBeGreaterThan(0);
+                expect(recordResponse.body.output_tokens).toBeGreaterThan(0);
+            } else {
+                // mock returns 8 input, 12 output
+                expect(recordResponse.body.prompt_tokens).toBe(8);
+                expect(recordResponse.body.output_tokens).toBe(12);
+            }
 
             // Verify first_token_latency is recorded (should be positive for streaming)
             expect(recordResponse.body.first_token_latency).toBeGreaterThan(0);
