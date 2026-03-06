@@ -166,9 +166,25 @@ async function sendRequest(
         headers["Authorization"] = vendor.token;
     }
 
-    // 3. 发起上游请求，拿到响应头后立即判断响应类型
+    // 3. OpenAI 流式请求注入 stream_options，让上游在最后一帧返回 usage
+    let upstreamBody = body;
+    if (format === ApiFormat.OPENAI) {
+        try {
+            const bodyJson = JSON.parse(body);
+            if (bodyJson.stream === true) {
+                bodyJson.stream_options = { include_usage: true };
+                upstreamBody = JSON.stringify(bodyJson);
+                // body 长度变了，同步更新 content-length，否则上游收到的 body 会被截断
+                headers["content-length"] = String(new TextEncoder().encode(upstreamBody).length);
+            }
+        } catch (e) {
+            console.log("Failed to inject stream_options:", e);
+        }
+    }
+
+    // 4. 发起上游请求，拿到响应头后立即判断响应类型
     console.log("do fetch upstream, url:", url);
-    const upstreamRes = await fetch(url, { method: "POST", headers, body });
+    const upstreamRes = await fetch(url, { method: "POST", headers, body: upstreamBody });
     console.log("upstream response status:", upstreamRes.status);
 
     const isStream =
