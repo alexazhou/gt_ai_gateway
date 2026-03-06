@@ -1,28 +1,137 @@
 import { Context } from "hono";
 import { SgModel } from "../model/sgModel";
 import { StatusCode } from "hono/dist/types/utils/http-status";
-import enhanced from "../util/enhanced";
 import { streamSSE, SSEStreamingApi } from "hono/streaming";
-import {
-    EventStreamContentType,
-    fetchEventSource,
-} from "@fortaine/fetch-event-source";
 import { SgUser } from "../model/sgUser";
 import { SgVendor } from "../model/sgVendor";
 import recordService from "./recordService";
 import { SgRecordStatus, ApiFormat } from "../constants";
 import sseAccumulator from "../util/sseAccumulator";
+import { SgRecord } from "../model/sgRecord";
 
-/**
- * 发送请求到上游 AI 服务
- *
- * @param c - Hono 上下文对象
- * @param user - 用户信息
- * @param modelConfig - 模型配置
- * @param vendor - 供应商信息
- * @param format - API 格式（openai 或 anthropic）
- * @returns Promise<Response> - 响应对象
- */
+
+async function handleStreamResponse(
+    c: Context,
+    upstreamRes: Response,
+    record: SgRecord,
+    format: ApiFormat,
+): Promise<Response> {
+    const accumulator = new sseAccumulator.SSEAccumulator(
+        format === ApiFormat.ANTHROPIC ? "anthropic" : "openai",
+    );
+    let firstTokenTime: number | null = null;
+
+    return streamSSE(c, async (stream: SSEStreamingApi) => {
+        const reader = upstreamRes.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        // 逐块读取上游 SSE 字节流
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            // 按 \n\n 切割出完整的 SSE event
+            const events = buffer.split("\n\n");
+            // 最后一段可能不完整，留到下一轮拼接
+            buffer = events.pop() ?? "";
+
+            for (const event of events) {
+                if (!event.trim()) continue;
+
+                // 解析 SSE event 中的各字段行（data / event / id / retry）
+                const lines = event.split("\n");
+                let data = "";
+                let eventType = "";
+                let id = "";
+                for (const line of lines) {
+                    if (line.startsWith("data:")) {
+                        data = line.slice(5).trim();
+                    } else if (line.startsWith("event:")) {
+                        eventType = line.slice(6).trim();
+                    } else if (line.startsWith("id:")) {
+                        id = line.slice(3).trim();
+                    }
+                }
+
+                if (!data) continue;
+
+                // 记录首个 token 时间
+                if (firstTokenTime === null && data !== "[DONE]") {
+                    firstTokenTime = Date.now();
+                }
+
+                // 转发给客户端
+                await stream.writeSSE({ data, event: eventType || undefined, id: id || undefined });
+
+                // [DONE] 之后不需要解析内容
+                if (data === "[DONE]") continue;
+
+                // 累积消息用于保存完整响应
+                try {
+                    accumulator.addMessage(JSON.parse(data));
+                } catch (e) {
+                    console.log("Failed to parse SSE data:", data, e);
+                }
+            }
+        }
+
+        // 流结束，保存完整响应到数据库
+        const fullResponse = accumulator.getResponse();
+        await recordService.update(record.id, {
+            response_data: JSON.stringify(fullResponse),
+            status: SgRecordStatus.SUCCESS,
+            prompt_tokens: fullResponse.usage?.prompt_tokens ?? null,
+            output_tokens: fullResponse.usage?.completion_tokens ?? null,
+            first_token_latency: firstTokenTime !== null
+                ? firstTokenTime - record.created_at.getTime()
+                : null,
+            end_at: new Date(),
+        });
+    });
+}
+
+
+async function handleNonStreamResponse(
+    c: Context,
+    upstreamRes: Response,
+    record: SgRecord,
+    format: ApiFormat,
+): Promise<Response> {
+    const responseText = await upstreamRes.text();
+    const statusCode = upstreamRes.status as StatusCode;
+
+    // 从响应体中提取 token 统计
+    let promptTokens: number | null = null;
+    let outputTokens: number | null = null;
+    try {
+        const responseJson = JSON.parse(responseText);
+        if (format === ApiFormat.ANTHROPIC) {
+            promptTokens = responseJson.usage?.input_tokens ?? null;
+            outputTokens = responseJson.usage?.output_tokens ?? null;
+        } else {
+            promptTokens = responseJson.usage?.prompt_tokens ?? null;
+            outputTokens = responseJson.usage?.completion_tokens ?? null;
+        }
+    } catch (e) {
+        console.log("Failed to parse response for token stats:", e);
+    }
+
+    await recordService.update(record.id, {
+        response_data: responseText,
+        status: statusCode === 200 ? SgRecordStatus.SUCCESS : SgRecordStatus.FAILED,
+        prompt_tokens: promptTokens,
+        output_tokens: outputTokens,
+        end_at: new Date(),
+    });
+
+    c.status(statusCode);
+    c.res.headers.set("Content-Type", "application/json");
+    return c.text(responseText);
+}
+
+
 async function sendRequest(
     c: Context,
     user: SgUser,
@@ -32,250 +141,48 @@ async function sendRequest(
 ): Promise<Response> {
     const url = vendor.getUrlByFormat(format);
 
-    // 1. 获取请求体，并创建数据库记录
-    let body: string = await c.req.text();
+    // 1. 读取请求体，创建数据库记录
+    const body: string = await c.req.text();
     const record = await recordService.create(user.id, modelConfig.id, body);
     await recordService.update(record.id, {
         status: SgRecordStatus.PROCESSING,
         start_at: new Date(),
     });
-    const recordId = record.id;
 
     console.log("sendRequest: modelConfig={}", modelConfig);
 
-    // 2. 初始化变量
-    let isStreamResponse: boolean = true; // 是否为流式响应
-    let upstreamStatusCode: StatusCode | null = null; // 上游响应状态码
-    let upstreamResponseText: string | null = null; // 上游响应文本（非流式）
-    const accumulator = new sseAccumulator.SSEAccumulator(
-        format === ApiFormat.ANTHROPIC ? 'anthropic' : 'openai'
-    ); // SSE 消息累加器
-    let firstTokenTime: number | null = null; // 首个 token 时间
-
-    // 自定义 Promise，用于等待响应头到达（判断是否为流式）
-    let getResponseHeaderPromise: enhanced.CustomPromise<void> = new enhanced.CustomPromise();
-
-    console.log("body:", body);
-
-    // 3. 构建上游请求选项
-    // 过滤掉 Cloudflare 添加的 header（以 cf- 开头）
-    let headers: Record<string, string> = {};
-
+    // 2. 构建上游请求 headers，过滤掉 Cloudflare 注入的 cf- 前缀 header
+    const headers: Record<string, string> = {};
     for (const [key, value] of c.req.raw.headers.entries()) {
-        // 过滤条件：不以 cf- 开头
         if (!key.toLowerCase().startsWith("cf-")) {
             headers[key] = value;
         }
     }
 
     if (format === ApiFormat.ANTHROPIC) {
-        headers["x-api-key"] = vendor!.token!;
+        headers["x-api-key"] = vendor.token;
         headers["anthropic-version"] = "2023-06-01";
     } else {
-        headers["Authorization"] = vendor!.token!;
+        headers["Authorization"] = vendor.token;
     }
 
-    let requestOptions = {
-        method: "POST",
-        headers: headers,
-        body: body,
-    };
-    console.log("requestOptions:", requestOptions);
+    // 3. 发起上游请求，拿到响应头后立即判断响应类型
+    console.log("do fetch upstream, url:", url);
+    const upstreamRes = await fetch(url, { method: "POST", headers, body });
+    console.log("upstream response status:", upstreamRes.status);
 
-    let upstreamReqPromise: Promise<void> | null = null; // 上游请求 Promise
-    let streamOutputPipe: SSEStreamingApi | null = null; // 流式输出管道
+    const isStream =
+        upstreamRes.ok &&
+        upstreamRes.headers.get("content-type")?.startsWith("text/event-stream");
 
-    console.log("do fetch upstream");
-
-    // 4. 发起 SSE 请求到上游服务
-    upstreamReqPromise = fetchEventSource(url, {
-        ...requestOptions,
-        // 响应打开时触发
-        async onopen(response: Response) {
-            upstreamStatusCode = response.status as StatusCode;
-
-            // 如果响应成功且是 SSE 流
-            if (
-                response.ok &&
-                response.headers
-                    .get("content-type")
-                    ?.startsWith(EventStreamContentType)
-            ) {
-                console.log("onOpen:", response);
-                getResponseHeaderPromise.resolve(null); // 解除阻塞，可以开始返回流式响应
-                return; // everything's good
-
-                // 如果是客户端错误（通常不可重试）
-            } else if (
-                response.status >= 400 &&
-                response.status < 500 &&
-                response.status !== 429
-            ) {
-                console.log("onOpen, but has error:", response);
-                isStreamResponse = false; // 标记为非流式响应
-
-                const contentType = response.headers.get("content-type");
-                console.log("upstream response content type: ", contentType);
-
-                // 读取响应文本
-                if (
-                    contentType?.startsWith("text/plain") ||
-                    contentType?.startsWith("application/json")
-                ) {
-                    upstreamResponseText = await response.clone().text();
-                    console.log("statusCode:", response.status);
-                    console.log("responseText:", upstreamResponseText);
-                }
-
-                console.log("fallback to json response");
-                getResponseHeaderPromise.resolve(null);
-
-                // 其他情况（非流式响应）
-            } else {
-                console.log("onOpen, but content-type not except:", response);
-                isStreamResponse = false;
-                upstreamResponseText = await response.clone().text();
-                console.log("statusCode:", response.status);
-                console.log("responseText:", upstreamResponseText);
-
-                getResponseHeaderPromise.resolve(null);
-            }
-        },
-        // 收到 SSE 消息时触发
-        async onmessage(msg) {
-            console.log("onMessage:", msg);
-
-            // 记录首个 token 的时间
-            if (firstTokenTime === null && msg.data !== "[DONE]") {
-                firstTokenTime = Date.now();
-            }
-
-            // 检查是否是 [DONE] 标和其他特殊消息
-            if (msg.data === "[DONE]") {
-                // 直接转发，不尝试解析
-                await streamOutputPipe!.writeSSE(msg);
-                return;
-            }
-
-            try {
-                // 累积消息到累加器
-                const data = JSON.parse(msg.data);
-                accumulator.addMessage(data);
-
-                await streamOutputPipe!.writeSSE(msg); // 将消息转发给客户端
-            } catch (e) {
-                console.log("Failed to parse message data:", msg.data, e);
-                // 仍然转发原始消息
-                await streamOutputPipe!.writeSSE(msg);
-            }
-        },
-        // 连接关闭时触发
-        onclose() {
-            console.log("onClose");
-            getResponseHeaderPromise.resolve(null);
-        },
-        // 发生错误时触发
-        onerror(err: Response) {
-            console.log("onerror:", err);
-            getResponseHeaderPromise.resolve(null);
-        },
-    });
-
-    // 5. 等待响应头到达，判断响应类型
-    console.log(
-        "before await getResponseHeaderPromise",
-        getResponseHeaderPromise,
-    );
-    await getResponseHeaderPromise;
-    console.log(
-        "after getResponseHeaderPromise finished",
-        getResponseHeaderPromise,
-    );
-    console.log("isStreamResponse:", isStreamResponse);
-
-    // 6. 根据响应类型返回结果
-    // 流式响应
-    if (isStreamResponse === true) {
-        // 准备 SSE 流式响应
-        let streamSSEResponse = streamSSE(
-            c,
-            async (stream: SSEStreamingApi) => {
-                streamOutputPipe = stream; // 设置输出管道
-                console.log(
-                    "before await upstreamReqPromise",
-                    upstreamReqPromise,
-                );
-                await upstreamReqPromise; // 等待上游请求完成
-                console.log(
-                    "after upstreamReqReqromise finished",
-                    upstreamReqPromise,
-                );
-
-                // 流式响应完成后，保存完整响应到数据库
-                const fullResponse = accumulator.getResponse();
-                const endTime = new Date();
-
-                // 提取统计数据
-                const stats = {
-                    prompt_tokens: fullResponse.usage?.prompt_tokens ?? null,
-                    output_tokens: fullResponse.usage?.completion_tokens ?? null,
-                    first_token_latency: firstTokenTime !== null
-                        ? firstTokenTime - record.created_at.getTime()
-                        : null,
-                    end_at: endTime,
-                };
-
-                await recordService.update(recordId, {
-                    response_data: JSON.stringify(fullResponse),
-                    status: SgRecordStatus.SUCCESS,
-                    ...stats,
-                });
-            },
-        );
-        return streamSSEResponse;
-
-        // 非流式响应
+    // 4. 按响应类型分发处理
+    if (isStream) {
+        return handleStreamResponse(c, upstreamRes, record, format);
     } else {
-        const endTime = new Date();
-
-        // 解析响应数据以提取 token 信息
-        let promptTokens: number | null = null;
-        let outputTokens: number | null = null;
-        if (upstreamResponseText) {
-            try {
-                const responseJson = JSON.parse(upstreamResponseText);
-                if (format === ApiFormat.ANTHROPIC) {
-                    // Anthropic 格式: usage.input_tokens, usage.output_tokens
-                    promptTokens = responseJson.usage?.input_tokens ?? null;
-                    outputTokens = responseJson.usage?.output_tokens ?? null;
-                } else {
-                    // OpenAI 格式: usage.prompt_tokens, usage.completion_tokens
-                    promptTokens = responseJson.usage?.prompt_tokens ?? null;
-                    outputTokens = responseJson.usage?.completion_tokens ?? null;
-                }
-            } catch (e) {
-                console.log("Failed to parse response for token stats:", e);
-            }
-        }
-
-        // 更新数据库记录
-        await recordService.update(recordId, {
-            response_data: upstreamResponseText,
-            status:
-                upstreamStatusCode == 200
-                    ? SgRecordStatus.SUCCESS
-                    : SgRecordStatus.FAILED,
-            prompt_tokens: promptTokens,
-            output_tokens: outputTokens,
-            end_at: endTime,
-        });
-
-        // 返回 JSON 响应
-        c.status(upstreamStatusCode!);
-        c.res.headers.set("Content-Type", "application/json");
-        return c.text(upstreamResponseText!);
+        return handleNonStreamResponse(c, upstreamRes, record, format);
     }
 }
+
 
 export default {
     sendRequest,
