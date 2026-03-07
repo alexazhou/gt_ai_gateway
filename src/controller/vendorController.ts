@@ -1,5 +1,6 @@
 import { Context } from "hono";
 import { SgVendor } from "../model/sgVendor";
+import { SgModel } from "../model/sgModel";
 import vendorService from "../service/vendorService";
 import errorHandler from "../util/errorHandler";
 
@@ -9,8 +10,13 @@ import errorHandler from "../util/errorHandler";
  */
 function formatVendor(vendor: SgVendor) {
     return {
-        ...vendor,
+        id: vendor.id,
+        type: vendor.type,
+        name: vendor.name,
+        token: vendor.token,
         urls: vendor.getUrls(),
+        created_at: vendor.created_at,
+        updated_at: vendor.updated_at,
     };
 }
 
