@@ -14,6 +14,7 @@ jobs:
   test-node:
     name: Test (Node Mode)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -47,6 +48,7 @@ jobs:
   test-worker:
     name: Test (Worker Mode)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
