@@ -86,7 +86,7 @@ const systemInfo = ref({
 // 保存服务器启动时间
 const serverStartTime = ref<Date | null>(null);
 // 定时器引用
-let uptimeTimer: NodeJS.Timeout | null = null;
+let uptimeTimer: number | null = null;
 
 /**
  * 计算运行时长
