@@ -27,3 +27,7 @@ database_id = "d49ccfb6-84db-4836-80e4-8dd82f7dd029"
 [observability]
 enabled = true
 head_sampling_rate = 1
+
+[assets]
+directory = "frontend/dist"
+binding = "ASSETS"
