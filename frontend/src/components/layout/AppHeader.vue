@@ -43,7 +43,7 @@ const appStore = useAppStore();
 const authStore = useAuthStore();
 
 const title = computed(() => {
-    return router.currentRoute.value.meta.title as string || 'Serverless AI Gateway';
+    return 'AI Gateway';
 });
 
 function toggleSidebar() {
