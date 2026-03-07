@@ -6,9 +6,9 @@ import requestHelper from "../../helpers/requestHelper";
  */
 
 describe("System API", () => {
-    describe("GET /", () => {
+    describe("GET /welcome", () => {
         it("should return welcome message with status 200", async () => {
-            const response = await requestHelper.get("/");
+            const response = await requestHelper.get("/welcome");
 
             expect(response.status).toBe(200);
             expect(response.body).toContain("Hello");
@@ -16,7 +16,7 @@ describe("System API", () => {
         });
 
         it("should return a text response", async () => {
-            const response = await requestHelper.get("/");
+            const response = await requestHelper.get("/welcome");
 
             expect(typeof response.body).toBe("string");
             expect(response.headers.get("content-type")).toContain(
@@ -25,7 +25,7 @@ describe("System API", () => {
         });
 
         it("should indicate local mode", async () => {
-            const response = await requestHelper.get("/");
+            const response = await requestHelper.get("/welcome");
 
             // In node mode: contains "local mode", in worker/cloud mode: contains "serverless ai gateway"
             const isLocalMode = response.body.includes("local mode");
