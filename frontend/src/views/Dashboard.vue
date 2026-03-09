@@ -107,6 +107,24 @@
             </a-col>
         </a-row>
 
+        <!-- 系统信息 -->
+        <a-card title="系统信息" style="margin-top: 16px" :loading="loading">
+            <a-descriptions :column="2" bordered>
+                <a-descriptions-item label="环境">
+                    {{ systemInfo.environment || '-' }}
+                </a-descriptions-item>
+                <a-descriptions-item label="版本">
+                    {{ systemInfo.version || '-' }}
+                </a-descriptions-item>
+                <a-descriptions-item label="启动时间">
+                    {{ systemInfo.startTime ? formatDate(systemInfo.startTime) : '-' }}
+                </a-descriptions-item>
+                <a-descriptions-item label="运行时间">
+                    {{ systemInfo.uptime || '-' }}
+                </a-descriptions-item>
+            </a-descriptions>
+        </a-card>
+
         <!-- 最近请求记录 -->
         <a-card
             title="最近请求"
@@ -139,24 +157,6 @@
             <div v-if="statsStore.recentRecords.length === 0" class="empty-records">
                 暂无请求记录
             </div>
-        </a-card>
-
-        <!-- 系统信息 -->
-        <a-card title="系统信息" style="margin-top: 16px" :loading="loading">
-            <a-descriptions :column="2" bordered>
-                <a-descriptions-item label="环境">
-                    {{ systemInfo.environment || '-' }}
-                </a-descriptions-item>
-                <a-descriptions-item label="版本">
-                    {{ systemInfo.version || '-' }}
-                </a-descriptions-item>
-                <a-descriptions-item label="启动时间">
-                    {{ systemInfo.startTime ? formatDate(systemInfo.startTime) : '-' }}
-                </a-descriptions-item>
-                <a-descriptions-item label="运行时间">
-                    {{ systemInfo.uptime || '-' }}
-                </a-descriptions-item>
-            </a-descriptions>
         </a-card>
     </div>
 </template>
