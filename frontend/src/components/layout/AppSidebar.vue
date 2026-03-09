@@ -73,7 +73,7 @@ function handleSelect({ key }: { key: string }) {
 }
 
 .app-sidebar.collapsed {
-    width: 64px;
+    width: 80px;
 }
 
 .sidebar-content {
