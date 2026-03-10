@@ -33,6 +33,7 @@
     "@hono/node-server": "^1.19.9",
     "@types/node": "^24.0.13",
     "better-sqlite3": "^12.6.2",
+    "dotenv": "^17.3.1",
     "hono": "^4.12.3",
     "knex-cloudflare-d1": "^0.1.1",
     "sutando": "^1.7.2",
@@ -42,6 +43,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250712.0",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/dotenv": "^6.1.1",
     "@types/sqlite3": "^3.1.11",
     "@types/uuid": "^10.0.0",
     "@vitest/coverage-v8": "^4.0.18",

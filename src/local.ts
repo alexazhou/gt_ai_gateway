@@ -1,10 +1,14 @@
 import { join } from "path";
+import { config } from "dotenv";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { readFileSync } from "fs";
 import ormService from "./service/ormService";
 import app, { Env } from "./routes";
 import initLogger, { Logger } from "./util/logger";
+
+// 加载环境变量
+config({ path: join(process.cwd(), ".dev.vars") });
 
 const DB_PATH = process.env.DB_PATH || join(process.cwd(), "local.db");
 
