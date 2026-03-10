@@ -1,6 +1,8 @@
 # 测试架构文档
 
-本文档描述测试环境的架构设计，包括测试框架、目录结构、数据隔离策略、Mock 服务器实现和全局生命周期配置。
+本文档描述：
+1. 自动化测试运行方式
+2. 测试环境的架构设计，包括测试框架、目录结构、数据隔离策略、Mock 服务器实现和全局生命周期配置
 
 ---
 
@@ -9,13 +11,13 @@
 ### 基本命令
 
 ```bash
-npm test                      # node 模式运行所有测试
-npm test -- --run --reporter=verbose  # 详细输出
-npm test -- --run tests/api/user/user.test.ts  # 特定文件
-npm test -- --run -t "should create user"       # 特定用例
+npm run backend:test                      # node 模式运行所有测试
+npm run backend:test -- --run --reporter=verbose  # 详细输出
+npm run backend:test -- --run tests/api/user/user.test.ts  # 特定文件
+npm run backend:test -- --run -t "should create user"       # 特定用例
 ```
 
-1. 通常情况下，使用 `npm test` 命令即可
+1. 通常情况下，使用 `npm run backend:test` 命令即可
 2. 全量命令可参考 package.json
 
 ### 环境变量
@@ -30,12 +32,34 @@ npm test -- --run -t "should create user"       # 特定用例
 | `TEST_REAL_API` | 使用真实 API | false |
 | `TEST_TIMEOUT` | 超时时间（毫秒） | 30000 |
 
+### ROOT_TOKEN 配置
+
+系统需要配置 `ROOT_TOKEN` 环境变量用于管理员认证。该配置位于项目根目录的 `.dev.vars` 文件中：
+
+```bash
+# .dev.vars 文件内容
+ROOT_TOKEN=your-admin-token-here
+```
+
+**配置说明：**
+
+1. **Node 模式启动**：本地启动服务时（`npm run backend:dev:local`），会自动加载 `.dev.vars` 文件中的 `ROOT_TOKEN`
+
+2. **启动日志验证**：服务启动后会在控制台输出 `ROOT_TOKEN` 的值，便于确认配置是否正确加载
+
+3. **测试服务器**：测试环境启动时会读取 `ROOT_TOKEN` 环境变量
+
+**注意事项：**
+
+- `.dev.vars` 文件不要提交到版本控制系统（已在 `.gitignore` 中）
+- 生产环境部署时需要通过 Cloudflare Workers 环境变量配置 `ROOT_TOKEN`
+
 ### 示例
 
 ```bash
-TEST_MODE=worker npm test                                # worker 模式
-TEST_VERBOSE=true TEST_CLEANUP=false npm test           # 调试模式
-TEST_REAL_API=true npm test                             # 真实 API
+TEST_MODE=worker npm run backend:test                                # worker 模式
+TEST_VERBOSE=true TEST_CLEANUP=false npm run backend:test           # 调试模式
+TEST_REAL_API=true npm run backend:test                             # 真实 API
 ```
 
 ## 测试方法

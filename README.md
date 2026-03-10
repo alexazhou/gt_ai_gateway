@@ -22,77 +22,6 @@
 - **SQLite**: 本地开发环境使用 SQLite 数据库
 - **Sutando**: ORM 框架，提供统一的数据库操作接口
 
-### 数据库表结构
-
-- `user`: 用户表（id, name, token, type）
-- `vendor`: 供应商表（id, type, name, token, url, api_format）
-- `model`: 模型表（id, name, vendor_id）
-- `record`: 请求记录表（id, user_id, model_id, request_data, response_data, status）
-
-## API 端点
-
-### 认证说明
-
-系统使用 Bearer Token 进行身份认证。所有 API 请求需要在请求头中携带：
-
-```
-Authorization: Bearer <token>
-```
-
-#### 用户类型
-
-系统支持两种用户类型：
-
-| 用户类型 | 说明 | 权限             |
-|---------|------|----------------|
-| `normal` | 普通用户 | 可访问 LLM API 端点 |
-| `admin` | 管理员 | 可访问所有 API 端点   |
-
-#### URL 权限说明
-
-#### 需要普通用户权限的端点
-
-**欢迎 API（无需认证）**
-- `GET /` - 欢迎信息
-
-**LLM API（普通用户）** 
-- `POST /v1/chat/completions` - OpenAI 格式聊天请求
-- `POST /v1/messages` - Anthropic 格式消息请求
-
-
-**LLM API（管理员权限）**
-- 所有其他的 API
-
-
-#### 错误响应
-
-- `401 Unauthorized` - 缺少 Authorization header 或 token 无效
-- `403 Forbidden` - 用户无权限访问该资源（需要管理员权限）
-
-#### 创建管理员用户
-
-通过数据库直接插入管理员用户：
-
-```sql
-INSERT INTO user (name, token, type, created_at, updated_at)
-VALUES ('Admin', 'your-admin-token', 'admin', datetime('now'), datetime('now'));
-```
-
-### 系统端点
-
-**系统 API**
-- `GET /` - 欢迎信息（无需认证）
-- `GET /status.json` - 系统状态（需要管理员权限）
-
-**LLM API（需要用户 Token）**
-- `POST /v1/chat/completions` - OpenAI 格式聊天请求
-- `POST /v1/messages` - Anthropic 格式消息请求
-
-**其他 API（需要管理员权限）**
-- 用户管理：`POST /user/create.json`、`GET /user/list.json`、`GET /user/:id`
-- 供应商管理：`POST /vendor/create.json`、`GET /vendor/list.json`、`GET /vendor/:id`、`PUT /vendor/:id`
-- 模型管理：`POST /model/create.json`、`GET /model/list.json`、`GET /model/:id`
-- 请求记录：`GET /record/list.json`、`GET /record/latest.json`、`GET /record/:id`
 
 ## 使用方式
 
@@ -100,11 +29,14 @@ VALUES ('Admin', 'your-admin-token', 'admin', datetime('now'), datetime('now'));
 
 #### 启动本地服务器
 ```bash
-# 使用 tsx 启动本地服务器
-npm run dev:local
+# 使用 tsx 启动本地服务器（Node 模式）
+npm run backend:dev:local
 
 # 或直接启动
-npm run start
+npm run backend:start
+
+# Cloudflare Workers 本地开发模式
+npm run backend:dev
 ```
 
 #### 数据库迁移
@@ -124,13 +56,13 @@ npm run db:clear:local
 #### 开发模式
 ```bash
 # 启动 Cloudflare Workers 本地开发环境
-npm run dev
+npm run backend:dev
 ```
 
 #### 部署到生产环境
 ```bash
 # 部署到 Cloudflare Workers
-npm run deploy
+npm run backend:deploy
 ```
 
 ### 测试
@@ -138,16 +70,16 @@ npm run deploy
 #### 运行所有测试
 ```bash
 # 运行所有测试
-npm test
+npm run backend:test
 
 # 运行 API 测试
-npm run test:api
+npm run backend:test:api
 
 # 运行集成测试
-npm run test:integration
+npm run backend:test:integration
 
 # 生成测试覆盖率报告
-npm run test:coverage
+npm run backend:test:coverage
 ```
 
 #### 测试配置

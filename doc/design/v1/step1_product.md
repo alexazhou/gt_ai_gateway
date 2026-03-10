@@ -397,8 +397,8 @@ Serverless AI Gateway 是一个无服务器 AI 网关，用于统一管理和调
 
 ### 11.2 参考文档
 
-- [v1.0 - 技术实现方案](./step2_technical_design.md)
-- [v1.0 - 开发任务清单](./step3_develop_tasks.md)
+- [v1.0 - 技术实现方案](step2_technical_design.md)
+- [v1.0 - 开发任务清单](step3_develop_tasks.md)
 - [Frontend Roadmap](../Frontend_Roadmap.md)
 
 ---

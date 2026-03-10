@@ -77,7 +77,7 @@ async function startServer() {
     });
 
     // 启动服务器
-    const port = parseInt(process.env.PORT || "3000", 10);
+    const port = parseInt(process.env.PORT || "8787", 10);
 
     // 构建环境变量
     const bindings: Env = {
