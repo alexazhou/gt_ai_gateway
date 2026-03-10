@@ -134,6 +134,7 @@ async function startServer() {
     });
 
     console.log(`Server listening on http://localhost:${port}`);
+    console.log(`ROOT_TOKEN: ${bindings.ROOT_TOKEN}`);
 }
 
 startServer().catch((err) => {
