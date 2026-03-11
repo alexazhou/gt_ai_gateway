@@ -40,10 +40,10 @@ jobs:
         run: cd frontend && npm ci
 
       - name: Build frontend
-        run: npm run build
+        run: npm run frontend:build
 
       - name: Run tests (Node mode)
-        run: npm run test:node
+        run: npm run backend:test:node
 
   test-worker:
     name: Test (Worker Mode)
@@ -74,7 +74,7 @@ jobs:
         run: cd frontend && npm ci
 
       - name: Build frontend
-        run: npm run build
+        run: npm run frontend:build
 
       - name: Run tests (Worker mode)
-        run: npm run test:worker
+        run: npm run backend:test:worker
