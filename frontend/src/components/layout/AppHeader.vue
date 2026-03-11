@@ -1,14 +1,6 @@
 <template>
     <div class="app-header">
         <div class="header-left">
-            <a-button
-                type="text"
-                @click="toggleSidebar"
-                class="collapse-btn"
-            >
-                <MenuFoldOutlined v-if="!appStore.sidebarCollapsed" />
-                <MenuUnfoldOutlined v-else />
-            </a-button>
             <span class="title">{{ title }}</span>
         </div>
         <div class="header-right">
@@ -34,21 +26,15 @@
 import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
-import { MenuFoldOutlined, MenuUnfoldOutlined, UserOutlined, LogoutOutlined } from '@ant-design/icons-vue';
-import { useAppStore } from '@/stores/app';
+import { UserOutlined, LogoutOutlined } from '@ant-design/icons-vue';
 import { useAuthStore } from '@/stores/auth';
 
 const router = useRouter();
-const appStore = useAppStore();
 const authStore = useAuthStore();
 
 const title = computed(() => {
     return 'AI Gateway';
 });
-
-function toggleSidebar() {
-    appStore.toggleSidebar();
-}
 
 function handleLogout() {
     authStore.logout();
@@ -66,6 +52,8 @@ function handleLogout() {
     height: 64px;
     background: #fff;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    position: relative;
+    z-index: 20;
 }
 
 .header-left {

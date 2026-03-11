@@ -33,13 +33,23 @@
                 </a-menu-item>
             </a-menu>
         </div>
+        <div class="sidebar-footer">
+            <a-button
+                type="text"
+                @click="toggleSidebar"
+                class="collapse-btn"
+            >
+                <MenuFoldOutlined v-if="!collapsed" />
+                <MenuUnfoldOutlined v-else />
+            </a-button>
+        </div>
     </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { DashboardOutlined, UserOutlined, ApiOutlined, SettingOutlined, FileTextOutlined, ExperimentOutlined } from '@ant-design/icons-vue';
+import { DashboardOutlined, UserOutlined, ApiOutlined, SettingOutlined, FileTextOutlined, ExperimentOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons-vue';
 import { useAppStore } from '@/stores/app';
 
 const router = useRouter();
@@ -61,6 +71,10 @@ const selectedKeys = computed(() => {
 function handleSelect({ key }: { key: string }) {
     router.push(key);
 }
+
+function toggleSidebar() {
+    appStore.toggleSidebar();
+}
 </script>
 
 <style scoped>
@@ -70,6 +84,9 @@ function handleSelect({ key }: { key: string }) {
     background: #fff;
     border-right: 1px solid #e8e8e8;
     transition: all 0.3s;
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
 }
 
 .app-sidebar.collapsed {
@@ -78,5 +95,15 @@ function handleSelect({ key }: { key: string }) {
 
 .sidebar-content {
     padding-top: 16px;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.sidebar-footer {
+    padding: 16px;
+}
+
+.collapse-btn {
+    font-size: 18px;
 }
 </style>
