@@ -50,17 +50,19 @@ describe("Record API", () => {
     });
 
     describe("GET /record/list.json", () => {
-        it("should return a list of records", async () => {
+        it("should return a list of records with total count", async () => {
             const response = await requestHelper.get("/record/list.json", adminToken);
 
             expect(response.status).toBe(200);
-            expect(Array.isArray(response.body)).toBe(true);
+            expect(response.body).toHaveProperty("list");
+            expect(response.body).toHaveProperty("total");
+            expect(Array.isArray(response.body.list)).toBe(true);
         });
 
         it("should return records with correct structure", async () => {
             const response = await requestHelper.get("/record/list.json", adminToken);
 
-            for (const record of response.body) {
+            for (const record of response.body.list) {
                 expect(record).toHaveProperty("id");
                 expect(record).toHaveProperty("user_id");
                 expect(record).toHaveProperty("model_id");
@@ -288,9 +290,9 @@ describe("Record API", () => {
             );
 
             expect(recordsResponse.status).toBe(200);
-            expect(recordsResponse.body.length).toBeGreaterThan(0);
+            expect(recordsResponse.body.list.length).toBeGreaterThan(0);
 
-            for (const record of recordsResponse.body) {
+            for (const record of recordsResponse.body.list) {
                 expect(record).toHaveProperty("prompt_tokens");
                 expect(record).toHaveProperty("output_tokens");
                 expect(record).toHaveProperty("first_token_latency");

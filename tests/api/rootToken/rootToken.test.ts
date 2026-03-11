@@ -99,7 +99,9 @@ describe("Root Token Tests", () => {
                 const response = await requestHelper.get("/record/list.json", ROOT_TOKEN);
 
                 expect(response.status).toBe(200);
-                expect(Array.isArray(response.body)).toBe(true);
+                expect(response.body).toHaveProperty("list");
+                expect(response.body).toHaveProperty("total");
+                expect(Array.isArray(response.body.list)).toBe(true);
             });
         });
 

@@ -153,7 +153,7 @@ describe("Integration Tests", () => {
             // Verify records count increased
             const recordsResponse =
                 await requestHelper.get("/record/list.json", adminToken);
-            const userRecords = recordsResponse.body.filter(
+            const userRecords = recordsResponse.body.list.filter(
                 (r: any) => r.user_id === userId && r.model_id === modelId,
             );
 
@@ -235,7 +235,7 @@ describe("Integration Tests", () => {
 
             // Count unique user-model combinations
             const combinations = new Set<string>();
-            for (const record of recordsResponse.body) {
+            for (const record of recordsResponse.body.list) {
                 combinations.add(`${record.user_id}-${record.model_id}`);
             }
 
