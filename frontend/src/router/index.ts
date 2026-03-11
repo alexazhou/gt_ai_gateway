@@ -1,102 +1,120 @@
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 
+// 静态导入所有页面组件
+import Login from '@/views/Login.vue';
+import AppLayout from '@/components/layout/AppLayout.vue';
+import Dashboard from '@/views/Dashboard.vue';
+import UserIndex from '@/views/User/Index.vue';
+import UserList from '@/views/User/List.vue';
+import UserDetail from '@/views/User/Detail.vue';
+import VendorIndex from '@/views/Vendor/Index.vue';
+import VendorList from '@/views/Vendor/List.vue';
+import VendorDetail from '@/views/Vendor/Detail.vue';
+import ModelIndex from '@/views/Model/Index.vue';
+import ModelList from '@/views/Model/List.vue';
+import ModelDetail from '@/views/Model/Detail.vue';
+import RecordIndex from '@/views/Record/Index.vue';
+import RecordList from '@/views/Record/List.vue';
+import RecordDetail from '@/views/Record/Detail.vue';
+import ApiTestIndex from '@/views/ApiTest/Index.vue';
+
 const routes: RouteRecordRaw[] = [
     {
         path: '/login',
         name: 'Login',
-        component: () => import('@/views/Login.vue'),
+        component: Login,
         meta: { requiresAuth: false },
     },
     {
         path: '/',
         name: 'Layout',
-        component: () => import('@/components/layout/AppLayout.vue'),
+        component: AppLayout,
         meta: { requiresAuth: true },
         redirect: '/dashboard',
         children: [
             {
                 path: 'dashboard',
                 name: 'Dashboard',
-                component: () => import('@/views/Dashboard.vue'),
+                component: Dashboard,
                 meta: { title: '仪表盘' },
             },
             {
                 path: 'user',
                 name: 'User',
-                component: () => import('@/views/User/Index.vue'),
+                component: UserIndex,
                 meta: { title: '用户管理' },
                 children: [
                     {
                         path: '',
                         name: 'UserList',
-                        component: () => import('@/views/User/List.vue'),
+                        component: UserList,
                     },
                     {
                         path: ':id',
                         name: 'UserDetail',
-                        component: () => import('@/views/User/Detail.vue'),
+                        component: UserDetail,
                     },
                 ],
             },
             {
                 path: 'vendor',
                 name: 'Vendor',
-                component: () => import('@/views/Vendor/Index.vue'),
+                component: VendorIndex,
                 meta: { title: '供应商管理' },
                 children: [
                     {
                         path: '',
                         name: 'VendorList',
-                        component: () => import('@/views/Vendor/List.vue'),
+                        component: VendorList,
                     },
                     {
                         path: ':id',
                         name: 'VendorDetail',
-                        component: () => import('@/views/Vendor/Detail.vue'),
+                        component: VendorDetail,
                     },
                 ],
             },
             {
                 path: 'model',
                 name: 'Model',
-                component: () => import('@/views/Model/Index.vue'),
+                component: ModelIndex,
                 meta: { title: '模型管理' },
                 children: [
                     {
                         path: '',
                         name: 'ModelList',
-                        component: () => import('@/views/Model/List.vue'),
+                        component: ModelList,
                     },
                     {
                         path: ':id',
                         name: 'ModelDetail',
-                        component: () => import('@/views/Model/Detail.vue'),
+                        component: ModelDetail,
                     },
                 ],
             },
             {
                 path: 'record',
                 name: 'Record',
-                component: () => import('@/views/Record/Index.vue'),
+                component: RecordIndex,
                 meta: { title: '请求记录' },
                 children: [
                     {
                         path: '',
                         name: 'RecordList',
-                        component: () => import('@/views/Record/List.vue'),
+                        component: RecordList,
                     },
                     {
                         path: ':id',
                         name: 'RecordDetail',
-                        component: () => import('@/views/Record/Detail.vue'),
+                        component: RecordDetail,
                     },
                 ],
             },
             {
                 path: 'api-test',
                 name: 'ApiTest',
-                component: () => import('@/views/ApiTest/Index.vue'),
+                component: ApiTestIndex,
                 meta: { title: 'API 测试' },
             },
         ],
