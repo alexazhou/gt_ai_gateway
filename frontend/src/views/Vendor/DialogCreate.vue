@@ -97,7 +97,7 @@ const formState = reactive({
     token: '',
 });
 
-const urlsForm = reactive<{ type: string; url: string }[]>([{ type: 'openai', url: '' }]);
+const urlsForm = reactive<{ type: string; url: string }[]>([{ type: URL_TYPES[0]!.value, url: '' }]);
 
 const rules = {
     type: [{ required: true, message: '请选择供应商类型' }],

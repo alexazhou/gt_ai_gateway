@@ -122,7 +122,7 @@ function open(vendor: Vendor) {
     });
 
     if (urlsForm.length === 0) {
-        const firstType = URL_TYPES[0].value;
+        const firstType = URL_TYPES[0]!.value;
         urlsForm.push({ type: firstType, url: '' });
     }
 
