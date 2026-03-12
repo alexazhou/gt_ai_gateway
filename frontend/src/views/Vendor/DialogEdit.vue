@@ -30,13 +30,24 @@
                 />
             </a-form-item>
             <a-form-item label="URLs 配置">
-                <div v-for="key in Object.keys(urlsForm)" :key="key" class="url-item">
-                    <a-form-item :label="key">
-                        <a-input
-                            v-model:value="urlsForm[key]"
-                            placeholder="请输入 URL"
-                        />
-                    </a-form-item>
+                <div v-for="(item, index) in urlsForm" :key="index" class="url-item">
+                    <a-space style="width: 100%">
+                        <a-form-item style="flex: 1; margin-bottom: 0">
+                            <a-select v-model:value="item.type" placeholder="请选择 URL 类型">
+                                <a-select-option value="openai">OpenAI</a-select-option>
+                                <a-select-option value="anthropic">Anthropic</a-select-option>
+                            </a-select>
+                        </a-form-item>
+                        <a-form-item style="flex: 2; margin-bottom: 0">
+                            <a-input
+                                v-model:value="item.url"
+                                placeholder="请输入 URL"
+                            />
+                        </a-form-item>
+                        <a-button type="text" danger @click="removeUrl(index)">
+                            <DeleteOutlined />
+                        </a-button>
+                    </a-space>
                 </div>
                 <a-button type="dashed" block @click="addUrl">
                     <PlusOutlined /> 添加 URL
@@ -49,7 +60,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
 import { message, type FormInstance } from 'ant-design-vue';
-import { PlusOutlined } from '@ant-design/icons-vue';
+import { PlusOutlined, DeleteOutlined } from '@ant-design/icons-vue';
 import { updateVendor } from '@/api/vendor';
 import type { Vendor } from '@/types/vendor';
 
@@ -69,7 +80,7 @@ const formState = reactive({
     token: '',
 });
 
-const urlsForm = reactive<Record<string, string>>({});
+const urlsForm = reactive<{ type: string; url: string }[]>([{ type: 'openai', url: '' }]);
 
 const rules = {
     type: [{ required: true, message: '请选择供应商类型' }],
@@ -83,19 +94,27 @@ function open(vendor: Vendor) {
     formState.name = vendor.name;
     formState.token = vendor.token;
 
+    urlsForm.splice(0, urlsForm.length);
     Object.keys(vendor.urls).forEach(key => {
         const url = vendor.urls[key];
         if (url !== undefined) {
-            urlsForm[key] = url;
+            urlsForm.push({ type: key, url });
         }
     });
+
+    if (urlsForm.length === 0) {
+        urlsForm.push({ type: 'openai', url: '' });
+    }
 
     visible.value = true;
 }
 
 function addUrl() {
-    const key = `custom_${Date.now()}`;
-    urlsForm[key] = '';
+    urlsForm.push({ type: 'openai', url: '' });
+}
+
+function removeUrl(index: number) {
+    urlsForm.splice(index, 1);
 }
 
 async function handleOk() {
@@ -106,8 +125,14 @@ async function handleOk() {
             type: formState.type,
             name: formState.name,
             token: formState.token,
-            urls: { ...urlsForm },
+            urls: {},
         };
+
+        urlsForm.forEach(item => {
+            if (item.url) {
+                updateData.urls[item.type] = item.url;
+            }
+        });
 
         loading.value = true;
         const vendor = await updateVendor(currentId.value, updateData);
@@ -126,7 +151,7 @@ function handleCancel() {
     formState.type = 'openai';
     formState.name = '';
     formState.token = '';
-    Object.keys(urlsForm).forEach(key => delete urlsForm[key]);
+    urlsForm.splice(0, urlsForm.length, { type: 'openai', url: '' });
 }
 
 defineExpose({ open });
