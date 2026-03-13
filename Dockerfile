@@ -31,8 +31,11 @@ WORKDIR /app
 # 复制依赖文件和入口脚本
 COPY package*.json docker-entrypoint.sh ./
 
-# 赋予执行权限并安装生产依赖
-RUN chmod +x docker-entrypoint.sh && npm ci --production
+# 安装生产依赖（包含 native 模块编译环境）
+RUN apk add --no-cache python3 make g++ && \
+    chmod +x docker-entrypoint.sh && \
+    npm ci --production && \
+    apk del python3 make g++
 
 # 复制构建产物和源代码
 COPY --from=builder /app/src ./src
