@@ -82,6 +82,7 @@ export const useApiTestStore = defineStore('apiTest', () => {
                 onError: (err: string) => {
                     loading.value = false;
                     error.value = err;
+                    responseText.value = `Error: ${err}`;
                     historyItem.status = 'error';
                     historyItem.response = err;
                     addToHistory(historyItem);

@@ -41,8 +41,11 @@ export async function chatCompletions(
             });
 
             if (!response.ok) {
-                const error = await response.json().catch(() => ({ error: '请求失败' }));
-                throw new Error(error.error || `HTTP ${response.status}`);
+                const errorData = await response.json().catch(() => ({ error: '请求失败' }));
+                const errorMsg = typeof errorData.error === 'object' 
+                    ? (errorData.error.message || JSON.stringify(errorData.error)) 
+                    : (errorData.error || errorData.message || `HTTP ${response.status}`);
+                throw new Error(errorMsg);
             }
 
             const result = await response.json();
@@ -66,9 +69,13 @@ export async function chatCompletions(
                 'Authorization': token ? `Bearer ${token}` : '',
             },
             body: JSON.stringify(requestBody),
-            onopen(response) {
+            async onopen(response) {
                 if (!response.ok) {
-                    return Promise.reject(new Error(`HTTP ${response.status}`));
+                    const errorData = await response.json().catch(() => ({ error: '请求失败' }));
+                    const errorMsg = typeof errorData.error === 'object' 
+                        ? (errorData.error.message || JSON.stringify(errorData.error)) 
+                        : (errorData.error || errorData.message || `HTTP ${response.status}`);
+                    throw new Error(errorMsg);
                 }
                 return Promise.resolve();
             },
@@ -93,11 +100,13 @@ export async function chatCompletions(
                 callbacks.onComplete?.();
             },
             onerror(err) {
+                // 如果 onopen 抛出了错误，这里会捕获到
                 callbacks.onError?.(err.message || '流式请求失败');
                 throw err;
             },
         });
     } catch (error: any) {
+        // 这里也会捕获到错误
         callbacks.onError?.(error.message || '请求失败');
     }
 }
@@ -145,8 +154,11 @@ export async function anthropicMessages(
             });
 
             if (!response.ok) {
-                const error = await response.json().catch(() => ({ error: '请求失败' }));
-                throw new Error(error.error || `HTTP ${response.status}`);
+                const errorData = await response.json().catch(() => ({ error: '请求失败' }));
+                const errorMsg = typeof errorData.error === 'object' 
+                    ? (errorData.error.message || JSON.stringify(errorData.error)) 
+                    : (errorData.error || errorData.message || `HTTP ${response.status}`);
+                throw new Error(errorMsg);
             }
 
             const result = await response.json();
@@ -170,9 +182,13 @@ export async function anthropicMessages(
                 'Authorization': token ? `Bearer ${token}` : '',
             },
             body: JSON.stringify(requestBody),
-            onopen(response) {
+            async onopen(response) {
                 if (!response.ok) {
-                    return Promise.reject(new Error(`HTTP ${response.status}`));
+                    const errorData = await response.json().catch(() => ({ error: '请求失败' }));
+                    const errorMsg = typeof errorData.error === 'object' 
+                        ? (errorData.error.message || JSON.stringify(errorData.error)) 
+                        : (errorData.error || errorData.message || `HTTP ${response.status}`);
+                    throw new Error(errorMsg);
                 }
                 return Promise.resolve();
             },

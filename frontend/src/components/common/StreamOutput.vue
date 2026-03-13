@@ -22,7 +22,11 @@
             </a-space>
         </div>
         <div class="stream-content">
-            <div v-if="content" class="stream-text">{{ content }}</div>
+            <div v-if="error" class="stream-error">
+                <div class="error-title">请求发生错误</div>
+                <div class="error-detail">{{ error }}</div>
+            </div>
+            <div v-else-if="content" class="stream-text">{{ content }}</div>
             <div v-else-if="loading" class="stream-placeholder">
                 <a-spin size="small" />
                 <span class="placeholder-text">等待响应...</span>
@@ -40,6 +44,7 @@ import { computed } from 'vue';
 interface Props {
     content: string;
     loading: boolean;
+    error?: string | null;
 }
 
 const props = defineProps<Props>();
@@ -50,12 +55,14 @@ const emit = defineEmits<{
 }>();
 
 const badgeStatus = computed(() => {
+    if (props.error) return 'error' as const;
     if (props.loading) return 'processing' as const;
     if (props.content) return 'success' as const;
     return 'default' as const;
 });
 
 const statusText = computed(() => {
+    if (props.error) return '失败';
     if (props.loading) return '生成中';
     if (props.content) return '已完成';
     return '等待中';
@@ -107,6 +114,26 @@ function handleClear() {
     line-height: 1.6;
     font-size: 14px;
     color: #24292e;
+}
+
+.stream-error {
+    background-color: #fff1f0;
+    border: 1px solid #ffa39e;
+    border-radius: 4px;
+    padding: 12px;
+    color: #cf1322;
+}
+
+.error-title {
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+
+.error-detail {
+    font-family: monospace;
+    font-size: 13px;
+    white-space: pre-wrap;
+    word-break: break-all;
 }
 
 .stream-placeholder {

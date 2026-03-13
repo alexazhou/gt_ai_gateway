@@ -159,6 +159,7 @@
             <a-col :span="12" class="response-panel">
                 <StreamOutput
                     :content="apiTestStore.responseText"
+                    :error="apiTestStore.error"
                     :loading="apiTestStore.loading"
                     @stop="handleStop"
                     @clear="handleClear"
