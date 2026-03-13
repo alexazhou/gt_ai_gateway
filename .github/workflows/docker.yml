@@ -35,15 +35,11 @@ jobs:
                   username: ${{ secrets.DOCKERHUB_USERNAME }}
                   password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-            - name: Set lower case owner name
-              run: |
-                echo "DOCKERHUB_REPO=${{ secrets.DOCKERHUB_USERNAME }}/serverless_ai_gateway" | tr '[:upper:]' '[:lower:]' >> $GITHUB_ENV
-
             - name: Extract metadata for Docker
               id: meta
               uses: docker/metadata-action@v5
               with:
-                  images: ${{ env.DOCKERHUB_REPO }}
+                  images: alexazhou/serverless_ai_gateway
                   tags: |
                       type=ref,event=branch
                       type=ref,event=pr
