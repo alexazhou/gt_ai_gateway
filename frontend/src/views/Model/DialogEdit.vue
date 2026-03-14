@@ -57,7 +57,7 @@ const currentId = ref<number>(0);
 
 const formState = reactive({
     name: '',
-    vendor_id: 0,
+    vendor_id: undefined as number | undefined,
     enable: true,
 });
 
@@ -107,7 +107,7 @@ async function handleOk() {
 function handleCancel() {
     visible.value = false;
     formState.name = '';
-    formState.vendor_id = 0;
+    formState.vendor_id = undefined;
     formState.enable = true;
 }
 
