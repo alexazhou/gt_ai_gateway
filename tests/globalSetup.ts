@@ -82,12 +82,13 @@ export async function setup(): Promise<void> {
 
     if (config.useMockServer) {
         console.log("Starting mock AI server...");
+        const mockServerPort = new URL(config.UPSTREAM_CONFIG.mock.url).port || "9999";
         // Initialize mock server logger
         mockServer.initMockLogger(
             config.LOG_CONFIG.dir,
             config.LOG_CONFIG.mockServerLogFile,
         );
-        mockServerProcess = await mockServer.startMockServer();
+        mockServerProcess = await mockServer.startMockServer(parseInt(mockServerPort, 10));
         console.log("[GLOBAL_SETUP] Mock AI server started");
     }
 

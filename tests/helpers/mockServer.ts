@@ -196,9 +196,14 @@ function handleOpenAIChat(req: IncomingMessage, res: ServerResponse): void {
         try {
             const data = body ? JSON.parse(body) : {};
             const isStream = data.stream === true;
+            const hasTools = Array.isArray(data.tools) && data.tools.length > 0;
 
             if (isStream) {
-                handleOpenAIStreamResponse(res, data);
+                if (hasTools) {
+                    handleOpenAIToolCallStreamResponse(res, data);
+                } else {
+                    handleOpenAIStreamResponse(res, data);
+                }
             } else {
                 handleOpenAINonStreamResponse(res, data);
             }
@@ -310,6 +315,131 @@ function handleOpenAIStreamResponse(res: ServerResponse, data: any): void {
     }, 100);
 }
 
+function handleOpenAIToolCallStreamResponse(res: ServerResponse, data: any): void {
+    res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+    });
+
+    const toolChunks = [
+        {
+            id: `chatcmpl-${Date.now()}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: data.model || "gpt-4o-mini",
+            choices: [
+                {
+                    index: 0,
+                    delta: { role: "assistant" },
+                    finish_reason: null,
+                },
+            ],
+        },
+        {
+            id: `chatcmpl-${Date.now()}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: data.model || "gpt-4o-mini",
+            choices: [
+                {
+                    index: 0,
+                    delta: {
+                        tool_calls: [
+                            {
+                                index: 0,
+                                id: "call_weather_001",
+                                type: "function",
+                                function: {
+                                    name: "get_weather",
+                                    arguments: "",
+                                },
+                            },
+                        ],
+                    },
+                    finish_reason: null,
+                },
+            ],
+        },
+        {
+            id: `chatcmpl-${Date.now()}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: data.model || "gpt-4o-mini",
+            choices: [
+                {
+                    index: 0,
+                    delta: {
+                        tool_calls: [
+                            {
+                                index: 0,
+                                function: {
+                                    arguments: "{\"city\":\"San",
+                                },
+                            },
+                        ],
+                    },
+                    finish_reason: null,
+                },
+            ],
+        },
+        {
+            id: `chatcmpl-${Date.now()}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: data.model || "gpt-4o-mini",
+            choices: [
+                {
+                    index: 0,
+                    delta: {
+                        tool_calls: [
+                            {
+                                index: 0,
+                                function: {
+                                    arguments: " Francisco\",\"unit\":\"celsius\"}",
+                                },
+                            },
+                        ],
+                    },
+                    finish_reason: null,
+                },
+            ],
+        },
+    ];
+
+    let i = 0;
+    const interval = setInterval(() => {
+        if (i >= toolChunks.length) {
+            const finalChunk = {
+                id: `chatcmpl-${Date.now()}`,
+                object: "chat.completion.chunk",
+                created: Math.floor(Date.now() / 1000),
+                model: data.model || "gpt-4o-mini",
+                choices: [
+                    {
+                        index: 0,
+                        delta: {},
+                        finish_reason: "tool_calls",
+                    },
+                ],
+                usage: {
+                    prompt_tokens: 18,
+                    completion_tokens: 9,
+                    total_tokens: 27,
+                },
+            };
+            res.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
+            res.write("data: [DONE]\n\n");
+            res.end();
+            clearInterval(interval);
+            return;
+        }
+
+        res.write(`data: ${JSON.stringify(toolChunks[i])}\n\n`);
+        i++;
+    }, 100);
+}
+
 /**
  * Handle Anthropic messages
  */
@@ -327,9 +457,14 @@ function handleAnthropicMessages(
         try {
             const data = body ? JSON.parse(body) : {};
             const isStream = data.stream === true;
+            const hasTools = Array.isArray(data.tools) && data.tools.length > 0;
 
             if (isStream) {
-                handleAnthropicStreamResponse(res, data);
+                if (hasTools) {
+                    handleAnthropicToolUseStreamResponse(res, data);
+                } else {
+                    handleAnthropicStreamResponse(res, data);
+                }
             } else {
                 handleAnthropicNonStreamResponse(res, data);
             }
@@ -431,6 +566,107 @@ function handleAnthropicStreamResponse(res: ServerResponse, data: any): void {
         res.write(
             `event: content_block_delta\ndata: ${JSON.stringify(chunkEvent)}\n\n`,
         );
+        i++;
+    }, 100);
+}
+
+function handleAnthropicToolUseStreamResponse(
+    res: ServerResponse,
+    data: any,
+): void {
+    res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+    });
+
+    const events = [
+        {
+            event: "message_start",
+            data: {
+                type: "message_start",
+                message: {
+                    id: `msg_${Date.now()}`,
+                    type: "message",
+                    role: "assistant",
+                    content: [],
+                    model: data.model || "claude-3-5-sonnet-20241022",
+                    stop_reason: null,
+                    stop_sequence: null,
+                    usage: { input_tokens: 14, output_tokens: 0 },
+                },
+            },
+        },
+        {
+            event: "content_block_start",
+            data: {
+                type: "content_block_start",
+                index: 0,
+                content_block: {
+                    type: "tool_use",
+                    id: "toolu_001",
+                    name: "get_weather",
+                    input: {},
+                },
+            },
+        },
+        {
+            event: "content_block_delta",
+            data: {
+                type: "content_block_delta",
+                index: 0,
+                delta: {
+                    type: "input_json_delta",
+                    partial_json: "{\"city\":\"San",
+                },
+            },
+        },
+        {
+            event: "content_block_delta",
+            data: {
+                type: "content_block_delta",
+                index: 0,
+                delta: {
+                    type: "input_json_delta",
+                    partial_json: " Francisco\",\"unit\":\"celsius\"}",
+                },
+            },
+        },
+        {
+            event: "content_block_stop",
+            data: {
+                type: "content_block_stop",
+                index: 0,
+            },
+        },
+        {
+            event: "message_delta",
+            data: {
+                type: "message_delta",
+                delta: {
+                    stop_reason: "tool_use",
+                    stop_sequence: null,
+                },
+                usage: { output_tokens: 11 },
+            },
+        },
+        {
+            event: "message_stop",
+            data: {
+                type: "message_stop",
+            },
+        },
+    ];
+
+    let i = 0;
+    const interval = setInterval(() => {
+        if (i >= events.length) {
+            res.end();
+            clearInterval(interval);
+            return;
+        }
+
+        res.write(`event: ${events[i].event}\ndata: ${JSON.stringify(events[i].data)}\n\n`);
         i++;
     }, 100);
 }

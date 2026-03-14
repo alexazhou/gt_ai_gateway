@@ -6,6 +6,7 @@ import modelFixtures from "../../fixtures/modelFixtures";
 import dbHelper from "../../helpers/dbHelper"
 import { setupAdminUser } from "../../globalSetup";
 import config from "../../config";
+import streamLogHelper from "../../helpers/streamLogHelper";
 
 /**
  * AI Chat Endpoint Tests
@@ -182,6 +183,74 @@ describe("AI Chat API", () => {
             expect(parsedResponseData.choices[0].message).toHaveProperty("content");
             expect(typeof parsedResponseData.choices[0].message.content).toBe("string");
             expect(parsedResponseData.choices[0].message.content.length).toBeGreaterThan(0);
+        }, 30000);
+
+        it("should record real OpenAI tool call stream log and aggregate tool_calls", async () => {
+            const chatRequest = {
+                ...mockHelper.generateOpenAIChatRequest({
+                    model: openaiModelName,
+                    stream: true,
+                    messages: [{ role: "user", content: "What is the weather in San Francisco?" }],
+                }),
+                tools: [
+                    {
+                        type: "function",
+                        function: {
+                            name: "get_weather",
+                            description: "Get weather by city",
+                            parameters: {
+                                type: "object",
+                                properties: {
+                                    city: { type: "string" },
+                                    unit: { type: "string" },
+                                },
+                                required: ["city"],
+                            },
+                        },
+                    },
+                ],
+            };
+
+            const response = await requestHelper.post(
+                "/llm/v1/chat/completions",
+                chatRequest,
+                testUserToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(typeof response.body).toBe("string");
+            expect(response.body).toContain("\"tool_calls\"");
+            expect(response.body).toContain("\"finish_reason\":\"tool_calls\"");
+
+            const recordsResponse = await requestHelper.get(
+                "/record/latest.json?limit=1",
+                adminToken,
+            );
+            expect(recordsResponse.status).toBe(200);
+            const latestRecord = recordsResponse.body[0];
+            expect(latestRecord.user_id).toBe(testUserId);
+            expect(latestRecord.model_id).toBe(openaiModelId);
+            expect(latestRecord.status).toBe("success");
+
+            const parsedResponseData = JSON.parse(latestRecord.response_data);
+            expect(parsedResponseData.choices[0].finish_reason).toBe("tool_calls");
+            expect(parsedResponseData.choices[0].message.tool_calls).toHaveLength(1);
+            expect(parsedResponseData.choices[0].message.tool_calls[0].id).toBe("call_weather_001");
+            expect(parsedResponseData.choices[0].message.tool_calls[0].function.name).toBe("get_weather");
+            expect(parsedResponseData.choices[0].message.tool_calls[0].function.arguments).toBe(
+                "{\"city\":\"San Francisco\",\"unit\":\"celsius\"}",
+            );
+
+            const { targetPath, content: streamLog } =
+                await streamLogHelper.moveStreamLogToResource(
+                    latestRecord.id,
+                    "openai-tool-call-stream.log",
+                );
+
+            expect(targetPath.endsWith("tests/resource/openai-tool-call-stream.log")).toBe(true);
+            expect(streamLog).toContain("\"tool_calls\"");
+            expect(streamLog).toContain("\"get_weather\"");
+            expect(streamLog).toContain("\"finish_reason\":\"tool_calls\"");
         }, 30000);
 
         it("should handle multiple messages in chat request", async () => {

@@ -13,6 +13,19 @@ interface SSEMessage {
         delta?: {
             role?: string;
             content?: string;
+            function_call?: {
+                name?: string;
+                arguments?: string;
+            };
+            tool_calls?: Array<{
+                index?: number;
+                id?: string;
+                type?: string;
+                function?: {
+                    name?: string;
+                    arguments?: string;
+                };
+            }>;
         };
         finish_reason?: string | null;
     }>;
@@ -42,15 +55,24 @@ interface AnthropicSSEMessage {
             cache_read_input_tokens?: number;
         };
     };
+    content_block?: {
+        type?: "thinking" | "text" | "tool_use";
+        thinking?: string;
+        text?: string;
+        id?: string;
+        name?: string;
+        input?: Record<string, unknown>;
+    };
     usage?: {
         input_tokens?: number;
         output_tokens?: number;
     };
     delta?: {
-        type?: 'text_delta' | 'thinking_delta' | 'signature_delta';
+        type?: "text_delta" | "thinking_delta" | "signature_delta" | "input_json_delta";
         text?: string;
         thinking?: string;
         signature?: string;
+        partial_json?: string;
         stop_reason?: string | null;
         stop_sequence?: string | null;
     };
@@ -69,6 +91,24 @@ interface AccumulatedResponse {
             content: string;
             thinking?: string;
             signature?: string;
+            function_call?: {
+                name?: string;
+                arguments: string;
+            };
+            tool_calls?: Array<{
+                id?: string;
+                type?: string;
+                function: {
+                    name?: string;
+                    arguments: string;
+                };
+            }>;
+            tool_use?: Array<{
+                id?: string;
+                name?: string;
+                input?: Record<string, unknown>;
+                input_json?: string;
+            }>;
         };
         finish_reason: string | null;
     }>;
@@ -134,6 +174,39 @@ class SSEAccumulator {
                         choice.delta.content;
                 }
 
+                if (choice.delta?.function_call) {
+                    const existingFunctionCall = this.response.choices[index].message.function_call ?? {
+                        arguments: "",
+                    };
+                    existingFunctionCall.name = choice.delta.function_call.name ?? existingFunctionCall.name;
+                    existingFunctionCall.arguments += choice.delta.function_call.arguments ?? "";
+                    this.response.choices[index].message.function_call = existingFunctionCall;
+                }
+
+                if (choice.delta?.tool_calls) {
+                    const toolCalls = this.response.choices[index].message.tool_calls ?? [];
+
+                    for (const toolCallDelta of choice.delta.tool_calls) {
+                        const toolIndex = toolCallDelta.index ?? 0;
+
+                        while (toolCalls.length <= toolIndex) {
+                            toolCalls.push({
+                                function: {
+                                    arguments: "",
+                                },
+                            });
+                        }
+
+                        const toolCall = toolCalls[toolIndex];
+                        toolCall.id = toolCallDelta.id ?? toolCall.id;
+                        toolCall.type = toolCallDelta.type ?? toolCall.type;
+                        toolCall.function.name = toolCallDelta.function?.name ?? toolCall.function.name;
+                        toolCall.function.arguments += toolCallDelta.function?.arguments ?? "";
+                    }
+
+                    this.response.choices[index].message.tool_calls = toolCalls;
+                }
+
                 // 保存 role
                 if (choice.delta?.role) {
                     this.response.choices[index].message.role =
@@ -186,6 +259,26 @@ class SSEAccumulator {
             return;
         }
 
+        if (eventType === "content_block_start" && msg.content_block?.type === "tool_use") {
+            const toolUseList = this.response.choices[0].message.tool_use ?? [];
+            const toolIndex = msg.index ?? 0;
+
+            while (toolUseList.length <= toolIndex) {
+                toolUseList.push({ input_json: "" });
+            }
+
+            toolUseList[toolIndex] = {
+                ...toolUseList[toolIndex],
+                id: msg.content_block.id ?? toolUseList[toolIndex].id,
+                name: msg.content_block.name ?? toolUseList[toolIndex].name,
+                input: msg.content_block.input ?? toolUseList[toolIndex].input,
+                input_json: toolUseList[toolIndex].input_json ?? "",
+            };
+
+            this.response.choices[0].message.tool_use = toolUseList;
+            return;
+        }
+
         // content_block_delta 事件：累积内容增量
         if (eventType === 'content_block_delta' && msg.delta) {
             const deltaType = msg.delta.type;
@@ -203,6 +296,16 @@ class SSEAccumulator {
             } else if (deltaType === 'text_delta' && msg.delta.text) {
                 // 累积 text 内容到 choices[0].message.content
                 this.response.choices[0].message.content += msg.delta.text;
+            } else if (deltaType === "input_json_delta" && msg.delta.partial_json !== undefined) {
+                const toolUseList = this.response.choices[0].message.tool_use ?? [];
+                const toolIndex = msg.index ?? 0;
+
+                while (toolUseList.length <= toolIndex) {
+                    toolUseList.push({ input_json: "" });
+                }
+
+                toolUseList[toolIndex].input_json = (toolUseList[toolIndex].input_json ?? "") + msg.delta.partial_json;
+                this.response.choices[0].message.tool_use = toolUseList;
             }
             return;
         }
@@ -217,10 +320,12 @@ class SSEAccumulator {
             // 更新最终的 usage（output_tokens 在这里最终确定）
             if (msg.message?.usage || msg.usage) {
                 const usage = msg.usage || msg.message?.usage;
+                const promptTokens = usage.input_tokens ?? this.response.usage?.prompt_tokens ?? 0;
+                const completionTokens = usage.output_tokens ?? this.response.usage?.completion_tokens ?? 0;
                 this.response.usage = {
-                    prompt_tokens: usage.input_tokens || this.response.usage?.prompt_tokens,
-                    completion_tokens: usage.output_tokens,
-                    total_tokens: (usage.input_tokens || 0) + (usage.output_tokens || 0),
+                    prompt_tokens: promptTokens,
+                    completion_tokens: completionTokens,
+                    total_tokens: promptTokens + completionTokens,
                 };
             }
             return;
@@ -232,6 +337,19 @@ class SSEAccumulator {
      * @returns 完整的响应对象
      */
     getResponse(): AccumulatedResponse {
+        const toolUseList = this.response.choices[0]?.message.tool_use;
+        if (toolUseList) {
+            for (const toolUse of toolUseList) {
+                if (!toolUse) continue;
+                if (toolUse.input_json) {
+                    try {
+                        toolUse.input = JSON.parse(toolUse.input_json);
+                    } catch {
+                        // Keep raw input_json when partial JSON is invalid or incomplete.
+                    }
+                }
+            }
+        }
         return this.response;
     }
 

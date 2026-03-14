@@ -6,6 +6,7 @@ import modelFixtures from "../../fixtures/modelFixtures";
 import dbHelper from "../../helpers/dbHelper"
 import { setupAdminUser } from "../../globalSetup";
 import config from "../../config";
+import streamLogHelper from "../../helpers/streamLogHelper";
 
 /**
  * AI Messages Endpoint Tests (Anthropic)
@@ -187,6 +188,73 @@ describe("AI Messages API (Anthropic)", () => {
             expect(parsedResponseData.choices[0].message).toHaveProperty("content");
             expect(typeof parsedResponseData.choices[0].message.content).toBe("string");
             expect(parsedResponseData.choices[0].message.content.length).toBeGreaterThan(0);
+        }, 30000);
+
+        it("should record real Anthropic tool use stream log and aggregate tool_use", async () => {
+            const messageRequest = {
+                ...mockHelper.generateAnthropicMessageRequest({
+                    model: anthropicModelName,
+                    stream: true,
+                    messages: [{ role: "user", content: "Check weather in San Francisco" }],
+                }),
+                tools: [
+                    {
+                        name: "get_weather",
+                        description: "Get weather by city",
+                        input_schema: {
+                            type: "object",
+                            properties: {
+                                city: { type: "string" },
+                                unit: { type: "string" },
+                            },
+                            required: ["city"],
+                        },
+                    },
+                ],
+            };
+
+            const response = await requestHelper.postWithAnthropicStyleApiKey(
+                "/llm/v1/messages",
+                messageRequest,
+                testUserToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(typeof response.body).toBe("string");
+            expect(response.body).toContain("content_block_start");
+            expect(response.body).toContain("\"tool_use\"");
+            expect(response.body).toContain("\"input_json_delta\"");
+
+            const recordsResponse = await requestHelper.get(
+                "/record/latest.json?limit=1",
+                adminToken,
+            );
+            expect(recordsResponse.status).toBe(200);
+            const latestRecord = recordsResponse.body[0];
+            expect(latestRecord.user_id).toBe(testUserId);
+            expect(latestRecord.model_id).toBe(anthropicModelId);
+            expect(latestRecord.status).toBe("success");
+
+            const parsedResponseData = JSON.parse(latestRecord.response_data);
+            expect(parsedResponseData.choices[0].finish_reason).toBe("tool_use");
+            expect(parsedResponseData.choices[0].message.tool_use).toHaveLength(1);
+            expect(parsedResponseData.choices[0].message.tool_use[0].id).toBe("toolu_001");
+            expect(parsedResponseData.choices[0].message.tool_use[0].name).toBe("get_weather");
+            expect(parsedResponseData.choices[0].message.tool_use[0].input).toEqual({
+                city: "San Francisco",
+                unit: "celsius",
+            });
+
+            const { targetPath, content: streamLog } =
+                await streamLogHelper.moveStreamLogToResource(
+                    latestRecord.id,
+                    "anthropic-tool-use-stream.log",
+                );
+
+            expect(targetPath.endsWith("tests/resource/anthropic-tool-use-stream.log")).toBe(true);
+            expect(streamLog).toContain("\"tool_use\"");
+            expect(streamLog).toContain("\"input_json_delta\"");
+            expect(streamLog).toContain("\"stop_reason\":\"tool_use\"");
         }, 30000);
 
         it("should handle multiple messages in request", async () => {
