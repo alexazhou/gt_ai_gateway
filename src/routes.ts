@@ -69,6 +69,7 @@ app.get("/status.json", authMiddleware.requireAdmin, systemController.status);
 app.get("/vendor/list.json", authMiddleware.requireAdmin, vendorController.listVendors);
 app.post("/vendor/batch.json", authMiddleware.requireAdmin, vendorController.getVendorsByIds);
 app.get("/vendor/:id", authMiddleware.requireAdmin, vendorController.getVendor);
+app.post("/vendor/:id/test.json", authMiddleware.requireAdmin, vendorController.testVendor);
 app.post("/vendor/create.json", authMiddleware.requireAdmin, vendorController.createVendor);
 app.put("/vendor/:id", authMiddleware.requireAdmin, vendorController.updateVendor);
 app.delete("/vendor/:id", authMiddleware.requireAdmin, vendorController.deleteVendor);

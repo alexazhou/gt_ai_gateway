@@ -3,6 +3,7 @@ import { SgVendor } from "../model/sgVendor";
 import { SgModel } from "../model/sgModel";
 import vendorService from "../service/vendorService";
 import customError from "../util/customError";
+import { ApiFormat } from "../constants";
 
 
 /**
@@ -135,6 +136,79 @@ async function deleteVendor(c: Context) {
     return c.json({ success: true });
 }
 
+async function testVendor(c: Context) {
+    const id = c.req.param("id");
+    const vendorId = parseInt(id, 10);
+
+    if (isNaN(vendorId)) {
+        throw new customError.AppError("Invalid ID format");
+    }
+
+    const vendor = await SgVendor.query().find(vendorId);
+    if (!vendor) {
+        throw new customError.NotFoundError("Vendor not found");
+    }
+
+    const { format = ApiFormat.OPENAI } = await c.req.json().catch(() => ({}));
+    
+    let url = vendor.getUrlByFormat(format);
+    const headers = new Headers();
+    let body = "";
+
+    if (format === ApiFormat.ANTHROPIC) {
+        if (!url.endsWith("/v1/messages")) {
+            url = url.replace(/\/$/, "") + "/v1/messages";
+        }
+        headers.set("x-api-key", vendor.token);
+        headers.set("anthropic-version", "2023-06-01");
+        headers.set("Content-Type", "application/json");
+        body = JSON.stringify({
+            model: "any-model", // Upstream might validate this, but for "ping" it might just return 401/404
+            messages: [{ role: "user", content: "ping" }],
+            max_tokens: 1,
+        });
+    } else {
+        // OpenAI format
+        headers.set("Authorization", vendor.token.startsWith("Bearer ") ? vendor.token : `Bearer ${vendor.token}`);
+        headers.set("Content-Type", "application/json");
+        body = JSON.stringify({
+            model: "any-model",
+            messages: [{ role: "user", content: "ping" }],
+            max_tokens: 1,
+        });
+    }
+
+    try {
+        console.log(`[testVendor] Testing vendor ${vendor.name} (${vendor.id}) at ${url}`);
+        const startTime = Date.now();
+        const response = await fetch(url, {
+            method: "POST",
+            headers,
+            body,
+        });
+        const duration = Date.now() - startTime;
+        const responseText = await response.text();
+        let responseData;
+        try {
+            responseData = JSON.parse(responseText);
+        } catch {
+            responseData = responseText;
+        }
+
+        return c.json({
+            success: response.ok,
+            status: response.status,
+            duration,
+            response: responseData,
+        });
+    } catch (error: any) {
+        return c.json({
+            success: false,
+            error: error.message || String(error),
+        }, 500);
+    }
+}
+
 export default {
     listVendors,
     getVendor,
@@ -142,4 +216,5 @@ export default {
     createVendor,
     updateVendor,
     deleteVendor,
+    testVendor,
 };
