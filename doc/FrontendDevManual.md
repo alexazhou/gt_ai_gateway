@@ -78,7 +78,7 @@ npm run frontend:dev
 
 ### 前后端联合开发
 
-1. **前端开发**：需先启动后端（`npm run backend:dev:local`），再启动前端（`npm run frontend:dev`）。
+1. **前端开发**：需先启动后端（`npm run backend:dev:local`，后端代码变更会自动重启），再启动前端（`npm run frontend:dev`）。
 2. **后端测试前端产物**：如果开发后端时需要用到前端产物（如测试后端集成的静态资源服务），需要先运行前端构建：`npm run frontend:build`。
 
 ### 开发命令

@@ -36,7 +36,7 @@ cd frontend && npm install
 
 ### 4. 启动服务
 ```bash
-# 启动后端 (Node 模式)
+# 启动后端 (Node 模式，自动监听代码变更并重启)
 npm run backend:dev:local
 
 # 启动前端 (在新终端)

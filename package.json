@@ -7,7 +7,7 @@
     "frontend:dev": "cd frontend && npm run dev",
     "frontend:dev:dev": "cd frontend && npm run dev -- --mode development",
     "backend:dev": "wrangler dev",
-    "backend:dev:local": "npx tsx src/local.ts",
+    "backend:dev:local": "npx tsx watch src/local.ts",
     "backend:start": "npx tsx src/local.ts",
     "backend:start:integrated": "npm run frontend:build && npx tsx src/local.ts",
     "backend:test": "TEST_MODE=node vitest --run --config vitest.config.ts",

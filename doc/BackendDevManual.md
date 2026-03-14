@@ -88,7 +88,7 @@ RECORD_LOG_ENABLED=false
 npm run backend:dev:local
 ```
 
-Node 模式使用本地 SQLite 数据库，运行在 `http://localhost:8787`
+Node 模式使用本地 SQLite 数据库，运行在 `http://localhost:8787`，并会在后端代码变更后自动重启。
 
 #### 前后端联合开发建议
 
@@ -108,7 +108,7 @@ Wrangler 会启动本地开发服务器，模拟 Cloudflare Workers 环境
 | 命令 | 说明 |
 |------|------|
 | `npm run backend:dev` | Cloudflare Workers 开发模式 |
-| `npm run backend:dev:local` | Node 本地开发模式 |
+| `npm run backend:dev:local` | Node 本地开发模式（watch 自动重启） |
 | `npm run backend:start` | Node 生产模式 |
 | `npm run backend:deploy` | 部署到 Cloudflare Workers |
 | `npm run backend:test` | 运行后端测试 |

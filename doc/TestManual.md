@@ -43,7 +43,7 @@ ROOT_TOKEN=your-admin-token-here
 
 **配置说明：**
 
-1. **Node 模式启动**：本地启动服务时（`npm run backend:dev:local`），会自动加载 `.dev.vars` 文件中的 `ROOT_TOKEN`
+1. **Node 模式启动**：本地启动服务时（`npm run backend:dev:local`），会自动加载 `.dev.vars` 文件中的 `ROOT_TOKEN`，并监听后端代码变更后自动重启
 
 2. **启动日志验证**：服务启动后会在控制台输出 `ROOT_TOKEN` 的值，便于确认配置是否正确加载
 
@@ -206,5 +206,4 @@ fileParallelism: false,  // 顺序执行，避免冲突
 每次运行测试时覆盖旧日志文件。
 
 ---
-
 
