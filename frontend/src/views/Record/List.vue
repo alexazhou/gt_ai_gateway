@@ -63,43 +63,23 @@
             </div>
         </div>
 
-        <a-table
-            :columns="columns"
-            :data-source="recordStore.records"
+        <RecordTable
+            :records="recordStore.records"
             :loading="recordStore.loading"
             :pagination="pagination"
             @change="handleTableChange"
-            :row-key="(record: Record) => record.id"
-        >
-            <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'status'">
-                    <a-tag :color="getStatusColor(record.status)">
-                        {{ getStatusText(record.status) }}
-                    </a-tag>
-                </template>
-                <template v-if="column.key === 'created_at'">
-                    {{ formatDate(record.created_at) }}
-                </template>
-                <template v-if="column.key === 'action'">
-                    <a-button type="link" @click="handleView(record)">
-                        查看
-                    </a-button>
-                </template>
-            </template>
-        </a-table>
+        />
     </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, reactive } from 'vue';
-import { useRouter } from 'vue-router';
 import { useRecordStore } from '@/stores/record';
 import { useAutoRefresh } from '@/composables/useAutoRefresh';
-import { formatDate } from '@/utils/format';
-import type { Record, RecordQuery, RequestStatus } from '@/types/record';
+import type { RecordQuery, RequestStatus } from '@/types/record';
 import type { Dayjs } from 'dayjs';
+import RecordTable from '@/components/common/RecordTable.vue';
 
-const router = useRouter();
 const recordStore = useRecordStore();
 
 const autoRefreshEnabled = ref(false);
@@ -121,16 +101,6 @@ const pagination = reactive({
     showQuickJumper: true,
     pageSizeOptions: ['10', '20', '50', '100'],
 });
-
-const columns = [
-    { title: 'ID', key: 'id', dataIndex: 'id', width: 80 },
-    { title: '用户', key: 'user_name', dataIndex: 'user_name' },
-    { title: '供应商', key: 'vendor_name', dataIndex: 'vendor_name' },
-    { title: '模型', key: 'model_name', dataIndex: 'model_name' },
-    { title: '状态', key: 'status', dataIndex: 'status', width: 100 },
-    { title: '创建时间', key: 'created_at', dataIndex: 'created_at', width: 180 },
-    { title: '操作', key: 'action', width: 80, fixed: 'right' as const },
-];
 
 const { start: startAutoRefresh, stop: stopAutoRefresh } = useAutoRefresh({
     callback: () => {
@@ -197,39 +167,6 @@ function handleAutoRefreshChange(checked: boolean) {
         startAutoRefresh();
     } else {
         stopAutoRefresh();
-    }
-}
-
-function handleView(record: Record) {
-    router.push(`/record/${record.id}`);
-}
-
-function getStatusColor(status: string | null): string {
-    switch (status) {
-        case 'success':
-            return 'success';
-        case 'failed':
-            return 'error';
-        case 'processing':
-            return 'processing';
-        case 'init':
-        default:
-            return 'default';
-    }
-}
-
-function getStatusText(status: string | null): string {
-    switch (status) {
-        case 'success':
-            return '成功';
-        case 'failed':
-            return '失败';
-        case 'processing':
-            return '处理中';
-        case 'init':
-            return '初始化';
-        default:
-            return '未知';
     }
 }
 </script>

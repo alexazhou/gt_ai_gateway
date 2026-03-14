@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { getDashboardStats, getRecentRecords } from '@/api/stats';
+import { useRecordStore } from './record';
 import type { DashboardStats, RecentRecord } from '@/types/stats';
 
 const STATS_CACHE_DURATION = 60000; // 60秒缓存
@@ -43,8 +44,15 @@ export const useStatsStore = defineStore('stats', () => {
 
     async function fetchRecent(limit: number = 10): Promise<void> {
         try {
+            const recordStore = useRecordStore();
             const response = await getRecentRecords(limit);
-            recentRecords.value = response || [];
+            const records = response || [];
+            
+            if (records.length > 0) {
+                await recordStore.enrichRecords(records);
+            }
+            
+            recentRecords.value = records;
         } catch (error) {
             console.error('获取最近记录失败:', error);
             recentRecords.value = [];

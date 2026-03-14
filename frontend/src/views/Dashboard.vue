@@ -131,29 +131,11 @@
             class="recent-records-card"
             :loading="statsStore.loading"
         >
-            <a-table
-                :columns="recentColumns"
-                :data-source="statsStore.recentRecords"
-                :pagination="false"
+            <RecordTable
+                :records="statsStore.recentRecords"
                 size="small"
-                :row-key="(record: any) => record.id"
-            >
-                <template #bodyCell="{ column, record }">
-                    <template v-if="column.key === 'status'">
-                        <a-tag :color="getStatusColor(record.status)">
-                            {{ getStatusText(record.status) }}
-                        </a-tag>
-                    </template>
-                    <template v-if="column.key === 'created_at'">
-                        {{ formatDate(record.created_at) }}
-                    </template>
-                    <template v-if="column.key === 'action'">
-                        <a-button type="link" size="small" @click="handleViewRecord(record.id)">
-                            查看
-                        </a-button>
-                    </template>
-                </template>
-            </a-table>
+                :columns="recentColumns"
+            />
             <div v-if="statsStore.recentRecords.length === 0" class="empty-records">
                 暂无请求记录
             </div>
@@ -163,7 +145,6 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue';
-import { useRouter } from 'vue-router';
 import {
     BarChartOutlined,
     CheckCircleOutlined,
@@ -179,8 +160,9 @@ import { useAutoRefresh } from '@/composables/useAutoRefresh';
 import { formatDate } from '@/utils/format';
 import StatusCard from '@/components/common/StatusCard.vue';
 import StatisticCard from '@/components/common/StatisticCard.vue';
+import RecordTable from '@/components/common/RecordTable.vue';
+
 const statsStore = useStatsStore();
-const router = useRouter();
 
 const loading = ref(false);
 const systemStats = ref({
@@ -210,6 +192,7 @@ let uptimeTimer: number | null = null;
 const recentColumns = [
     { title: 'ID', key: 'id', dataIndex: 'id', width: 60 },
     { title: '用户', key: 'user_name', dataIndex: 'user_name' },
+    { title: '供应商', key: 'vendor_name', dataIndex: 'vendor_name' },
     { title: '模型', key: 'model_name', dataIndex: 'model_name' },
     { title: '状态', key: 'status', dataIndex: 'status', width: 80 },
     { title: '时间', key: 'created_at', dataIndex: 'created_at', width: 150 },
@@ -325,39 +308,6 @@ function formatUptime(startTime: Date): string {
 function updateUptime() {
     if (serverStartTime.value) {
         systemInfo.value.uptime = formatUptime(serverStartTime.value);
-    }
-}
-
-function handleViewRecord(id: number) {
-    router.push(`/record/${id}`);
-}
-
-function getStatusColor(status: string): string {
-    switch (status) {
-        case 'success':
-            return 'success';
-        case 'failed':
-            return 'error';
-        case 'processing':
-            return 'processing';
-        case 'init':
-        default:
-            return 'default';
-    }
-}
-
-function getStatusText(status: string): string {
-    switch (status) {
-        case 'success':
-            return '成功';
-        case 'failed':
-            return '失败';
-        case 'processing':
-            return '处理中';
-        case 'init':
-            return '初始化';
-        default:
-            return '未知';
     }
 }
 

@@ -51,8 +51,8 @@ async function recentRecords(c: Context) {
     // 简化返回数据
     const simplified = records.map(r => ({
         id: r.id,
-        user_name: `用户${r.user_id || '-'}`,
-        model_name: `模型${r.model_id || '-'}`,
+        user_id: r.user_id,
+        model_id: r.model_id,
         status: r.status,
         created_at: r.created_at,
     }));

@@ -1,3 +1,5 @@
+import type { Record } from './record';
+
 export interface DashboardStats {
     total_requests: number;
     success_count: number;
@@ -8,13 +10,7 @@ export interface DashboardStats {
     today_requests: number;
 }
 
-export interface RecentRecord {
-    id: number;
-    user_name: string;
-    model_name: string;
-    status: string;
-    created_at: string;
-}
+export interface RecentRecord extends Record {}
 
 export interface TimeRangeStats {
     date: string;
