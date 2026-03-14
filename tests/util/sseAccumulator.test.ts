@@ -297,5 +297,126 @@ describe("SSE Accumulator", () => {
 
             console.log("OpenAI Response:", JSON.stringify(response, null, 2));
         });
+
+        it("should correctly handle role and content deltas", () => {
+            const logFile = join(resourceDir, "openai-stream.log");
+
+            if (!existsSync(logFile)) {
+                console.log(`Log file not found: ${logFile}, skipping test`);
+                return;
+            }
+
+            const content = readFileSync(logFile, "utf-8");
+            const events = content.split("\n\n");
+
+            const accumulator = new sseAccumulator.SSEAccumulator("openai");
+            let foundRoleDelta = false;
+            let foundContentDeltas = false;
+
+            for (const event of events) {
+                if (!event.trim()) continue;
+
+                const dataMatch = event.match(/^data:\s*(.+)$/m);
+
+                if (dataMatch) {
+                    const data = dataMatch[1];
+
+                    if (data === "[DONE]") continue;
+
+                    try {
+                        const parsedData = JSON.parse(data);
+
+                        const choice = parsedData.choices[0];
+                        if (choice.delta?.role) {
+                            foundRoleDelta = true;
+                        }
+                        if (choice.delta?.content) {
+                            foundContentDeltas = true;
+                        }
+
+                        accumulator.addMessage(parsedData);
+                    } catch (e) {
+                        console.log("Failed to parse SSE data:", data, e);
+                    }
+                }
+            }
+
+            const response = accumulator.getResponse();
+            const message = response.choices[0].message;
+
+            console.log("Found role delta:", foundRoleDelta, "Found content deltas:", foundContentDeltas);
+
+            // 验证 role 被正确设置
+            if (foundRoleDelta) {
+                expect(message.role).toBe("assistant");
+            }
+
+            // 验证 content 被正确累积
+            if (foundContentDeltas) {
+                expect(message.content.length).toBeGreaterThan(0);
+                // 验证累积的内容是否正确
+                expect(message.content).toContain("Hello");
+                expect(message.content).toContain("mock AI assistant");
+            }
+
+            console.log("Final content:", message.content);
+        });
+
+        it("should correctly handle usage information from final chunk", () => {
+            const logFile = join(resourceDir, "openai-stream.log");
+
+            if (!existsSync(logFile)) {
+                console.log(`Log file not found: ${logFile}, skipping test`);
+                return;
+            }
+
+            const content = readFileSync(logFile, "utf-8");
+            const events = content.split("\n\n");
+
+            const accumulator = new sseAccumulator.SSEAccumulator("openai");
+            let foundUsageChunk = false;
+
+            for (const event of events) {
+                if (!event.trim()) continue;
+
+                const dataMatch = event.match(/^data:\s*(.+)$/m);
+
+                if (dataMatch) {
+                    const data = dataMatch[1];
+
+                    if (data === "[DONE]") continue;
+
+                    try {
+                        const parsedData = JSON.parse(data);
+
+                        if (parsedData.usage) {
+                            foundUsageChunk = true;
+                            console.log("Usage chunk:", JSON.stringify(parsedData.usage));
+                        }
+
+                        accumulator.addMessage(parsedData);
+                    } catch (e) {
+                        console.log("Failed to parse SSE data:", data, e);
+                    }
+                }
+            }
+
+            const response = accumulator.getResponse();
+
+            console.log("Found usage chunk:", foundUsageChunk);
+
+            if (foundUsageChunk) {
+                // 验证 usage 被正确记录
+                expect(response.usage).toBeDefined();
+                expect(response.usage?.prompt_tokens).toBeDefined();
+                expect(response.usage?.completion_tokens).toBeDefined();
+                expect(response.usage?.total_tokens).toBeDefined();
+
+                console.log("Final usage:", response.usage);
+            }
+
+            // 验证 finish_reason
+            expect(response.choices[0].finish_reason).toBe("stop");
+        });
     });
 });

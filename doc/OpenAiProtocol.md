@@ -102,7 +102,7 @@ Authorization: Bearer YOUR_API_KEY
 #### 2.2 `delta` 对象
 
 与非流式的 `message` 不同，流式使用 `delta` 记录增量：
-- **首个 Chunk**：通常包含 `role: "assistant"`。
+- **首个 Chunk**：通常包含 `role: "assistant"`，`content` 可能为空字符串，也可能不存在。
 - **后续 Chunk**：包含增量的 `content` 文本。
 - **工具调用**：包含 `tool_calls` 的增量片段（如 `arguments` 的 JSON 片段）。
 
@@ -116,21 +116,33 @@ Authorization: Bearer YOUR_API_KEY
 
 #### 2.4 Token 统计 (`usage`)
 
-当启用 `include_usage: true` 时，在 `[DONE]` 之前会发送一个特殊的 Chunk：
-- `choices` 数组为空。
-- 包含完整的 `usage` 字段。
+当启用 `include_usage: true` 时，在 `[DONE]` 之前通常会带上完整的 `usage` 字段。
+
+常见实现有两种形式：
+- 作为一个单独的 Chunk 发送，此时 `choices` 可能为空。
+- 附着在最后一个 `finish_reason != null` 的 Chunk 上一并返回。
+
+因此解析器不应把 `usage` 的位置写死，只要在结束前捕获到 `usage` 即可。
 
 ---
 
 ## 3. 完整流式响应示例
 
 ```text
-data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"glm-4.7","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"glm-4.7","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
 
 data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"glm-4.7","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
 
 data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"glm-4.7","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":null}]}
 
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"glm-4.7","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":2,"total_tokens":11}}
+
+data: [DONE]
+```
+
+也可能出现下面这种等价形式，其中 `usage` 单独放在一个 Chunk 中：
+
+```text
 data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"glm-4.7","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
 
 data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"glm-4.7","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":2,"total_tokens":11}}
@@ -146,8 +158,9 @@ data: [DONE]
 
 1. **初始化**：创建一个空字符串用于拼接 `content`。
 2. **拼接**：收到每个包含 `delta.content` 的 Chunk 时，将其内容追加到字符串末尾。
-3. **完成**：收到 `finish_reason` 不为 `null` 的 Chunk 或 `[DONE]` 时，停止接收。
-4. **统计**：保存最后一个包含 `usage` 字段的数据。
+3. **继续读取**：即使已经收到 `finish_reason` 不为 `null` 的 Chunk，也应继续读取直到 `[DONE]`，因为 `usage` 可能仍在后续 Chunk 中，或者与结束 Chunk 合并返回。
+4. **完成**：收到 `data: [DONE]` 后停止接收。
+5. **统计**：保存结束前最后一次出现的 `usage` 数据。
 
 ---
 
