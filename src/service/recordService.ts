@@ -1,11 +1,22 @@
 import { SgRecord } from "../model/sgRecord";
 import { SgRecordStatus } from "../constants";
 
+function isLogEnabled(): boolean {
+    return process.env.RECORD_LOG_ENABLED === "true";
+}
+
 async function create(
     userId: number,
     modelId: number,
     requestData: string | null,
 ) {
+    if (isLogEnabled()) {
+        console.log(`[RecordService] Creating record: user=${userId}, model=${modelId}`);
+        if (requestData) {
+            console.log(`[RecordService] Request data: ${requestData}`);
+        }
+    }
+
     return SgRecord.query().create({
         user_id: userId,
         model_id: modelId,
@@ -21,6 +32,10 @@ async function create(
 }
 
 async function update(recordId: number, data: Partial<SgRecord>) {
+    if (isLogEnabled()) {
+        console.log(`[RecordService] Updating record ${recordId}:`, JSON.stringify(data, null, 2));
+    }
+
     return SgRecord.query().where("id", recordId).update(data);
 }
 
