@@ -1,6 +1,6 @@
 {
   "name": "serverless_ai_gateway",
-  "version": "1.1.0",
+  "version": "1.2.2",
   "scripts": {
     "frontend:build": "cd frontend && npm run build",
     "frontend:build:dev": "cd frontend && npm run build -- --mode development",

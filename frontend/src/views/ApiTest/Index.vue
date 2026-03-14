@@ -145,9 +145,6 @@
                                     <a-button type="link" size="small" @click="loadHistory(item)">
                                         加载
                                     </a-button>
-                                    <a-button type="link" danger size="small" @click="removeHistory(item.id)">
-                                        删除
-                                    </a-button>
                                 </template>
                             </a-list-item>
                         </template>
