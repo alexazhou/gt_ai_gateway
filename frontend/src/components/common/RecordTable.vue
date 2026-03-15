@@ -14,6 +14,19 @@
                     {{ getStatusText(record.status) }}
                 </a-tag>
             </template>
+            <template v-else-if="column.key === 'token_stats'">
+                <div class="metric-cell">
+                    <div>{{ formatTokenStats(record) }}</div>
+                </div>
+            </template>
+            <template v-else-if="column.key === 'timing'">
+                <div class="metric-cell">
+                    <div>{{ formatDuration(record.start_at, record.end_at) }}</div>
+                    <div v-if="record.first_token_latency !== null" class="metric-sub">
+                        首 Token {{ record.first_token_latency }}ms
+                    </div>
+                </div>
+            </template>
             <template v-if="column.key === 'created_at'">
                 {{ formatDate(record.created_at) }}
             </template>
@@ -31,6 +44,7 @@ import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { formatDate } from '@/utils/format';
 import type { Record } from '@/types/record';
+import dayjs from 'dayjs';
 
 interface Props {
     records: Record[];
@@ -57,6 +71,8 @@ const defaultColumns = [
     { title: '用户', key: 'user_name', dataIndex: 'user_name' },
     { title: '供应商', key: 'vendor_name', dataIndex: 'vendor_name' },
     { title: '模型', key: 'model_name', dataIndex: 'model_name' },
+    { title: 'Token', key: 'token_stats', width: 140 },
+    { title: '时间', key: 'timing', width: 140 },
     { title: '状态', key: 'status', dataIndex: 'status', width: 100 },
     { title: '创建时间', key: 'created_at', dataIndex: 'created_at', width: 180 },
     { title: '操作', key: 'action', width: 80, fixed: 'right' as const },
@@ -72,6 +88,46 @@ function handleTableChange(pag: any) {
 
 function handleView(record: Record) {
     router.push(`/record/${record.id}`);
+}
+
+function formatTokenStats(record: Record): string {
+    const prompt = record.prompt_tokens ?? 0;
+    const output = record.output_tokens ?? 0;
+
+    if (record.prompt_tokens === null && record.output_tokens === null) {
+        return '-';
+    }
+
+    return `${prompt} / ${output}`;
+}
+
+function normalizeTimestamp(value: string | number | null): number | null {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+
+    if (typeof value === 'number') {
+        return value;
+    }
+
+    if (/^\d+$/.test(value)) {
+        return Number(value);
+    }
+
+    const parsed = dayjs(value).valueOf();
+    return Number.isNaN(parsed) ? null : parsed;
+}
+
+function formatDuration(startAt: string | number | null, endAt: string | number | null): string {
+    const start = normalizeTimestamp(startAt);
+    const end = normalizeTimestamp(endAt);
+
+    if (start === null || end === null) {
+        return '-';
+    }
+
+    const duration = end - start;
+    return Number.isNaN(duration) ? '-' : `${duration.toLocaleString()}ms`;
 }
 
 function getStatusColor(status: string | null): string {
@@ -103,3 +159,14 @@ function getStatusText(status: string | null): string {
     }
 }
 </script>
+
+<style scoped>
+.metric-cell {
+    line-height: 1.4;
+}
+
+.metric-sub {
+    font-size: 12px;
+    color: #8c8c8c;
+}
+</style>

@@ -11,8 +11,8 @@ export interface Record extends BaseEntity {
     prompt_tokens: number | null;
     output_tokens: number | null;
     first_token_latency: number | null;
-    start_at: string | null;
-    end_at: string | null;
+    start_at: string | number | null;
+    end_at: string | number | null;
 
     // 关联数据
     user_name?: string | null;

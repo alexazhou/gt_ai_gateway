@@ -2,6 +2,29 @@ import { Context } from "hono";
 import { SgRecord } from "../model/sgRecord";
 import recordService from "../service/recordService";
 
+function normalizeTimestampField(value: unknown): string | number | null {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    if (value instanceof Date) {
+        return value.toISOString();
+    }
+
+    return value as string | number;
+}
+
+function serializeRecord(record: SgRecord) {
+    const data = record.toData() as Record<string, unknown>;
+    const rawAttributes = (record as any).getAttributes?.() as Record<string, unknown> | undefined;
+
+    return {
+        ...data,
+        start_at: normalizeTimestampField(rawAttributes?.start_at ?? data.start_at),
+        end_at: normalizeTimestampField(rawAttributes?.end_at ?? data.end_at),
+    };
+}
+
 async function listRecords(c: Context) {
     const { page, pageSize } = c.req.query();
     const pageNum = page ? parseInt(page, 10) : 1;
@@ -21,7 +44,7 @@ async function listRecords(c: Context) {
         .get();
 
     return c.json({
-        list: records,
+        list: records.map(serializeRecord),
         total: total,
     });
 }
@@ -30,7 +53,7 @@ async function latestRecords(c: Context) {
     const { limit } = c.req.query();
     const limitNumber = limit ? parseInt(limit, 10) : 10;
     const records = await recordService.latest(limitNumber);
-    return c.json(records);
+    return c.json(records.map(serializeRecord));
 }
 
 async function getRecord(c: Context) {
@@ -48,7 +71,7 @@ async function getRecord(c: Context) {
         return c.json({ error: "Record not found" }, 404);
     }
 
-    return c.json(record);
+    return c.json(serializeRecord(record));
 }
 
 export default {
