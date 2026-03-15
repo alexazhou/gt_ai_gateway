@@ -11,6 +11,14 @@
 | **doc/BackendDevManual.md** | 后端开发手册，包含环境配置、后端开发方式、API 开发等 |
 | **doc/TestManual.md** | 测试手册，描述测试环境的架构设计和操作流程 |
 | **doc/LlmApiUsage.md** | LLM API 使用指南，介绍如何调用网关提供的 LLM 接口 |
+| **doc/OpenAiProtocol.md** | OpenAI 协议说明文档 |
+| **doc/AnthropicProtocol.md** | Anthropic 协议说明文档 |
+| **doc/StreamLogging.md** | 流式日志相关说明 |
+| **doc/design/Frontend_Product_Documentation.md** | 前端产品文档 |
+| **doc/design/Frontend_Roadmap.md** | 前端路线图 |
+| **doc/tech/concurrent_request_fix.md** | 并发请求问题修复记录 |
+| **doc/tech/record_timestamp_serialization_fix.md** | 请求记录时间字段序列化修复说明 |
+| **doc/tech/release_process.md** | 新版本发布流程，包含版本号修改、提交流程、tag 和 push 步骤 |
 
 ## 编程规范
 1. 代码使用 4 个空格缩进，每个方法之间空两行
@@ -37,6 +45,7 @@
     - **演示/临时文件**：`upstream_demo.txt`、各种 `.txt` 或临时测试脚本
 2. **提交前自检**：使用 `git status` 确认待提交的文件列表，确保只包含核心代码逻辑和必要的文档改动。
 3. **强制推送警告**：除非是为了修复错误的提交（如误删、误传敏感信息且尚未被他人拉取），否则避免使用 `git push --force`。
+4. 在提交之前，需要执行所有后端自动化测试用例，和一次前端构建。避免提交失败的代码
 
 ## 测试文档
 ...
