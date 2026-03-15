@@ -15,6 +15,12 @@
                         @change="handleAutoRefreshChange"
                     />
                 </a-tooltip>
+                <span class="last-updated">
+                    自动刷新
+                    <template v-if="autoRefreshEnabled">
+                        ({{ remainingSeconds }} 秒后刷新)
+                    </template>
+                </span>
                 <a-button
                     type="primary"
                     size="small"
@@ -103,7 +109,6 @@
                 <StatusCard
                     title="系统状态"
                     :value="systemStatus"
-                    description="后端服务运行状态"
                     :loading="loading"
                 />
             </a-col>
@@ -111,20 +116,32 @@
 
         <!-- 系统信息 -->
         <a-card title="系统信息" style="margin-top: 16px" :loading="loading">
-            <a-descriptions :column="2" bordered>
-                <a-descriptions-item label="环境">
-                    {{ systemInfo.environment || '-' }}
-                </a-descriptions-item>
-                <a-descriptions-item label="版本">
-                    {{ systemInfo.version || '-' }}
-                </a-descriptions-item>
-                <a-descriptions-item label="启动时间">
-                    {{ systemInfo.startTime ? formatDate(systemInfo.startTime) : '-' }}
-                </a-descriptions-item>
-                <a-descriptions-item label="运行时间">
-                    {{ systemInfo.uptime || '-' }}
-                </a-descriptions-item>
-            </a-descriptions>
+            <div class="system-info-grid">
+                <div class="system-info-item">
+                    <span class="system-info-label">环境</span>
+                    <span class="system-info-value">
+                        {{ systemInfo.environment || '-' }}
+                    </span>
+                </div>
+                <div class="system-info-item">
+                    <span class="system-info-label">版本</span>
+                    <span class="system-info-value">
+                        {{ systemInfo.version || '-' }}
+                    </span>
+                </div>
+                <div class="system-info-item">
+                    <span class="system-info-label">启动时间</span>
+                    <span class="system-info-value">
+                        {{ systemInfo.startTime ? formatDate(systemInfo.startTime) : '-' }}
+                    </span>
+                </div>
+                <div class="system-info-item">
+                    <span class="system-info-label">运行时间</span>
+                    <span class="system-info-value">
+                        {{ systemInfo.uptime || '-' }}
+                    </span>
+                </div>
+            </div>
         </a-card>
 
         <!-- 最近请求记录 -->
@@ -202,7 +219,11 @@ const recentColumns = [
 ];
 
 // 自动刷新
-const { start: startAutoRefresh, stop: stopAutoRefresh } = useAutoRefresh({
+const {
+    start: startAutoRefresh,
+    stop: stopAutoRefresh,
+    remainingSeconds,
+} = useAutoRefresh({
     callback: () => {
         refreshAll();
     },
@@ -352,12 +373,36 @@ function formatTime(date: Date): string {
     color: #8c8c8c;
 }
 
-.dashboard :deep(.ant-descriptions-item-label) {
-    width: 120px;
-    min-width: 120px;
+.system-info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 16px;
 }
 
-.dashboard :deep(.ant-descriptions-item-content) {
-    min-width: 150px;
+.system-info-item {
+    display: flex;
+    align-items: center;
+    min-height: 64px;
+    padding: 0 20px;
+    border: 1px solid #f0f0f0;
+    border-radius: 12px;
+    background: #fafafa;
+}
+
+.system-info-label {
+    flex: 0 0 96px;
+    color: #8c8c8c;
+    font-size: 13px;
+}
+
+.system-info-value {
+    color: #262626;
+    font-weight: 500;
+}
+
+@media (max-width: 768px) {
+    .system-info-grid {
+        grid-template-columns: 1fr;
+    }
 }
 </style>

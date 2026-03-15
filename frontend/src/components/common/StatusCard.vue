@@ -1,5 +1,5 @@
 <template>
-    <a-card :loading="loading" hoverable>
+    <a-card :loading="loading" hoverable class="status-card">
         <template #title>
             <span>{{ title }}</span>
         </template>
@@ -24,7 +24,19 @@ defineProps<Props>();
 </script>
 
 <style scoped>
+.status-card {
+    height: 100%;
+}
+
+.status-card :deep(.ant-card-body) {
+    height: calc(100% - 57px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .status-content {
+    width: 100%;
     text-align: center;
 }
 
