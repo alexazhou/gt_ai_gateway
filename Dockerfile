@@ -5,14 +5,25 @@ WORKDIR /app
 # 复制后端依赖文件
 COPY package*.json ./
 
-# 安装后端依赖
-RUN npm ci --loglevel info
+# 安装后端依赖 (优化网络重试和并发)
+RUN npm config set fetch-retries 10 && \
+    npm config set fetch-retry-mintimeout 3000 && \
+    npm config set fetch-retry-maxtimeout 10000 && \
+    npm config set fetch-timeout 30000 && \
+    npm config set maxsockets 30 && \
+    npm ci --loglevel info
 
 # 复制前端依赖文件
 COPY frontend/package*.json ./frontend/
 
-# 安装前端依赖
-RUN cd frontend && npm ci
+# 安装前端依赖 (同步优化网络设置)
+RUN cd frontend && \
+    npm config set fetch-retries 10 && \
+    npm config set fetch-retry-mintimeout 3000 && \
+    npm config set fetch-retry-maxtimeout 10000 && \
+    npm config set fetch-timeout 30000 && \
+    npm config set maxsockets 30 && \
+    npm ci --loglevel info
 
 # 复制源代码
 COPY . .
