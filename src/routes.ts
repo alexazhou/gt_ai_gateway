@@ -1,4 +1,5 @@
 import { Hono, MiddlewareHandler, HTTPException } from "hono";
+import { logger } from "hono/logger";
 import { join } from "path";
 import { readFileSync } from "fs";
 import gatewayController from "./controller/gatewayController";
@@ -28,6 +29,9 @@ const dbMiddleware: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
 };
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+// 注册日志中间件
+app.use("*", logger());
 
 // 注册数据库中间件（最前面）
 app.use("*", dbMiddleware);

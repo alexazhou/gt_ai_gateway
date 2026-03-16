@@ -51,6 +51,7 @@ declare module 'vue' {
     ATag: typeof import('ant-design-vue/es')['Tag']
     ATextarea: typeof import('ant-design-vue/es')['Textarea']
     ATooltip: typeof import('ant-design-vue/es')['Tooltip']
+    ATypographyText: typeof import('ant-design-vue/es')['TypographyText']
     HelloWorld: typeof import('./src/components/HelloWorld.vue')['default']
     JsonViewer: typeof import('./src/components/common/JsonViewer.vue')['default']
     RecordTable: typeof import('./src/components/common/RecordTable.vue')['default']

@@ -18,6 +18,7 @@ import RecordIndex from '@/views/Record/Index.vue';
 import RecordList from '@/views/Record/List.vue';
 import RecordDetail from '@/views/Record/Detail.vue';
 import ApiTestIndex from '@/views/ApiTest/Index.vue';
+import IntegrationIndex from '@/views/Integration/Index.vue';
 
 const routes: RouteRecordRaw[] = [
     {
@@ -116,6 +117,12 @@ const routes: RouteRecordRaw[] = [
                 name: 'ApiTest',
                 component: ApiTestIndex,
                 meta: { title: 'API 测试' },
+            },
+            {
+                path: 'integration',
+                name: 'Integration',
+                component: IntegrationIndex,
+                meta: { title: '接入配置' },
             },
         ],
     },
