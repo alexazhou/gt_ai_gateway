@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # 安装后端依赖
-RUN npm ci
+RUN npm ci --loglevel info
 
 # 复制前端依赖文件
 COPY frontend/package*.json ./frontend/
