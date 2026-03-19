@@ -47,6 +47,14 @@
                         {{ record.type === 'admin' ? '管理员' : '普通用户' }}
                     </a-tag>
                 </template>
+                <template v-if="column.key === 'balance'">
+                    <a-statistic
+                        :value="record.balance"
+                        :precision="2"
+                        prefix="¥"
+                        :value-style="{ color: record.balance > 0 ? '#1677ff' : record.balance < 0 ? '#ff4d4f' : '#8c8c8c', fontSize: '14px' }"
+                    />
+                </template>
                 <template v-if="column.key === 'action'">
                     <a-space>
                         <a-button type="link" @click="handleView(record)">
@@ -87,6 +95,7 @@ const columns = [
     { title: '用户名', key: 'name', dataIndex: 'name' },
     { title: 'Token', key: 'token', dataIndex: 'token' },
     { title: '类型', key: 'type', dataIndex: 'type', width: 100 },
+    { title: '余额', key: 'balance', dataIndex: 'balance', width: 150 },
     { title: '操作', key: 'action', width: 120, fixed: 'right' as const },
 ];
 

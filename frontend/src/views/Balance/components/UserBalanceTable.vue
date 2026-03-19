@@ -41,7 +41,7 @@
                         :value="record.balance"
                         :precision="2"
                         prefix="¥"
-                        :value-style="{ color: record.balance < 10 ? '#cf1322' : '#3f8600', fontSize: '14px' }"
+                        :value-style="{ color: record.balance > 0 ? '#1677ff' : record.balance < 0 ? '#ff4d4f' : '#8c8c8c', fontSize: '14px' }"
                     />
                 </template>
                 <template v-if="column.key === 'action'">
@@ -72,7 +72,6 @@ const { loading, data, pagination, searchForm, setPage, clearData } = useTable<U
 const columns = [
     { title: 'ID', key: 'id', dataIndex: 'id', width: 80 },
     { title: '用户名', key: 'name', dataIndex: 'name' },
-    { title: 'Token', key: 'token', dataIndex: 'token' },
     { title: '类型', key: 'type', dataIndex: 'type', width: 100 },
     { title: '余额', key: 'balance', dataIndex: 'balance', width: 150 },
     { title: '操作', key: 'action', width: 100, fixed: 'right' as const },
