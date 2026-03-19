@@ -69,10 +69,10 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD node -e "require('http').get('http://localhost:8787/welcome', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})" || exit 1
 
 # 设置环境变量
-ENV NODE_ENV=production
-ENV PORT=8787
-ENV DB_PATH=/app/data/local.db
-ENV LOG_DIR=/app/data/log
+ENV NODE_ENV=production \
+    PORT=8787 \
+    DB_PATH=/app/data/local.db \
+    LOG_DIR=/app/data/log
 
 # 启动应用
 CMD ["./docker-entrypoint.sh"]
