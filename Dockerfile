@@ -33,7 +33,12 @@ RUN npm config set fetch-retries 10 && \
 
 # 复制前端构建产物和后端源代码
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
-COPY . .
+COPY script ./script
+COPY src ./src
+COPY resource ./resource
+COPY package*.json ./
+COPY docker-entrypoint.sh ./
+COPY tsconfig.json ./
 
 # 3. 生产环境镜像阶段
 FROM node:20-alpine
