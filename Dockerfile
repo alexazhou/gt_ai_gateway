@@ -42,8 +42,9 @@ COPY . .
 FROM node:20-alpine
 WORKDIR /app
 
-# 安装运行时需要的库 (better-sqlite3 需要 libstdc++)
-RUN apk add --no-cache libstdc++
+# 安装运行时需要的库并创建目录
+RUN apk add --no-cache libstdc++ && \
+    mkdir -p /app/data
 
 # 复制依赖文件和入口脚本
 COPY package*.json docker-entrypoint.sh ./
@@ -57,9 +58,6 @@ COPY --from=builder /app/src ./src
 COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY --from=builder /app/script ./script
 COPY --from=builder /app/resource ./resource
-
-# 创建数据库文件目录
-RUN mkdir -p /app/data
 
 # 暴露端口
 EXPOSE 8787
