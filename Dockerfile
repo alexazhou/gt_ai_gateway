@@ -2,15 +2,21 @@
 FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
 
-# 安装前端依赖并构建
+# 复制前端依赖和配置文件
 COPY frontend/package*.json ./
+COPY frontend/tsconfig*.json ./
+
+# 安装前端依赖
 RUN npm config set fetch-retries 10 && \
     npm config set fetch-retry-mintimeout 3000 && \
     npm config set fetch-retry-maxtimeout 10000 && \
     npm config set fetch-timeout 30000 && \
     npm config set maxsockets 30 && \
-    npm ci --loglevel info && \
-    npm run build
+    npm ci --loglevel info
+
+# 复制前端源代码并构建
+COPY frontend/ ./
+RUN npm run build
 
 # 2. 依赖和源码准备阶段 (针对每个目标架构分别运行)
 FROM node:20-alpine AS builder
