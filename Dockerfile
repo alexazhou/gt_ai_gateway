@@ -54,6 +54,8 @@ COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x docker-entrypoint.sh
 
 # 复制构建产物、依赖和源代码
+# 注意：不能使用多行 COPY 格式（如 COPY --from=builder \n ...），在 buildx 跨架构构建时会出现文件找不到的错误
+# 必须使用单行 COPY 格式以确保兼容性
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/frontend/dist ./frontend/dist
