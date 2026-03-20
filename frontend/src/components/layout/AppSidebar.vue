@@ -216,7 +216,7 @@ function toggleSidebar() {
 .app-sidebar :deep(.ant-menu-item-selected) {
     background: var(--sidebar-selected);
     color: var(--sidebar-selected-text);
-    box-shadow: inset 0 0 0 1px var(--sidebar-selected-border);
+    box-shadow: inset 0 0 0 1px rgba(37, 143, 255, 0.16);
 }
 
 .app-sidebar :deep(.ant-menu-item-selected .anticon) {
