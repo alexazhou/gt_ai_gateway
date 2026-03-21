@@ -22,7 +22,7 @@ import { ref, computed } from 'vue';
 import { message } from 'ant-design-vue/es';
 
 interface Props {
-    data: any;
+    data: unknown;
 }
 
 const props = defineProps<Props>();

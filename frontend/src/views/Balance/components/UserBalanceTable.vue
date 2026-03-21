@@ -70,18 +70,21 @@
 
 <script setup lang="ts">
 import { onMounted } from 'vue';
+import type { TableColumnsType, TablePaginationConfig } from 'ant-design-vue';
 import { listUsers } from '@/api/user';
 import { useTable } from '@/composables/useTable';
 import TokenDisplay from '@/components/common/TokenDisplay.vue';
-import type { User } from '@/types/user';
+import type { User, UserQuery } from '@/types/user';
 
 const emit = defineEmits<{
     adjust: [user: User];
 }>();
 
-const { loading, data, pagination, searchForm, setPage, clearData } = useTable<User>();
+const { loading, data, pagination, searchForm, setPage, clearData } = useTable<User, UserQuery>(10, {
+    keyword: undefined,
+});
 
-const columns = [
+const columns: TableColumnsType<User> = [
     { title: 'ID', key: 'id', dataIndex: 'id', width: 80 },
     { title: '用户名', key: 'name', dataIndex: 'name' },
     { title: '类型', key: 'type', dataIndex: 'type', width: 100 },
@@ -120,8 +123,8 @@ function handleReset() {
     loadData();
 }
 
-function handleTableChange(pag: any) {
-    setPage(pag.current, pag.pageSize);
+function handleTableChange(pag: TablePaginationConfig) {
+    setPage(pag.current ?? 1, pag.pageSize ?? pagination.pageSize);
 }
 
 function handleAdjust(record: User) {

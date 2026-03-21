@@ -67,17 +67,21 @@
 
 <script setup lang="ts">
 import { onMounted, watch } from 'vue';
+import type { TableColumnsType, TablePaginationConfig } from 'ant-design-vue';
 import { listRechargeRecords } from '@/api/billing';
 import { useTable } from '@/composables/useTable';
-import type { RechargeRecord } from '@/types/billing';
+import type { RechargeRecord, RechargeRecordsQuery } from '@/types/billing';
 
 const props = defineProps<{
     selectedUserId?: number;
 }>();
 
-const { loading, data, pagination, searchForm, setPage, clearData } = useTable<RechargeRecord>();
+const { loading, data, pagination, searchForm, setPage, clearData } = useTable<RechargeRecord, RechargeRecordsQuery>(10, {
+    user_id: undefined,
+    type: undefined,
+});
 
-const columns = [
+const columns: TableColumnsType<RechargeRecord> = [
     { title: 'ID', key: 'id', dataIndex: 'id', width: 80 },
     { title: '用户ID', key: 'user_id', dataIndex: 'user_id', width: 100 },
     { title: '金额', key: 'amount', dataIndex: 'amount', width: 120 },
@@ -101,18 +105,12 @@ watch(() => props.selectedUserId, (newUserId) => {
 async function loadData() {
     loading.value = true;
     try {
-        const params: any = {};
+        const params: RechargeRecordsQuery = {};
         if (searchForm.user_id) {
             params.user_id = searchForm.user_id;
         }
         if (searchForm.type) {
             params.type = searchForm.type;
-        }
-        if (searchForm.limit) {
-            params.limit = searchForm.limit;
-        }
-        if (searchForm.offset) {
-            params.offset = searchForm.offset;
         }
 
         const result = await listRechargeRecords(params);
@@ -140,8 +138,8 @@ function handleReset() {
     loadData();
 }
 
-function handleTableChange(pag: any) {
-    setPage(pag.current, pag.pageSize);
+function handleTableChange(pag: TablePaginationConfig) {
+    setPage(pag.current ?? 1, pag.pageSize ?? pagination.pageSize);
 }
 
 function formatDate(dateStr: string | number | null): string {

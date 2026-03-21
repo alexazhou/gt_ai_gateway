@@ -4,7 +4,7 @@ export interface ValidationRule {
     required?: boolean;
     message?: string;
     pattern?: RegExp;
-    validator?: (value: any) => boolean | string;
+    validator?: (value: unknown) => boolean | string;
 }
 
 export interface ValidationResult {
@@ -12,7 +12,7 @@ export interface ValidationResult {
     error?: string;
 }
 
-export function validate(value: any, rules: ValidationRule[]): ValidationResult {
+export function validate(value: unknown, rules: ValidationRule[]): ValidationResult {
     for (const rule of rules) {
         if (rule.required && (value === null || value === undefined || value === '')) {
             return {
@@ -21,7 +21,7 @@ export function validate(value: any, rules: ValidationRule[]): ValidationResult 
             };
         }
 
-        if (rule.pattern && !rule.pattern.test(value)) {
+        if (rule.pattern && (typeof value !== 'string' || !rule.pattern.test(value))) {
             return {
                 valid: false,
                 error: rule.message || '格式不正确',

@@ -80,6 +80,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import type { TableColumnsType, TablePaginationConfig } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import { message, Modal } from 'ant-design-vue/es';
 import { listVendors, deleteVendor } from '@/api/vendor';
@@ -88,17 +89,21 @@ import { formatDate } from '@/utils/format';
 import DialogCreate from './DialogCreate.vue';
 import DialogEdit from './DialogEdit.vue';
 import DialogTest from './DialogTest.vue';
-import type { Vendor, VendorType } from '@/types/vendor';
+import type { Vendor, VendorQuery, VendorType } from '@/types/vendor';
+import { AppRequestError, toAppRequestError } from '@/utils/requestError';
 
 const router = useRouter();
 
-const { loading, data, pagination, searchForm, setPage, clearData } = useTable<Vendor>();
+const { loading, data, pagination, searchForm, setPage, clearData } = useTable<Vendor, VendorQuery>(10, {
+    keyword: undefined,
+    type: undefined,
+});
 
 const createDialogRef = ref();
 const editDialogRef = ref();
 const testDialogRef = ref();
 
-const columns = [
+const columns: TableColumnsType<Vendor> = [
     { title: 'ID', key: 'id', dataIndex: 'id', width: 80 },
     { title: '类型', key: 'type', dataIndex: 'type', width: 120 },
     { title: '名称', key: 'name', dataIndex: 'name' },
@@ -138,8 +143,8 @@ function handleReset() {
     loadData();
 }
 
-function handleTableChange(pag: any) {
-    setPage(pag.current, pag.pageSize);
+function handleTableChange(pag: TablePaginationConfig) {
+    setPage(pag.current ?? 1, pag.pageSize ?? pagination.pageSize);
 }
 
 function handleCreate() {
@@ -178,8 +183,9 @@ function handleDelete(record: Vendor) {
                 await deleteVendor(record.id);
                 message.success('删除成功');
                 loadData();
-            } catch (error: any) {
-                message.error(error.message || '删除失败');
+            } catch (error) {
+                const requestError: AppRequestError = toAppRequestError(error, '删除失败');
+                message.error(requestError.message);
             }
         },
     });

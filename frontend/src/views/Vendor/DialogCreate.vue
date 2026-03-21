@@ -81,7 +81,7 @@ import { message } from 'ant-design-vue/es';
 import type { FormInstance } from 'ant-design-vue/es';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons-vue';
 import { createVendor } from '@/api/vendor';
-import type { Vendor } from '@/types/vendor';
+import type { CreateVendorRequest, Vendor, VendorUrls } from '@/types/vendor';
 
 const emit = defineEmits<{
     success: [vendor: Vendor];
@@ -131,19 +131,20 @@ async function handleOk() {
     try {
         await formRef.value?.validate();
 
-        const createData: any = {
+        const createData: CreateVendorRequest = {
             type: formState.type,
             name: formState.name,
             token: formState.token,
         };
 
         if (urlsForm.length > 0 && urlsForm.some(item => item.url)) {
-            createData.urls = {};
+            const urls: VendorUrls = {};
             urlsForm.forEach(item => {
                 if (item.url) {
-                    createData.urls[item.type] = item.url;
+                    urls[item.type] = item.url;
                 }
             });
+            createData.urls = urls;
         }
 
         loading.value = true;

@@ -1,7 +1,7 @@
 <template>
     <div class="app-header">
         <div class="header-left">
-            <img src="/favicon.svg" alt="Logo" class="logo" />
+            <img src="/favicon.svg" alt="Logo" class="logo">
             <span class="title">{{ title }}</span>
         </div>
         <div class="header-right">

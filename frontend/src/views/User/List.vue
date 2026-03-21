@@ -87,22 +87,26 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import type { TableColumnsType, TablePaginationConfig } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import { listUsers } from '@/api/user';
 import { useTable } from '@/composables/useTable';
 import TokenDisplay from '@/components/common/TokenDisplay.vue';
 import DialogCreate from './DialogCreate.vue';
 import DialogEdit from './DialogEdit.vue';
-import type { User } from '@/types/user';
+import type { User, UserQuery } from '@/types/user';
 
 const router = useRouter();
 
-const { loading, data, pagination, searchForm, setPage, clearData } = useTable<User>();
+const { loading, data, pagination, searchForm, setPage, clearData } = useTable<User, UserQuery>(10, {
+    keyword: undefined,
+    type: undefined,
+});
 
 const createDialogRef = ref();
 const editDialogRef = ref();
 
-const columns = [
+const columns: TableColumnsType<User> = [
     { title: 'ID', key: 'id', dataIndex: 'id', width: 80 },
     { title: '用户名', key: 'name', dataIndex: 'name' },
     { title: 'Token', key: 'token', dataIndex: 'token' },
@@ -143,8 +147,8 @@ function handleReset() {
     loadData();
 }
 
-function handleTableChange(pag: any) {
-    setPage(pag.current, pag.pageSize);
+function handleTableChange(pag: TablePaginationConfig) {
+    setPage(pag.current ?? 1, pag.pageSize ?? pagination.pageSize);
 }
 
 function handleCreate() {

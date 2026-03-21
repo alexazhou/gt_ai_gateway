@@ -79,8 +79,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, reactive } from 'vue';
+import type { TablePaginationConfig } from 'ant-design-vue';
 import { useRecordStore } from '@/stores/record';
 import { useAutoRefresh } from '@/composables/useAutoRefresh';
+import type { TablePaginationState } from '@/types';
 import type { RecordQuery, RequestStatus } from '@/types/record';
 import type { Dayjs } from 'dayjs';
 import RecordTable from '@/components/common/RecordTable.vue';
@@ -98,7 +100,7 @@ const searchForm = reactive<{
     end_time?: string;
 }>({});
 
-const pagination = reactive({
+const pagination = reactive<TablePaginationState>({
     current: 1,
     pageSize: 10,
     total: 0,
@@ -157,9 +159,9 @@ function handleReset() {
     loadData();
 }
 
-function handleTableChange(pag: any) {
-    pagination.current = pag.current;
-    pagination.pageSize = pag.pageSize;
+function handleTableChange(pag: TablePaginationConfig) {
+    pagination.current = pag.current ?? 1;
+    pagination.pageSize = pag.pageSize ?? pagination.pageSize;
     loadData();
 }
 

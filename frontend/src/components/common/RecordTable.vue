@@ -52,6 +52,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import type { TableColumnsType, TablePaginationConfig } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import { ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons-vue';
 import { formatDate } from '@/utils/format';
@@ -61,9 +62,9 @@ import dayjs from 'dayjs';
 interface Props {
     records: Record[];
     loading?: boolean;
-    pagination?: any;
+    pagination?: false | TablePaginationConfig;
     size?: 'small' | 'middle' | 'default';
-    columns?: any[];
+    columns?: TableColumnsType<Record>;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -73,12 +74,12 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-    change: [pagination: any];
+    change: [pagination: TablePaginationConfig];
 }>();
 
 const router = useRouter();
 
-const defaultColumns = [
+const defaultColumns: TableColumnsType<Record> = [
     { title: 'ID', key: 'id', dataIndex: 'id', width: 80 },
     { title: '用户', key: 'user_name', dataIndex: 'user_name' },
     { title: '供应商', key: 'vendor_name', dataIndex: 'vendor_name' },
@@ -94,7 +95,7 @@ const displayColumns = computed(() => {
     return props.columns || defaultColumns;
 });
 
-function handleTableChange(pag: any) {
+function handleTableChange(pag: TablePaginationConfig) {
     emit('change', pag);
 }
 

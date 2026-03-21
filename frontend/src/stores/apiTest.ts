@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { sendApiTest } from '@/api/gateway';
 import type { ApiTestRequest, ApiTestHistory, ApiTestState } from '@/types/gateway';
+import { toAppRequestError } from '@/utils/requestError';
 
 const MAX_HISTORY_COUNT = 50;
 const HISTORY_STORAGE_KEY = 'api_test_history';
@@ -88,9 +89,9 @@ export const useApiTestStore = defineStore('apiTest', () => {
                     addToHistory(historyItem);
                 },
             });
-        } catch (err: any) {
+        } catch (err) {
             loading.value = false;
-            const errorMsg = err?.message || '请求失败';
+            const errorMsg = toAppRequestError(err).message;
             error.value = errorMsg;
             historyItem.status = 'error';
             historyItem.response = errorMsg;

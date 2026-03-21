@@ -1,6 +1,6 @@
 <template>
     <div class="balance-page">
-        <a-tabs v-model:activeKey="activeTab">
+        <a-tabs v-model:active-key="activeTab">
             <a-tab-pane key="users" tab="用户余额">
                 <UserBalanceTable @adjust="handleAdjust" />
             </a-tab-pane>

@@ -83,14 +83,16 @@
 import { ref, computed } from 'vue';
 import { message } from 'ant-design-vue/es';
 import { testVendor } from '@/api/vendor';
+import type { VendorTestResponse } from '@/api/vendor';
 import { listModels } from '@/api/model';
 import type { Vendor } from '@/types/vendor';
 import type { Model } from '@/types/model';
+import { toAppRequestError } from '@/utils/requestError';
 
 const visible = ref(false);
 const loading = ref(false);
 const format = ref('openai');
-const result = ref<any>(null);
+const result = ref<VendorTestResponse | null>(null);
 const currentVendor = ref<Vendor | null>(null);
 
 const testModel = ref<string>('');
@@ -182,11 +184,12 @@ async function handleTest() {
         } else {
             message.warning(`测试完成，但上游返回错误 (HTTP ${res.status})`);
         }
-    } catch (error: any) {
+    } catch (error) {
+        const requestError = toAppRequestError(error);
         console.error('Test failed:', error);
         result.value = {
             success: false,
-            error: error.message || '请求失败'
+            error: requestError.message,
         };
         message.error('测试请求发送失败');
     } finally {

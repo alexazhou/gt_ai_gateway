@@ -98,6 +98,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import type { TableColumnsType, TablePaginationConfig } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import { ArrowUpOutlined, ArrowDownOutlined, InfoCircleOutlined } from '@ant-design/icons-vue';
 import { listModels } from '@/api/model';
@@ -106,12 +107,15 @@ import { useTable } from '@/composables/useTable';
 import { formatDate } from '@/utils/format';
 import DialogCreate from './DialogCreate.vue';
 import DialogEdit from './DialogEdit.vue';
-import type { Model } from '@/types/model';
+import type { Model, ModelQuery } from '@/types/model';
 import type { Vendor as VendorType } from '@/types/vendor';
 
 const router = useRouter();
 
-const { loading, data, pagination, searchForm, setPage, clearData } = useTable<Model>();
+const { loading, data, pagination, searchForm, setPage, clearData } = useTable<Model, ModelQuery>(10, {
+    keyword: undefined,
+    vendor_id: undefined,
+});
 
 const createDialogRef = ref();
 const editDialogRef = ref();
@@ -119,7 +123,7 @@ const editDialogRef = ref();
 const vendors = ref<VendorType[]>([]);
 const vendorsLoading = ref(false);
 
-const columns = [
+const columns: TableColumnsType<Model> = [
     { title: 'ID', key: 'id', dataIndex: 'id', width: 80 },
     { title: '模型名称', key: 'name', dataIndex: 'name' },
     { title: '所属供应商', key: 'vendor_id', dataIndex: 'vendor_id', width: 150 },
@@ -173,8 +177,8 @@ function handleReset() {
     loadData();
 }
 
-function handleTableChange(pag: any) {
-    setPage(pag.current, pag.pageSize);
+function handleTableChange(pag: TablePaginationConfig) {
+    setPage(pag.current ?? 1, pag.pageSize ?? pagination.pageSize);
 }
 
 function handleCreate() {
