@@ -13,13 +13,12 @@ export const useRecordStore = defineStore('record', () => {
     const currentRecord = ref<RecordDetail | null>(null);
     const total = ref(0);
     const loading = ref(false);
-    const autoRefresh = ref(false);
 
     // Getters
     const hasRecords = computed(() => records.value.length > 0);
 
     // Actions
-    async function fetchRecords(query?: RecordQuery): Promise<void> {
+    async function fetchRecords(query?: RecordQuery): Promise<{ total: number }> {
         loading.value = true;
         try {
             const response = await listRecords(query);
@@ -32,10 +31,12 @@ export const useRecordStore = defineStore('record', () => {
             }
             
             records.value = fetchedRecords;
+            return { total: total.value };
         } catch (error) {
             console.error('获取记录列表失败:', error);
             records.value = [];
             total.value = 0;
+            return { total: 0 };
         } finally {
             loading.value = false;
         }
@@ -161,10 +162,6 @@ export const useRecordStore = defineStore('record', () => {
         }
     }
 
-    function setAutoRefresh(value: boolean): void {
-        autoRefresh.value = value;
-    }
-
     function clearCurrentRecord(): void {
         currentRecord.value = null;
     }
@@ -179,13 +176,11 @@ export const useRecordStore = defineStore('record', () => {
         currentRecord,
         total,
         loading,
-        autoRefresh,
         hasRecords,
         fetchRecords,
         fetchLatest,
         enrichRecords,
         fetchRecordDetail,
-        setAutoRefresh,
         clearCurrentRecord,
         clearRecords,
     };

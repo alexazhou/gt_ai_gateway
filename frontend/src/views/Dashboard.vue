@@ -201,8 +201,6 @@ const systemInfo = ref({
     uptime: '',
 });
 
-const autoRefreshEnabled = ref(false);
-
 const lastUpdated = computed(() => statsStore.lastUpdated);
 
 // 保存服务器启动时间
@@ -222,20 +220,20 @@ const recentColumns = [
 
 // 自动刷新
 const {
+    isRunning: autoRefreshEnabled,
     start: startAutoRefresh,
     stop: stopAutoRefresh,
     remainingSeconds,
 } = useAutoRefresh({
     callback: () => {
-        refreshAll();
+        return loadDashboardData();
     },
     defaultInterval: 30000,
     immediate: false,
 });
 
 onMounted(() => {
-    loadSystemData();
-    refreshAll();
+    void loadDashboardData();
 });
 
 onUnmounted(() => {
@@ -246,20 +244,20 @@ onUnmounted(() => {
     }
 });
 
-async function refreshAll() {
+async function loadDashboardData(): Promise<void> {
     await Promise.all([
         statsStore.refreshAll(),
+        loadSystemData(),
     ]);
 }
 
-function handleRefresh() {
-    refreshAll();
-    loadSystemData();
+function handleRefresh(): void {
+    void loadDashboardData();
 }
 
-function handleAutoRefreshChange(checked: boolean) {
+function handleAutoRefreshChange(checked: boolean): void {
     if (checked) {
-        startAutoRefresh();
+        void startAutoRefresh();
     } else {
         stopAutoRefresh();
     }
@@ -269,9 +267,9 @@ async function loadSystemData() {
     loading.value = true;
     try {
         const [users, vendors, models, systemStatusData] = await Promise.all([
-            listUsers(),
-            listVendors(),
-            listModels(),
+            listUsers({ page: 1, pageSize: 1 }),
+            listVendors({ page: 1, pageSize: 1 }),
+            listModels({ page: 1, pageSize: 1 }),
             status().catch(() => null),
         ]);
 

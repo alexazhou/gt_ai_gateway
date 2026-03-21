@@ -78,38 +78,25 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, reactive } from 'vue';
-import type { TablePaginationConfig } from 'ant-design-vue';
-import { useRecordStore } from '@/stores/record';
+import { onMounted, onUnmounted } from 'vue';
 import { useAutoRefresh } from '@/composables/useAutoRefresh';
-import type { TablePaginationState } from '@/types';
-import type { RecordQuery, RequestStatus } from '@/types/record';
-import type { Dayjs } from 'dayjs';
+import { useRecordTable } from '@/composables/useRecordTable';
 import RecordTable from '@/components/common/RecordTable.vue';
 
-const recordStore = useRecordStore();
-
-const autoRefreshEnabled = ref(false);
-const dateRange = ref<[Dayjs, Dayjs] | null>(null);
-
-const searchForm = reactive<{
-    status?: RequestStatus;
-    user_name?: string;
-    model_name?: string;
-    start_time?: string;
-    end_time?: string;
-}>({});
-
-const pagination = reactive<TablePaginationState>({
-    current: 1,
-    pageSize: 10,
-    total: 0,
-    showSizeChanger: true,
-    showQuickJumper: true,
-    pageSizeOptions: ['10', '20', '50', '100'],
-});
+const {
+    recordStore,
+    searchForm,
+    pagination,
+    dateRange,
+    loadData,
+    handleSearch,
+    handleReset,
+    handleTableChange,
+    handleDateChange,
+} = useRecordTable();
 
 const {
+    isRunning: autoRefreshEnabled,
     start: startAutoRefresh,
     stop: stopAutoRefresh,
     remainingSeconds,
@@ -129,55 +116,9 @@ onUnmounted(() => {
     stopAutoRefresh();
 });
 
-async function loadData() {
-    const query: RecordQuery = {
-        page: pagination.current,
-        pageSize: pagination.pageSize,
-        ...searchForm,
-    };
-
-    await recordStore.fetchRecords(query);
-    pagination.total = recordStore.total;
-}
-
-function handleSearch() {
-    pagination.current = 1;
-    recordStore.clearRecords();
-    loadData();
-}
-
-function handleReset() {
-    searchForm.status = undefined;
-    searchForm.user_name = undefined;
-    searchForm.model_name = undefined;
-    searchForm.start_time = undefined;
-    searchForm.end_time = undefined;
-    dateRange.value = null;
-    pagination.current = 1;
-    pagination.pageSize = 10;
-    recordStore.clearRecords();
-    loadData();
-}
-
-function handleTableChange(pag: TablePaginationConfig) {
-    pagination.current = pag.current ?? 1;
-    pagination.pageSize = pag.pageSize ?? pagination.pageSize;
-    loadData();
-}
-
-function handleDateChange(dates: [Dayjs, Dayjs] | null) {
-    if (dates) {
-        searchForm.start_time = dates[0].format('YYYY-MM-DD HH:mm:ss');
-        searchForm.end_time = dates[1].format('YYYY-MM-DD HH:mm:ss');
-    } else {
-        searchForm.start_time = undefined;
-        searchForm.end_time = undefined;
-    }
-}
-
 function handleAutoRefreshChange(checked: boolean) {
     if (checked) {
-        startAutoRefresh();
+        void startAutoRefresh();
     } else {
         stopAutoRefresh();
     }
