@@ -11,11 +11,12 @@ interface UseAutoRefreshOptions {
 
 interface UseAutoReturn {
     isRunning: ReturnType<typeof ref<boolean>>;
+    isRefreshing: ReturnType<typeof ref<boolean>>;
     interval: ReturnType<typeof ref<number>>;
     remainingSeconds: ComputedRef<number>;
-    start: () => void;
+    start: () => Promise<void>;
     stop: () => void;
-    restart: () => void;
+    restart: () => Promise<void>;
     setIntervalValue: (value: number) => void;
 }
 
@@ -23,6 +24,7 @@ export function useAutoRefresh(options: UseAutoRefreshOptions): UseAutoReturn {
     const { callback, defaultInterval = 30000, immediate = false } = options;
 
     const isRunning = ref(false);
+    const isRefreshing = ref(false);
     const interval = ref(defaultInterval);
     const remainingMs = ref(defaultInterval);
     const remainingSeconds = computed(() => Math.max(0, Math.ceil(remainingMs.value / 1000)));
@@ -56,12 +58,25 @@ export function useAutoRefresh(options: UseAutoRefreshOptions): UseAutoReturn {
         }, 1000);
     }
 
+    async function runRefresh(): Promise<void> {
+        if (isRefreshing.value) {
+            return;
+        }
+
+        isRefreshing.value = true;
+        try {
+            await callback();
+        } finally {
+            isRefreshing.value = false;
+        }
+    }
+
     function scheduleNextRefresh(): void {
         clearTimers();
         startCountdown();
 
         refreshTimer = window.setTimeout(async () => {
-            await callback();
+            await runRefresh();
 
             if (isRunning.value) {
                 scheduleNextRefresh();
@@ -69,13 +84,18 @@ export function useAutoRefresh(options: UseAutoRefreshOptions): UseAutoReturn {
         }, interval.value);
     }
 
-    function start(): void {
+    async function start(): Promise<void> {
         if (isRunning.value) return;
 
         isRunning.value = true;
 
         // 立即执行一次
-        callback();
+        await runRefresh();
+
+        if (!isRunning.value) {
+            return;
+        }
+
         scheduleNextRefresh();
     }
 
@@ -85,15 +105,15 @@ export function useAutoRefresh(options: UseAutoRefreshOptions): UseAutoReturn {
         isRunning.value = false;
     }
 
-    function restart(): void {
+    async function restart(): Promise<void> {
         stop();
-        start();
+        await start();
     }
 
     function setIntervalValue(value: number): void {
         interval.value = value;
         if (isRunning.value) {
-            restart();
+            void restart();
         }
     }
 
@@ -104,11 +124,12 @@ export function useAutoRefresh(options: UseAutoRefreshOptions): UseAutoReturn {
 
     // 如果设置了立即执行，则启动
     if (immediate) {
-        start();
+        void start();
     }
 
     return {
         isRunning,
+        isRefreshing,
         interval,
         remainingSeconds,
         start,

@@ -1,9 +1,10 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { welcome } from '@/api/system';
+import { clearAuthToken, getAuthToken, setAuthToken } from '@/utils/authSession';
 
 export const useAuthStore = defineStore('auth', () => {
-    const token = ref<string>(localStorage.getItem('adminToken') || '');
+    const token = ref<string>(getAuthToken());
     const userType = ref<string>('');
     const isLoading = ref(false);
 
@@ -11,13 +12,13 @@ export const useAuthStore = defineStore('auth', () => {
 
     function setToken(newToken: string) {
         token.value = newToken;
-        localStorage.setItem('adminToken', newToken);
+        setAuthToken(newToken);
     }
 
     function clearToken() {
         token.value = '';
         userType.value = '';
-        localStorage.removeItem('adminToken');
+        clearAuthToken();
     }
 
     async function validateToken(): Promise<boolean> {

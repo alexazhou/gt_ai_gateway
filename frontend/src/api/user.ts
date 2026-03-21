@@ -1,7 +1,8 @@
 import request from '../utils/request';
 import type { User, CreateUserRequest, UpdateUserRequest, AdjustBalanceRequest } from '../types/user';
+import type { UserQuery } from '../types/user';
 
-export async function listUsers(params?: any): Promise<User[]> {
+export async function listUsers(params?: UserQuery): Promise<User[]> {
     return request.get('/user/list.json', { params });
 }
 

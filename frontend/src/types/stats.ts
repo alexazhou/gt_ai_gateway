@@ -10,7 +10,7 @@ export interface DashboardStats {
     today_requests: number;
 }
 
-export interface RecentRecord extends Record {}
+export type RecentRecord = Record;
 
 export interface TimeRangeStats {
     date: string;

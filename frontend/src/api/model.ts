@@ -1,7 +1,8 @@
 import request from '../utils/request';
 import type { Model, CreateModelRequest, UpdateModelRequest } from '../types/model';
+import type { ModelQuery } from '../types/model';
 
-export async function listModels(params?: any): Promise<Model[]> {
+export async function listModels(params?: ModelQuery): Promise<Model[]> {
     return request.get('/model/list.json', { params });
 }
 

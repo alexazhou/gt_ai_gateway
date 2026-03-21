@@ -53,13 +53,6 @@ const strokeIconProps = {
     'aria-hidden': 'true',
 };
 
-const fillIconProps = {
-    viewBox: '0 0 24 24',
-    width: '24',
-    height: '24',
-    'aria-hidden': 'true',
-};
-
 const SunIcon = {
     render() {
         return h(

@@ -1,7 +1,8 @@
 import request from '../utils/request';
 import type { Vendor, CreateVendorRequest, UpdateVendorRequest } from '../types/vendor';
+import type { VendorQuery } from '../types/vendor';
 
-export async function listVendors(params?: any): Promise<Vendor[]> {
+export async function listVendors(params?: VendorQuery): Promise<Vendor[]> {
     return request.get('/vendor/list.json', { params });
 }
 
@@ -25,6 +26,10 @@ export async function deleteVendor(id: number): Promise<{ success: boolean }> {
     return request.delete(`/vendor/${id}`);
 }
 
-export async function testVendor(id: number, format: string = 'openai', model?: string): Promise<any> {
+export async function testVendor(
+    id: number,
+    format: string = 'openai',
+    model?: string,
+): Promise<Record<string, unknown>> {
     return request.post(`/vendor/${id}/test.json`, { format, model });
 }

@@ -1,6 +1,8 @@
 import axios, { AxiosError } from 'axios';
 import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import { message } from 'ant-design-vue/es';
+import { clearAuthToken, getAuthToken } from './authSession';
+import { normalizeAxiosError } from './requestError';
 
 const instance: AxiosInstance = axios.create({
     baseURL: import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? '/api' : ''),
@@ -12,7 +14,7 @@ const instance: AxiosInstance = axios.create({
 
 instance.interceptors.request.use(
     (config: InternalAxiosRequestConfig) => {
-        const token = localStorage.getItem('adminToken');
+        const token = getAuthToken();
         if (token && config.headers) {
             config.headers['Authorization'] = `Bearer ${token}`;
         }
@@ -27,15 +29,17 @@ instance.interceptors.response.use(
     (response) => {
         return response.data;
     },
-    (error: AxiosError) => {
-        const status = error.response?.status;
-        const errorMessage = (error.response?.data as any)?.error || error.message;
+    (error: AxiosError<unknown>) => {
+        const requestError = normalizeAxiosError(error);
+        const { status } = requestError;
 
         switch (status) {
             case 401:
                 message.error('未授权，请重新登录');
-                localStorage.removeItem('adminToken');
-                window.location.href = '/login';
+                clearAuthToken();
+                if (typeof window !== 'undefined' && window.location.hash !== '#/login') {
+                    window.location.hash = '#/login';
+                }
                 break;
             case 403:
                 message.error('权限不足');
@@ -47,12 +51,12 @@ instance.interceptors.response.use(
                 message.error('服务器错误');
                 break;
             default:
-                if (errorMessage) {
-                    message.error(errorMessage);
+                if (requestError.message) {
+                    message.error(requestError.message);
                 }
         }
 
-        return Promise.reject(error);
+        return Promise.reject(requestError);
     }
 );
 

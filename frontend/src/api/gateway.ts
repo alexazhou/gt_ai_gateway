@@ -1,5 +1,7 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import type { ApiTestRequest, StreamChunk } from '@/types/gateway';
+import { getAuthToken } from '@/utils/authSession';
+import { createHttpError, toAppRequestError } from '@/utils/requestError';
 
 interface StreamCallbacks {
     onMessage?: (content: string) => void;
@@ -7,7 +9,31 @@ interface StreamCallbacks {
     onError?: (error: string) => void;
 }
 
+interface ChatCompletionResponse {
+    choices?: Array<{
+        message?: {
+            content?: string;
+        };
+    }>;
+}
+
+interface AnthropicMessageResponse {
+    content?: Array<{
+        text?: string;
+    }>;
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+
+async function parseErrorResponse(response: Response): Promise<unknown> {
+    return response.json().catch(() => undefined);
+}
+
+async function ensureOk(response: Response, fallback: string = '请求失败'): Promise<void> {
+    if (!response.ok) {
+        throw createHttpError(response.status, await parseErrorResponse(response), fallback);
+    }
+}
 
 /**
  * 发送 Chat Completions 请求（支持流式）
@@ -26,7 +52,7 @@ export async function chatCompletions(
         stream: stream ?? false,
     };
 
-    const token = localStorage.getItem('adminToken');
+    const token = getAuthToken();
 
     if (!stream) {
         // 非流式请求
@@ -41,19 +67,15 @@ export async function chatCompletions(
             });
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ error: '请求失败' }));
-                const errorMsg = typeof errorData.error === 'object' 
-                    ? (errorData.error.message || JSON.stringify(errorData.error)) 
-                    : (errorData.error || errorData.message || `HTTP ${response.status}`);
-                throw new Error(errorMsg);
+                throw createHttpError(response.status, await parseErrorResponse(response), `HTTP ${response.status}`);
             }
 
-            const result = await response.json();
+            const result = await response.json() as ChatCompletionResponse;
             const content = result.choices?.[0]?.message?.content || '';
             callbacks.onMessage?.(content);
             callbacks.onComplete?.();
-        } catch (error: any) {
-            callbacks.onError?.(error.message || '请求失败');
+        } catch (error) {
+            callbacks.onError?.(toAppRequestError(error).message);
         }
         return;
     }
@@ -70,13 +92,7 @@ export async function chatCompletions(
             },
             body: JSON.stringify(requestBody),
             async onopen(response) {
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ error: '请求失败' }));
-                    const errorMsg = typeof errorData.error === 'object' 
-                        ? (errorData.error.message || JSON.stringify(errorData.error)) 
-                        : (errorData.error || errorData.message || `HTTP ${response.status}`);
-                    throw new Error(errorMsg);
-                }
+                await ensureOk(response, `HTTP ${response.status}`);
                 return Promise.resolve();
             },
             onmessage(msg) {
@@ -100,14 +116,13 @@ export async function chatCompletions(
                 callbacks.onComplete?.();
             },
             onerror(err) {
-                // 如果 onopen 抛出了错误，这里会捕获到
-                callbacks.onError?.(err.message || '流式请求失败');
-                throw err;
+                const requestError = toAppRequestError(err, '流式请求失败');
+                callbacks.onError?.(requestError.message);
+                throw requestError;
             },
         });
-    } catch (error: any) {
-        // 这里也会捕获到错误
-        callbacks.onError?.(error.message || '请求失败');
+    } catch (error) {
+        callbacks.onError?.(toAppRequestError(error).message);
     }
 }
 
@@ -124,7 +139,7 @@ export async function anthropicMessages(
     const systemMessage = messages.find(m => m.role === 'system');
     const otherMessages = messages.filter(m => m.role !== 'system');
 
-    const requestBody: any = {
+    const requestBody: Record<string, unknown> = {
         model,
         messages: otherMessages.map(m => ({
             role: m.role,
@@ -139,7 +154,7 @@ export async function anthropicMessages(
         requestBody.system = systemMessage.content;
     }
 
-    const token = localStorage.getItem('adminToken');
+    const token = getAuthToken();
 
     if (!stream) {
         // 非流式请求
@@ -154,19 +169,15 @@ export async function anthropicMessages(
             });
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ error: '请求失败' }));
-                const errorMsg = typeof errorData.error === 'object' 
-                    ? (errorData.error.message || JSON.stringify(errorData.error)) 
-                    : (errorData.error || errorData.message || `HTTP ${response.status}`);
-                throw new Error(errorMsg);
+                throw createHttpError(response.status, await parseErrorResponse(response), `HTTP ${response.status}`);
             }
 
-            const result = await response.json();
+            const result = await response.json() as AnthropicMessageResponse;
             const content = result.content?.[0]?.text || '';
             callbacks.onMessage?.(content);
             callbacks.onComplete?.();
-        } catch (error: any) {
-            callbacks.onError?.(error.message || '请求失败');
+        } catch (error) {
+            callbacks.onError?.(toAppRequestError(error).message);
         }
         return;
     }
@@ -183,13 +194,7 @@ export async function anthropicMessages(
             },
             body: JSON.stringify(requestBody),
             async onopen(response) {
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ error: '请求失败' }));
-                    const errorMsg = typeof errorData.error === 'object' 
-                        ? (errorData.error.message || JSON.stringify(errorData.error)) 
-                        : (errorData.error || errorData.message || `HTTP ${response.status}`);
-                    throw new Error(errorMsg);
-                }
+                await ensureOk(response, `HTTP ${response.status}`);
                 return Promise.resolve();
             },
             onmessage(msg) {
@@ -213,12 +218,13 @@ export async function anthropicMessages(
                 callbacks.onComplete?.();
             },
             onerror(err) {
-                callbacks.onError?.(err.message || '流式请求失败');
-                throw err;
+                const requestError = toAppRequestError(err, '流式请求失败');
+                callbacks.onError?.(requestError.message);
+                throw requestError;
             },
         });
-    } catch (error: any) {
-        callbacks.onError?.(error.message || '请求失败');
+    } catch (error) {
+        callbacks.onError?.(toAppRequestError(error).message);
     }
 }
 

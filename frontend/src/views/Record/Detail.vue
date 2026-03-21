@@ -198,7 +198,7 @@ function downloadJson(data: string | null, type: 'request' | 'response') {
         URL.revokeObjectURL(url);
 
         message.success('下载成功');
-    } catch (error) {
+    } catch (_error) {
         message.error('下载失败：数据格式错误');
     }
 }

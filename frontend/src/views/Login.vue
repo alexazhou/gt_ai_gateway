@@ -65,7 +65,7 @@ async function handleLogin() {
         } else {
             message.error('Token 验证失败');
         }
-    } catch (error) {
+    } catch (_error) {
         message.error('登录失败，请检查 Token');
     } finally {
         loading.value = false;
