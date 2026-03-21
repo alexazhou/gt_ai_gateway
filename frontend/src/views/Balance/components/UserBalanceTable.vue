@@ -69,10 +69,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue';
-import type { TableColumnsType, TablePaginationConfig } from 'ant-design-vue';
+import type { TableColumnsType } from 'ant-design-vue';
 import { listUsers } from '@/api/user';
-import { useTable } from '@/composables/useTable';
+import { useResourceTable } from '@/composables/useResourceTable';
 import TokenDisplay from '@/components/common/TokenDisplay.vue';
 import type { User, UserQuery } from '@/types/user';
 
@@ -80,8 +79,14 @@ const emit = defineEmits<{
     adjust: [user: User];
 }>();
 
-const { loading, data, pagination, searchForm, setPage, clearData } = useTable<User, UserQuery>(10, {
-    keyword: undefined,
+const { loading, data, pagination, searchForm, handleSearch, handleReset, handleTableChange } = useResourceTable<User, UserQuery>({
+    initialSearchForm: {
+        keyword: undefined,
+    },
+    fetcher: listUsers,
+    resetSearchForm: (form) => {
+        form.keyword = undefined;
+    },
 });
 
 const columns: TableColumnsType<User> = [
@@ -91,41 +96,6 @@ const columns: TableColumnsType<User> = [
     { title: '余额', key: 'balance', dataIndex: 'balance', width: 150 },
     { title: '操作', key: 'action', width: 100, fixed: 'right' as const },
 ];
-
-onMounted(() => {
-    loadData();
-});
-
-async function loadData() {
-    loading.value = true;
-    try {
-        const result = await listUsers(searchForm);
-        data.value = result;
-        pagination.total = result.length;
-    } catch (error) {
-        console.error('加载用户列表失败:', error);
-    } finally {
-        loading.value = false;
-    }
-}
-
-function handleSearch() {
-    pagination.current = 1;
-    clearData();
-    loadData();
-}
-
-function handleReset() {
-    searchForm.keyword = undefined;
-    pagination.current = 1;
-    pagination.pageSize = 10;
-    clearData();
-    loadData();
-}
-
-function handleTableChange(pag: TablePaginationConfig) {
-    setPage(pag.current ?? 1, pag.pageSize ?? pagination.pageSize);
-}
 
 function handleAdjust(record: User) {
     emit('adjust', record);

@@ -98,12 +98,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import type { TableColumnsType, TablePaginationConfig } from 'ant-design-vue';
+import type { TableColumnsType } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import { ArrowUpOutlined, ArrowDownOutlined, InfoCircleOutlined } from '@ant-design/icons-vue';
 import { listModels } from '@/api/model';
 import { listVendors } from '@/api/vendor';
-import { useTable } from '@/composables/useTable';
+import { useResourceTable } from '@/composables/useResourceTable';
 import { formatDate } from '@/utils/format';
 import DialogCreate from './DialogCreate.vue';
 import DialogEdit from './DialogEdit.vue';
@@ -112,9 +112,16 @@ import type { Vendor as VendorType } from '@/types/vendor';
 
 const router = useRouter();
 
-const { loading, data, pagination, searchForm, setPage, clearData } = useTable<Model, ModelQuery>(10, {
-    keyword: undefined,
-    vendor_id: undefined,
+const { loading, data, pagination, searchForm, loadData, handleSearch, handleReset, handleTableChange } = useResourceTable<Model, ModelQuery>({
+    initialSearchForm: {
+        keyword: undefined,
+        vendor_id: undefined,
+    },
+    fetcher: listModels,
+    resetSearchForm: (form) => {
+        form.keyword = undefined;
+        form.vendor_id = undefined;
+    },
 });
 
 const createDialogRef = ref();
@@ -145,41 +152,8 @@ async function loadVendors() {
 }
 
 onMounted(() => {
-    loadVendors();
-    loadData();
+    void loadVendors();
 });
-
-async function loadData() {
-    loading.value = true;
-    try {
-        const result = await listModels(searchForm);
-        data.value = result;
-        pagination.total = result.length;
-    } catch (error) {
-        console.error('加载模型列表失败:', error);
-    } finally {
-        loading.value = false;
-    }
-}
-
-function handleSearch() {
-    pagination.current = 1;
-    clearData();
-    loadData();
-}
-
-function handleReset() {
-    searchForm.keyword = undefined;
-    searchForm.vendor_id = undefined;
-    pagination.current = 1;
-    pagination.pageSize = 10;
-    clearData();
-    loadData();
-}
-
-function handleTableChange(pag: TablePaginationConfig) {
-    setPage(pag.current ?? 1, pag.pageSize ?? pagination.pageSize);
-}
 
 function handleCreate() {
     createDialogRef.value?.open();

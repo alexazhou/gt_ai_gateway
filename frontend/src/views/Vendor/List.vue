@@ -79,12 +79,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import type { TableColumnsType, TablePaginationConfig } from 'ant-design-vue';
+import { ref } from 'vue';
+import type { TableColumnsType } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import { message, Modal } from 'ant-design-vue/es';
 import { listVendors, deleteVendor } from '@/api/vendor';
-import { useTable } from '@/composables/useTable';
+import { useResourceTable } from '@/composables/useResourceTable';
 import { formatDate } from '@/utils/format';
 import DialogCreate from './DialogCreate.vue';
 import DialogEdit from './DialogEdit.vue';
@@ -94,9 +94,16 @@ import { AppRequestError, toAppRequestError } from '@/utils/requestError';
 
 const router = useRouter();
 
-const { loading, data, pagination, searchForm, setPage, clearData } = useTable<Vendor, VendorQuery>(10, {
-    keyword: undefined,
-    type: undefined,
+const { loading, data, pagination, searchForm, loadData, handleSearch, handleReset, handleTableChange } = useResourceTable<Vendor, VendorQuery>({
+    initialSearchForm: {
+        keyword: undefined,
+        type: undefined,
+    },
+    fetcher: listVendors,
+    resetSearchForm: (form) => {
+        form.keyword = undefined;
+        form.type = undefined;
+    },
 });
 
 const createDialogRef = ref();
@@ -110,42 +117,6 @@ const columns: TableColumnsType<Vendor> = [
     { title: '创建时间', key: 'created_at', dataIndex: 'created_at', width: 180 },
     { title: '操作', key: 'action', width: 180, fixed: 'right' as const },
 ];
-
-onMounted(() => {
-    loadData();
-});
-
-async function loadData() {
-    loading.value = true;
-    try {
-        const result = await listVendors(searchForm);
-        data.value = result;
-        pagination.total = result.length;
-    } catch (error) {
-        console.error('加载供应商列表失败:', error);
-    } finally {
-        loading.value = false;
-    }
-}
-
-function handleSearch() {
-    pagination.current = 1;
-    clearData();
-    loadData();
-}
-
-function handleReset() {
-    searchForm.keyword = undefined;
-    searchForm.type = undefined;
-    pagination.current = 1;
-    pagination.pageSize = 10;
-    clearData();
-    loadData();
-}
-
-function handleTableChange(pag: TablePaginationConfig) {
-    setPage(pag.current ?? 1, pag.pageSize ?? pagination.pageSize);
-}
 
 function handleCreate() {
     createDialogRef.value?.open();
@@ -182,7 +153,7 @@ function handleDelete(record: Vendor) {
             try {
                 await deleteVendor(record.id);
                 message.success('删除成功');
-                loadData();
+                void loadData();
             } catch (error) {
                 const requestError: AppRequestError = toAppRequestError(error, '删除失败');
                 message.error(requestError.message);
