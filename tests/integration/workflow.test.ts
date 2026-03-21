@@ -108,7 +108,7 @@ describe("Integration Tests", () => {
 
             // Verify model exists
             const modelsResponse = await requestHelper.get("/model/list.json", adminToken);
-            const model = modelsResponse.body.find(
+            const model = modelsResponse.body.list.find(
                 (m: any) => m.id === modelId,
             );
             expect(model).toBeDefined();

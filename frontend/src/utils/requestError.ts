@@ -3,17 +3,20 @@ import type { AxiosError } from 'axios';
 interface AppRequestErrorOptions {
     status?: number;
     data?: unknown;
+    handled?: boolean;
 }
 
 export class AppRequestError extends Error {
     status?: number;
     data?: unknown;
+    handled: boolean;
 
     constructor(message: string, options: AppRequestErrorOptions = {}) {
         super(message);
         this.name = 'AppRequestError';
         this.status = options.status;
         this.data = options.data;
+        this.handled = options.handled ?? false;
     }
 }
 

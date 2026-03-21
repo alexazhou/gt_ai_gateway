@@ -82,7 +82,7 @@
 import { ref } from 'vue';
 import type { TableColumnsType } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
-import { message, Modal } from 'ant-design-vue/es';
+import { Modal } from 'ant-design-vue/es';
 import { listVendors, deleteVendor } from '@/api/vendor';
 import { useResourceTable } from '@/composables/useResourceTable';
 import { formatDate } from '@/utils/format';
@@ -90,7 +90,7 @@ import DialogCreate from './DialogCreate.vue';
 import DialogEdit from './DialogEdit.vue';
 import DialogTest from './DialogTest.vue';
 import type { Vendor, VendorQuery, VendorType } from '@/types/vendor';
-import { AppRequestError, toAppRequestError } from '@/utils/requestError';
+import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 
 const router = useRouter();
 
@@ -152,11 +152,10 @@ function handleDelete(record: Vendor) {
         onOk: async () => {
             try {
                 await deleteVendor(record.id);
-                message.success('删除成功');
+                notifySuccess('删除成功');
                 void loadData();
             } catch (error) {
-                const requestError: AppRequestError = toAppRequestError(error, '删除失败');
-                message.error(requestError.message);
+                notifyRequestError(error, '删除失败');
             }
         },
     });

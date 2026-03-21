@@ -77,11 +77,11 @@
 
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
-import { message } from 'ant-design-vue/es';
 import type { FormInstance } from 'ant-design-vue/es';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons-vue';
 import { updateVendor } from '@/api/vendor';
 import type { UpdateVendorRequest, Vendor, VendorType, VendorUrls } from '@/types/vendor';
+import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 
 const emit = defineEmits<{
     success: [vendor: Vendor];
@@ -167,11 +167,11 @@ async function handleOk() {
 
         loading.value = true;
         const vendor = await updateVendor(currentId.value, updateData);
-        message.success('更新成功');
+        notifySuccess('更新成功');
         emit('success', vendor);
         handleCancel();
     } catch (error) {
-        console.error('更新失败:', error);
+        notifyRequestError(error, '更新失败');
     } finally {
         loading.value = false;
     }

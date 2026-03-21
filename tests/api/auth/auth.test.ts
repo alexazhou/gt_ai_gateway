@@ -122,7 +122,7 @@ describe("Auth API Tests", () => {
                 );
 
                 expect(response.status).toBe(200);
-                expect(Array.isArray(response.body)).toBe(true);
+                expect(Array.isArray(response.body.list)).toBe(true);
             });
         });
 
@@ -259,7 +259,7 @@ describe("Auth API Tests", () => {
                 );
 
                 expect(response.status).toBe(200);
-                expect(Array.isArray(response.body)).toBe(true);
+                expect(Array.isArray(response.body.list)).toBe(true);
             });
         });
 
@@ -350,7 +350,7 @@ describe("Auth API Tests", () => {
                 );
 
                 expect(response.status).toBe(200);
-                expect(Array.isArray(response.body)).toBe(true);
+                expect(Array.isArray(response.body.list)).toBe(true);
             });
         });
 
@@ -370,8 +370,8 @@ describe("Auth API Tests", () => {
             it("should return 200 with admin token", async () => {
                 // First get list to find a valid user ID
                 const listResponse = await requestHelper.get("/user/list.json", adminToken);
-                expect(listResponse.body.length).toBeGreaterThan(0);
-                const userId = listResponse.body[0].id;
+                expect(listResponse.body.list.length).toBeGreaterThan(0);
+                const userId = listResponse.body.list[0].id;
 
                 const response = await requestHelper.get(`/user/${userId}`, adminToken);
 

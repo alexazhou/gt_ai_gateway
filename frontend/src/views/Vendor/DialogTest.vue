@@ -81,14 +81,13 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { message } from 'ant-design-vue/es';
 import { testVendor } from '@/api/vendor';
 import type { VendorTestResponse } from '@/api/vendor';
 import { listModels } from '@/api/model';
 import type { Vendor } from '@/types/vendor';
 import type { Model } from '@/types/model';
-import { toAppRequestError } from '@/utils/requestError';
 import { normalizeListResponse } from '@/utils/listResponse';
+import { notifyRequestError, notifySuccess, notifyWarning } from '@/utils/requestFeedback';
 
 const visible = ref(false);
 const loading = ref(false);
@@ -155,14 +154,17 @@ async function open(vendor: Vendor) {
 async function loadVendorModels(vendorId: number) {
     modelsLoading.value = true;
     try {
-        const allModels = normalizeListResponse(await listModels()).list;
-        vendorModels.value = allModels.filter(m => m.vendor_id === vendorId);
+        vendorModels.value = normalizeListResponse(await listModels({
+            vendor_id: vendorId,
+            page: 1,
+            pageSize: 1000,
+        })).list;
         // 如果有模型，默认选中第一个
         if (vendorModels.value.length > 0) {
             testModel.value = vendorModels.value[0]?.name || '';
         }
     } catch (error) {
-        console.error('Failed to load models:', error);
+        notifyRequestError(error, '加载模型列表失败');
     } finally {
         modelsLoading.value = false;
     }
@@ -181,18 +183,16 @@ async function handleTest() {
         const res = await testVendor(currentVendor.value.id, format.value, testModel.value);
         result.value = res;
         if (res.success) {
-            message.success('测试完成，连接正常');
+            notifySuccess('测试完成，连接正常');
         } else {
-            message.warning(`测试完成，但上游返回错误 (HTTP ${res.status})`);
+            notifyWarning(`测试完成，但上游返回错误 (HTTP ${res.status})`);
         }
     } catch (error) {
-        const requestError = toAppRequestError(error);
-        console.error('Test failed:', error);
+        const requestError = notifyRequestError(error, '测试请求发送失败');
         result.value = {
             success: false,
             error: requestError.message,
         };
-        message.error('测试请求发送失败');
     } finally {
         loading.value = false;
     }

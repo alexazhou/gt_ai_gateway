@@ -4,6 +4,7 @@ import { SgModel } from "../model/sgModel";
 import vendorService from "../service/vendorService";
 import customError from "../util/customError";
 import { ApiFormat } from "../constants";
+import { createListResponse, parsePaginationQuery } from "../util/pagination";
 
 
 /**
@@ -23,9 +24,22 @@ function formatVendor(vendor: SgVendor) {
 
 
 async function listVendors(c: Context) {
-    const vendors = await SgVendor.query().get();
+    const query = c.req.query();
+    const { pageSize, offset } = parsePaginationQuery(query);
+    const dbQuery = SgVendor.query().orderBy("id", "desc");
+
+    if (query.type) {
+        dbQuery.where("type", query.type);
+    }
+
+    if (query.keyword) {
+        dbQuery.where("name", "like", `%${query.keyword}%`);
+    }
+
+    const total = Number(await dbQuery.clone().count() || 0);
+    const vendors = await dbQuery.limit(pageSize).offset(offset).get();
     const formattedVendors = vendors.map(formatVendor);
-    return c.json(formattedVendors);
+    return c.json(createListResponse(formattedVendors, total));
 }
 
 

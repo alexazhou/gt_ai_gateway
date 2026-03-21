@@ -2,10 +2,25 @@ import { Context } from "hono";
 import { SgUser } from "../model/sgUser";
 import { UserType } from "../constants";
 import userService from "../service/userService";
+import { createListResponse, parsePaginationQuery } from "../util/pagination";
 
 async function listUsers(c: Context) {
-    const users = await SgUser.query().get();
-    return c.json(users);
+    const query = c.req.query();
+    const { pageSize, offset } = parsePaginationQuery(query);
+
+    const dbQuery = SgUser.query().orderBy("id", "desc");
+
+    if (query.type) {
+        dbQuery.where("type", query.type);
+    }
+
+    if (query.keyword) {
+        dbQuery.where("name", "like", `%${query.keyword}%`);
+    }
+
+    const total = Number(await dbQuery.clone().count() || 0);
+    const users = await dbQuery.limit(pageSize).offset(offset).get();
+    return c.json(createListResponse(users, total));
 }
 
 async function getUser(c: Context) {

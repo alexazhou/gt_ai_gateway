@@ -144,7 +144,7 @@ const columns: TableColumnsType<Model> = [
 async function loadVendors() {
     vendorsLoading.value = true;
     try {
-        vendors.value = normalizeListResponse(await listVendors()).list;
+        vendors.value = normalizeListResponse(await listVendors({ page: 1, pageSize: 1000 })).list;
     } catch (error) {
         console.error('加载供应商列表失败:', error);
     } finally {

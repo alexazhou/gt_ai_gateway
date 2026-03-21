@@ -1,7 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
-import { message } from 'ant-design-vue/es';
-import { clearAuthToken, getAuthToken } from './authSession';
+import { getAuthToken } from './authSession';
+import { notifyRequestError } from './requestFeedback';
 import { normalizeAxiosError } from './requestError';
 
 const instance: AxiosInstance = axios.create({
@@ -31,31 +31,7 @@ instance.interceptors.response.use(
     },
     (error: AxiosError<unknown>) => {
         const requestError = normalizeAxiosError(error);
-        const { status } = requestError;
-
-        switch (status) {
-            case 401:
-                message.error('未授权，请重新登录');
-                clearAuthToken();
-                if (typeof window !== 'undefined' && window.location.hash !== '#/login') {
-                    window.location.hash = '#/login';
-                }
-                break;
-            case 403:
-                message.error('权限不足');
-                break;
-            case 404:
-                message.error('资源不存在');
-                break;
-            case 500:
-                message.error('服务器错误');
-                break;
-            default:
-                if (requestError.message) {
-                    message.error(requestError.message);
-                }
-        }
-
+        notifyRequestError(requestError);
         return Promise.reject(requestError);
     }
 );

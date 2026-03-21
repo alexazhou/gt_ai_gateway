@@ -80,7 +80,6 @@
 
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
-import { message } from 'ant-design-vue/es';
 import type { FormInstance } from 'ant-design-vue/es';
 import { InfoCircleOutlined } from '@ant-design/icons-vue';
 import { updateModel } from '@/api/model';
@@ -88,6 +87,7 @@ import { listVendors } from '@/api/vendor';
 import type { Model } from '@/types/model';
 import type { Vendor as VendorType } from '@/types/vendor';
 import { normalizeListResponse } from '@/utils/listResponse';
+import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 
 const emit = defineEmits<{
     success: [model: Model];
@@ -118,9 +118,9 @@ const vendorsLoading = ref(false);
 async function loadVendors() {
     vendorsLoading.value = true;
     try {
-        vendors.value = normalizeListResponse(await listVendors()).list;
+        vendors.value = normalizeListResponse(await listVendors({ page: 1, pageSize: 1000 })).list;
     } catch (error) {
-        console.error('加载供应商列表失败:', error);
+        notifyRequestError(error, '加载供应商列表失败');
     } finally {
         vendorsLoading.value = false;
     }
@@ -133,7 +133,7 @@ function open(model: Model) {
     formState.input_price = model.input_price;
     formState.output_price = model.output_price;
     currentId.value = model.id;
-    loadVendors();
+    void loadVendors();
     visible.value = true;
 }
 
@@ -142,11 +142,11 @@ async function handleOk() {
         await formRef.value?.validate();
         loading.value = true;
         const model = await updateModel(currentId.value, formState);
-        message.success('更新成功');
+        notifySuccess('更新成功');
         emit('success', model);
         handleCancel();
     } catch (error) {
-        console.error('更新失败:', error);
+        notifyRequestError(error, '更新失败');
     } finally {
         loading.value = false;
     }

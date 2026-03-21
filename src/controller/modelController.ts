@@ -3,6 +3,7 @@ import { SgModel } from "../model/sgModel";
 import { SgVendor } from "../model/sgVendor";
 import modelService from "../service/modelService";
 import customError from "../util/customError";
+import { createListResponse, parsePaginationQuery } from "../util/pagination";
 
 
 async function checkDuplicateEnabledModel(
@@ -59,8 +60,24 @@ async function createModel(c: Context) {
 
 
 async function listModels(c: Context) {
-    const modelConfigs = await SgModel.query().get();
-    return c.json(modelConfigs);
+    const query = c.req.query();
+    const { pageSize, offset } = parsePaginationQuery(query);
+    const dbQuery = SgModel.query().orderBy("id", "desc");
+
+    if (query.vendor_id) {
+        const vendorId = parseInt(query.vendor_id, 10);
+        if (!isNaN(vendorId)) {
+            dbQuery.where("vendor_id", vendorId);
+        }
+    }
+
+    if (query.keyword) {
+        dbQuery.where("name", "like", `%${query.keyword}%`);
+    }
+
+    const total = Number(await dbQuery.clone().count() || 0);
+    const modelConfigs = await dbQuery.limit(pageSize).offset(offset).get();
+    return c.json(createListResponse(modelConfigs, total));
 }
 
 

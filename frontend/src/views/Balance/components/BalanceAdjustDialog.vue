@@ -64,10 +64,10 @@
 
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
-import { message } from 'ant-design-vue/es';
 import type { FormInstance } from 'ant-design-vue/es';
 import { adjustUserBalance } from '@/api/user';
 import type { User } from '@/types/user';
+import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 
 const emit = defineEmits<{
     success: [];
@@ -116,11 +116,11 @@ async function handleOk() {
             remark: formState.remark,
         });
 
-        message.success(formState.type === 'recharge' ? '充值成功' : '扣减成功');
+        notifySuccess(formState.type === 'recharge' ? '充值成功' : '扣减成功');
         emit('success');
         handleCancel();
     } catch (error) {
-        console.error('调整余额失败:', error);
+        notifyRequestError(error, '调整余额失败');
     } finally {
         loading.value = false;
     }

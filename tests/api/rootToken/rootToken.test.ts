@@ -58,10 +58,10 @@ describe("Root Token Tests", () => {
                 const response = await requestHelper.get("/user/list.json", ROOT_TOKEN);
 
                 expect(response.status).toBe(200);
-                expect(Array.isArray(response.body)).toBe(true);
+                expect(Array.isArray(response.body.list)).toBe(true);
 
                 // Root user should not appear in the list
-                const rootUser = response.body.find((u: any) => u.id === ROOT_USER_ID);
+                const rootUser = response.body.list.find((u: any) => u.id === ROOT_USER_ID);
                 expect(rootUser).toBeUndefined();
             });
 
@@ -81,7 +81,7 @@ describe("Root Token Tests", () => {
                 const response = await requestHelper.get("/vendor/list.json", ROOT_TOKEN);
 
                 expect(response.status).toBe(200);
-                expect(Array.isArray(response.body)).toBe(true);
+                expect(Array.isArray(response.body.list)).toBe(true);
             });
         });
 
@@ -90,7 +90,7 @@ describe("Root Token Tests", () => {
                 const response = await requestHelper.get("/model/list.json", ROOT_TOKEN);
 
                 expect(response.status).toBe(200);
-                expect(Array.isArray(response.body)).toBe(true);
+                expect(Array.isArray(response.body.list)).toBe(true);
             });
         });
 

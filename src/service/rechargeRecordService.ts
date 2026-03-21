@@ -20,7 +20,13 @@ async function listRechargeRecords(query: RechargeRecordsQuery = {}) {
         dbQuery.where("type", type);
     }
 
-    return dbQuery.orderBy("id", "desc").limit(limit).offset(offset).get();
+    const total = Number(await dbQuery.clone().count() || 0);
+    const list = await dbQuery.orderBy("id", "desc").limit(limit).offset(offset).get();
+
+    return {
+        list,
+        total,
+    };
 }
 
 async function getRechargeRecord(id: number) {

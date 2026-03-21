@@ -113,13 +113,13 @@ describe("User API (Positive)", () => {
             const response = await requestHelper.get("/user/list.json", adminToken);
 
             expect(response.status).toBe(200);
-            expect(Array.isArray(response.body)).toBe(true);
-            expect(response.body.length).toBeGreaterThan(0);
+            expect(Array.isArray(response.body.list)).toBe(true);
+            expect(response.body.total).toBeGreaterThan(0);
         });
 
         it("should return users with correct structure", async () => {
             const response = await requestHelper.get("/user/list.json", adminToken);
-            const user = response.body[0];
+            const user = response.body.list[0];
 
             expect(user).toHaveProperty("id");
             expect(user).toHaveProperty("name");
@@ -131,7 +131,7 @@ describe("User API (Positive)", () => {
         it("should return all users created in tests", async () => {
             const response = await requestHelper.get("/user/list.json", adminToken);
 
-            expect(response.body.length).toBeGreaterThanOrEqual(4); // At least the users we created
+            expect(response.body.total).toBeGreaterThanOrEqual(4); // At least the users we created
         });
     });
 

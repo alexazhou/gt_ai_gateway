@@ -39,13 +39,13 @@
 
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
-import { message } from 'ant-design-vue/es';
 import type { FormInstance } from 'ant-design-vue/es';
 import { createModel } from '@/api/model';
 import { listVendors } from '@/api/vendor';
 import type { Model } from '@/types/model';
 import type { Vendor as VendorType } from '@/types/vendor';
 import { normalizeListResponse } from '@/utils/listResponse';
+import { notifyError, notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 
 const emit = defineEmits<{
     success: [model: Model];
@@ -72,16 +72,16 @@ const vendorsLoading = ref(false);
 async function loadVendors() {
     vendorsLoading.value = true;
     try {
-        vendors.value = normalizeListResponse(await listVendors()).list;
+        vendors.value = normalizeListResponse(await listVendors({ page: 1, pageSize: 1000 })).list;
     } catch (error) {
-        console.error('加载供应商列表失败:', error);
+        notifyRequestError(error, '加载供应商列表失败');
     } finally {
         vendorsLoading.value = false;
     }
 }
 
 function open() {
-    loadVendors();
+    void loadVendors();
     visible.value = true;
 }
 
@@ -91,7 +91,7 @@ async function handleOk() {
         loading.value = true;
         // 确保 vendor_id 不为空（表单验证应该已经保证）
         if (formState.vendor_id === undefined) {
-            message.error('请选择供应商');
+            notifyError('请选择供应商');
             return;
         }
         const model = await createModel({
@@ -99,11 +99,11 @@ async function handleOk() {
             vendor_id: formState.vendor_id,
             enable: formState.enable,
         });
-        message.success('创建成功');
+        notifySuccess('创建成功');
         emit('success', model);
         handleCancel();
     } catch (error) {
-        console.error('创建失败:', error);
+        notifyRequestError(error, '创建失败');
     } finally {
         loading.value = false;
     }

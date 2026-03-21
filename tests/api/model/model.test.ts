@@ -97,8 +97,8 @@ describe("Model API (Positive)", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(Array.isArray(response.body)).toBe(true);
-            expect(response.body.length).toBeGreaterThan(0);
+            expect(Array.isArray(response.body.list)).toBe(true);
+            expect(response.body.total).toBeGreaterThan(0);
         });
 
         it("should return models with correct structure", async () => {
@@ -106,7 +106,7 @@ describe("Model API (Positive)", () => {
                 "/model/list.json",
                 adminToken,
             );
-            const model = response.body[0];
+            const model = response.body.list[0];
 
             expect(model).toHaveProperty("id");
             expect(model).toHaveProperty("name");
@@ -122,7 +122,7 @@ describe("Model API (Positive)", () => {
                 adminToken,
             );
 
-            const vendorIds = response.body.map((m: any) => m.vendor_id);
+            const vendorIds = response.body.list.map((m: any) => m.vendor_id);
             expect(vendorIds).toContain(openaiVendorId);
             expect(vendorIds).toContain(anthropicVendorId);
         });
@@ -151,7 +151,7 @@ describe("Model API (Positive)", () => {
                 "/model/list.json",
                 adminToken,
             );
-            const disabledModel = response.body.find((m: any) => m.id === disabledModelId);
+            const disabledModel = response.body.list.find((m: any) => m.id === disabledModelId);
             expect(disabledModel).toBeDefined();
             expect(disabledModel.enable).toBeFalsy();
         });

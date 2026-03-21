@@ -168,13 +168,13 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { message } from 'ant-design-vue/es';
 import { useApiTestStore } from '@/stores/apiTest';
 import { listModels } from '@/api/model';
 import StreamOutput from '@/components/common/StreamOutput.vue';
 import type { ApiTestHistory } from '@/types/gateway';
 import type { Model } from '@/types/model';
 import { normalizeListResponse } from '@/utils/listResponse';
+import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 
 const apiTestStore = useApiTestStore();
 const models = ref<Model[]>([]);
@@ -187,9 +187,9 @@ onMounted(() => {
 async function loadModels() {
     modelsLoading.value = true;
     try {
-        models.value = normalizeListResponse(await listModels()).list;
-    } catch {
-        message.error('加载模型列表失败');
+        models.value = normalizeListResponse(await listModels({ page: 1, pageSize: 1000 })).list;
+    } catch (error) {
+        notifyRequestError(error, '加载模型列表失败');
     } finally {
         modelsLoading.value = false;
     }
@@ -230,7 +230,7 @@ function handleClear() {
 
 function handleClearHistory() {
     apiTestStore.clearHistory();
-    message.success('历史记录已清空');
+    notifySuccess('历史记录已清空');
 }
 
 function loadHistory(item: ApiTestHistory) {
@@ -243,7 +243,7 @@ function loadHistory(item: ApiTestHistory) {
         max_tokens: request.max_tokens ?? 2048,
         stream: request.stream ?? true,
     });
-    message.success('已加载历史配置');
+    notifySuccess('已加载历史配置');
 }
 
 function formatTime(timestamp: number): string {

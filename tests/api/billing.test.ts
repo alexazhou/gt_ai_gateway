@@ -115,7 +115,7 @@ describe("Billing API", () => {
             );
 
             expect(response.status).toBe(200);
-            const model = response.body.find((m: any) => m.id === modelId);
+            const model = response.body.list.find((m: any) => m.id === modelId);
             expect(model).toBeDefined();
             expect(model.input_price).toBe(1.0);
             expect(model.output_price).toBe(2.0);
@@ -154,7 +154,7 @@ describe("Billing API", () => {
             );
 
             expect(response.status).toBe(200);
-            const user = response.body.find((u: any) => u.id === testUserId);
+            const user = response.body.list.find((u: any) => u.id === testUserId);
             expect(user).toBeDefined();
             expect(user).toHaveProperty("balance");
         });
@@ -267,8 +267,8 @@ describe("Billing API", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(Array.isArray(response.body)).toBe(true);
-            expect(response.body.length).toBeGreaterThan(0);
+            expect(Array.isArray(response.body.list)).toBe(true);
+            expect(response.body.total).toBeGreaterThan(0);
         });
 
         it("should filter recharge records by user_id", async () => {
@@ -278,8 +278,8 @@ describe("Billing API", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(Array.isArray(response.body)).toBe(true);
-            response.body.forEach((record: any) => {
+            expect(Array.isArray(response.body.list)).toBe(true);
+            response.body.list.forEach((record: any) => {
                 expect(record.user_id).toBe(testUserId);
             });
         });
@@ -291,8 +291,8 @@ describe("Billing API", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(Array.isArray(response.body)).toBe(true);
-            response.body.forEach((record: any) => {
+            expect(Array.isArray(response.body.list)).toBe(true);
+            response.body.list.forEach((record: any) => {
                 expect(record.type).toBe("recharge");
             });
         });
@@ -304,8 +304,8 @@ describe("Billing API", () => {
                 adminToken,
             );
 
-            if (listResponse.body.length > 0) {
-                const recordId = listResponse.body[0].id;
+            if (listResponse.body.list.length > 0) {
+                const recordId = listResponse.body.list[0].id;
                 const response = await requestHelper.get(
                     `/balance/recharge/${recordId}`,
                     adminToken,
@@ -344,8 +344,8 @@ describe("Billing API", () => {
             );
 
             expect(response.status).toBe(200);
-            if (response.body.length > 0) {
-                const record = response.body[0];
+            if (response.body.list.length > 0) {
+                const record = response.body.list[0];
                 expect(record).toHaveProperty("id");
                 expect(record).toHaveProperty("user_id");
                 expect(record).toHaveProperty("amount");

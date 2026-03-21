@@ -33,10 +33,10 @@
 
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
-import { message } from 'ant-design-vue/es';
 import type { FormInstance } from 'ant-design-vue/es';
 import { createUser } from '@/api/user';
 import type { User } from '@/types/user';
+import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 
 const emit = defineEmits<{
     success: [user: User];
@@ -66,11 +66,11 @@ async function handleOk() {
         await formRef.value?.validate();
         loading.value = true;
         const user = await createUser(formState);
-        message.success('创建成功');
+        notifySuccess('创建成功');
         emit('success', user);
         handleCancel();
     } catch (error) {
-        console.error('创建失败:', error);
+        notifyRequestError(error, '创建失败');
     } finally {
         loading.value = false;
     }

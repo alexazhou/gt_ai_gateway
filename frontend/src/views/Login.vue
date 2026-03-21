@@ -33,8 +33,8 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { message } from 'ant-design-vue/es';
 import { useAuthStore } from '@/stores/auth';
+import { notifyError, notifySuccess } from '@/utils/requestFeedback';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -51,7 +51,7 @@ const rules = {
 
 async function handleLogin() {
     if (!formState.token.trim()) {
-        message.error('请输入 Token');
+        notifyError('请输入 Token');
         return;
     }
 
@@ -59,14 +59,14 @@ async function handleLogin() {
     try {
         const success = await authStore.login(formState.token);
         if (success) {
-            message.success('登录成功');
+            notifySuccess('登录成功');
             const redirect = router.currentRoute.value.query.redirect as string;
             router.push(redirect || '/dashboard');
         } else {
-            message.error('Token 验证失败');
+            notifyError('Token 验证失败');
         }
     } catch (_error) {
-        message.error('登录失败，请检查 Token');
+        notifyError('登录失败，请检查 Token');
     } finally {
         loading.value = false;
     }

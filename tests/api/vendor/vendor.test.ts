@@ -111,13 +111,13 @@ describe("Vendor API (Positive)", () => {
             const response = await requestHelper.get("/vendor/list.json", adminToken);
 
             expect(response.status).toBe(200);
-            expect(Array.isArray(response.body)).toBe(true);
-            expect(response.body.length).toBeGreaterThan(0);
+            expect(Array.isArray(response.body.list)).toBe(true);
+            expect(response.body.total).toBeGreaterThan(0);
         });
 
         it("should return vendors with correct structure", async () => {
             const response = await requestHelper.get("/vendor/list.json", adminToken);
-            const vendor = response.body[0];
+            const vendor = response.body.list[0];
 
             expect(vendor).toHaveProperty("id");
             expect(vendor).toHaveProperty("type");
@@ -131,7 +131,7 @@ describe("Vendor API (Positive)", () => {
         it("should include different API formats", async () => {
             const response = await requestHelper.get("/vendor/list.json", adminToken);
 
-            const allUrls = response.body.map((v: any) => Object.keys(v.urls || {}));
+            const allUrls = response.body.list.map((v: any) => Object.keys(v.urls || {}));
             const flatUrls = allUrls.flat();
             expect(flatUrls).toContain("openai");
             expect(flatUrls).toContain("anthropic");

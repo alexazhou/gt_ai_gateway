@@ -1,18 +1,18 @@
 import { Context } from "hono";
 import rechargeRecordService from "../service/rechargeRecordService";
+import { parsePaginationQuery } from "../util/pagination";
 
 async function listRechargeRecords(c: Context) {
     const query = c.req.query();
     const userId = query.user_id ? parseInt(query.user_id, 10) : undefined;
     const type = query.type;
-    const limit = query.limit ? parseInt(query.limit, 10) : undefined;
-    const offset = query.offset ? parseInt(query.offset, 10) : undefined;
+    const { pageSize, offset } = parsePaginationQuery(query, 10);
 
     try {
         const records = await rechargeRecordService.listRechargeRecords({
             user_id: userId,
             type,
-            limit,
+            limit: pageSize,
             offset,
         });
         return c.json(records);

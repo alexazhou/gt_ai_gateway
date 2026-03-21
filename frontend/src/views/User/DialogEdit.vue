@@ -32,11 +32,12 @@
 
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
-import { message, Modal } from 'ant-design-vue/es';
+import { Modal } from 'ant-design-vue/es';
 import type { FormInstance } from 'ant-design-vue/es';
 import { updateUser } from '@/api/user';
 import TokenDisplay from '@/components/common/TokenDisplay.vue';
 import type { User } from '@/types/user';
+import { notifyError, notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 
 const emit = defineEmits<{
     success: [user: User];
@@ -71,7 +72,7 @@ function showRegenerateConfirm() {
         cancelText: '取消',
         onOk: async () => {
             formState.token = crypto.randomUUID();
-            message.success('新 Token 已生成，请点击确定保存');
+            notifySuccess('新 Token 已生成，请点击确定保存');
         },
     });
 }
@@ -80,7 +81,7 @@ async function handleOk() {
     try {
         await formRef.value?.validate();
         if (!userId.value) {
-            message.error('用户 ID 无效');
+            notifyError('用户 ID 无效');
             return;
         }
 
@@ -89,11 +90,11 @@ async function handleOk() {
             name: formState.name,
             token: formState.token,
         });
-        message.success('更新成功');
+        notifySuccess('更新成功');
         emit('success', user);
         handleCancel();
     } catch (error) {
-        console.error('更新失败:', error);
+        notifyRequestError(error, '更新失败');
     } finally {
         loading.value = false;
     }
