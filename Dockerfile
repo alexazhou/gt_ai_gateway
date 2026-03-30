@@ -47,7 +47,7 @@ RUN apk add --no-cache libstdc++ && \
     mkdir -p /app/data
 
 # 复制依赖文件和入口脚本
-COPY --from=builder /app/package*.json ./package*.json
+COPY --from=builder /app/package.json /app/package-lock.json /app/tsconfig.json ./
 COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh
 
 # 赋予执行权限
