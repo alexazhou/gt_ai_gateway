@@ -5,6 +5,7 @@ import { streamSSE, SSEStreamingApi } from "hono/streaming";
 import { SgUser } from "../model/sgUser";
 import { SgVendor } from "../model/sgVendor";
 import recordService from "./recordService";
+import ormService from "./ormService";
 import { SgRecordStatus, ApiFormat } from "../constants";
 import sseAccumulator from "../util/sseAccumulator";
 import { SgRecord } from "../model/sgRecord";
@@ -40,8 +41,8 @@ async function handleStreamResponse(
     );
     let firstTokenTime: number | null = null;
 
-    // 检查是否启用流式日志记录（仅在 node 模式下且环境变量启用时可用）
-    const isStreamLogEnabled = process.env.TEST_MODE === "node" && process.env.STREAM_LOG_ENABLED === "true";
+    // 检查是否启用流式日志记录（仅本地 Node 模式下可用）
+    const isStreamLogEnabled = ormService.isNode && process.env.STREAM_LOG_ENABLED === "true";
     let logFilePath: string | null = null;
 
     if (isStreamLogEnabled) {
