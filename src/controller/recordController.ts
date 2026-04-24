@@ -29,22 +29,36 @@ function serializeRecord(record: SgRecord) {
 async function listRecords(c: Context) {
     const query = c.req.query();
     const { pageSize, offset } = parsePaginationQuery(query);
+    const { status, start_time, end_time } = query;
 
-    // 使用 COUNT 查询获取总数
-    const countQuery = SgRecord.query();
-    const countResult = await countQuery.clone().count();
-    const total = Number(countResult || 0);
+    // user_ids 和 model_ids 支持多选，格式为逗号分隔的 ID 列表
+    const userIds = query.user_ids ? query.user_ids.split(",").map(Number).filter(Boolean) : null;
+    const modelIds = query.model_ids ? query.model_ids.split(",").map(Number).filter(Boolean) : null;
 
-    // 分页获取数据
-    const records = await SgRecord.query()
-        .orderBy("id", "desc")
-        .limit(pageSize)
-        .offset(offset)
-        .get();
+    const q = SgRecord.query();
+
+    if (status) {
+        q.where("status", status);
+    }
+    if (start_time) {
+        q.where("created_at", ">=", start_time);
+    }
+    if (end_time) {
+        q.where("created_at", "<=", end_time);
+    }
+    if (userIds && userIds.length > 0) {
+        q.whereIn("user_id", userIds);
+    }
+    if (modelIds && modelIds.length > 0) {
+        q.whereIn("model_id", modelIds);
+    }
+
+    const total = Number(await q.clone().count() || 0);
+    const records = await q.orderBy("id", "desc").limit(pageSize).offset(offset).get();
 
     return c.json({
         list: records.map(serializeRecord),
-        total: total,
+        total,
     });
 }
 

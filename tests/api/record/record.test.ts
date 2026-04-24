@@ -135,6 +135,129 @@ describe("Record API", () => {
         });
     });
 
+    describe("GET /record/list.json - Filtering", () => {
+        let userAId: number;
+        let userAToken: string;
+        let userBId: number;
+        let userBToken: string;
+        let modelAId: number;
+        let modelBId: number;
+        let filterVendorId: number;
+        let modelAName: string;
+        let modelBName: string;
+
+        beforeAll(async () => {
+            // 使用随机名称避免与其他测试的模型名冲突（modelService.getModel 按名字查找取第一条）
+            const ts = Date.now();
+            modelAName = `filter-model-a-${ts}`;
+            modelBName = `filter-model-b-${ts}`;
+
+            const vendor = await requestHelper.post(
+                "/vendor/create.json",
+                vendorFixtures.VENDOR_FIXTURES.openai(),
+                adminToken,
+            );
+            filterVendorId = vendor.body.id;
+
+            const [userA, userB, modelA, modelB] = await Promise.all([
+                requestHelper.post("/user/create.json", mockHelper.generateUser(), adminToken),
+                requestHelper.post("/user/create.json", mockHelper.generateUser(), adminToken),
+                requestHelper.post("/model/create.json", modelFixtures.createRandomModel(filterVendorId, modelAName), adminToken),
+                requestHelper.post("/model/create.json", modelFixtures.createRandomModel(filterVendorId, modelBName), adminToken),
+            ]);
+            userAId = userA.body.id;
+            userAToken = userA.body.token;
+            userBId = userB.body.id;
+            userBToken = userB.body.token;
+            modelAId = modelA.body.id;
+            modelBId = modelB.body.id;
+
+            // userA × modelA: 2 requests
+            await requestHelper.post("/llm/v1/chat/completions", mockHelper.generateOpenAIChatRequest({ model: modelAName, stream: false }), userAToken);
+            await requestHelper.post("/llm/v1/chat/completions", mockHelper.generateOpenAIChatRequest({ model: modelAName, stream: false }), userAToken);
+            // userA × modelB: 1 request
+            await requestHelper.post("/llm/v1/chat/completions", mockHelper.generateOpenAIChatRequest({ model: modelBName, stream: false }), userAToken);
+            // userB × modelA: 1 request
+            await requestHelper.post("/llm/v1/chat/completions", mockHelper.generateOpenAIChatRequest({ model: modelAName, stream: false }), userBToken);
+        });
+
+        it("should filter by single user_id", async () => {
+            const res = await requestHelper.get(`/record/list.json?user_ids=${userAId}`, adminToken);
+
+            expect(res.status).toBe(200);
+            expect(res.body.list.every((r: any) => r.user_id === userAId)).toBe(true);
+            expect(res.body.total).toBe(3);
+        });
+
+        it("should filter by multiple user_ids", async () => {
+            const res = await requestHelper.get(`/record/list.json?user_ids=${userAId},${userBId}`, adminToken);
+
+            expect(res.status).toBe(200);
+            expect(res.body.list.every((r: any) => [userAId, userBId].includes(r.user_id))).toBe(true);
+            expect(res.body.total).toBe(4);
+        });
+
+        it("should filter by single model_id", async () => {
+            const res = await requestHelper.get(`/record/list.json?model_ids=${modelAId}`, adminToken);
+
+            expect(res.status).toBe(200);
+            expect(res.body.list.every((r: any) => r.model_id === modelAId)).toBe(true);
+            expect(res.body.total).toBe(3);
+        });
+
+        it("should filter by multiple model_ids", async () => {
+            const res = await requestHelper.get(`/record/list.json?model_ids=${modelAId},${modelBId}`, adminToken);
+
+            expect(res.status).toBe(200);
+            expect(res.body.list.every((r: any) => [modelAId, modelBId].includes(r.model_id))).toBe(true);
+            expect(res.body.total).toBe(4);
+        });
+
+        it("should filter by user_id and model_id combined", async () => {
+            const res = await requestHelper.get(`/record/list.json?user_ids=${userAId}&model_ids=${modelAId}`, adminToken);
+
+            expect(res.status).toBe(200);
+            expect(res.body.list.every((r: any) => r.user_id === userAId && r.model_id === modelAId)).toBe(true);
+            expect(res.body.total).toBe(2);
+        });
+
+        it("should filter by status", async () => {
+            const res = await requestHelper.get("/record/list.json?status=success", adminToken);
+
+            expect(res.status).toBe(200);
+            expect(res.body.list.every((r: any) => r.status === "success")).toBe(true);
+        });
+
+        it("should return empty list when no records match the filter", async () => {
+            const res = await requestHelper.get("/record/list.json?user_ids=99999", adminToken);
+
+            expect(res.status).toBe(200);
+            expect(res.body.list).toHaveLength(0);
+            expect(res.body.total).toBe(0);
+        });
+
+        it("should filter by start_time and end_time", async () => {
+            // 使用远未来时间作为 start_time，应返回空
+            const futureStart = "2099-01-01 00:00:00";
+            const emptyRes = await requestHelper.get(
+                `/record/list.json?start_time=${encodeURIComponent(futureStart)}`,
+                adminToken,
+            );
+            expect(emptyRes.status).toBe(200);
+            expect(emptyRes.body.total).toBe(0);
+
+            // 使用远过去时间作为 start_time，应返回所有记录
+            const pastStart = "2000-01-01 00:00:00";
+            const allRes = await requestHelper.get(
+                `/record/list.json?start_time=${encodeURIComponent(pastStart)}`,
+                adminToken,
+            );
+            expect(allRes.status).toBe(200);
+            expect(allRes.body.total).toBeGreaterThan(0);
+        });
+    });
+
+
     describe("Record Statistics Fields", () => {
         let openaiVendorId: number;
         let openaiModelId: number;

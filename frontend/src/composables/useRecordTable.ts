@@ -7,8 +7,8 @@ import type { RecordQuery, RequestStatus } from '@/types/record';
 
 export interface RecordSearchForm {
     status?: RequestStatus;
-    user_name?: string;
-    model_name?: string;
+    user_ids?: number[];
+    model_ids?: number[];
     start_time?: string;
     end_time?: string;
 }
@@ -21,8 +21,8 @@ export function useRecordTable() {
 
     const searchForm = reactive<RecordSearchForm>({
         status: undefined,
-        user_name: undefined,
-        model_name: undefined,
+        user_ids: undefined,
+        model_ids: undefined,
         start_time: undefined,
         end_time: undefined,
     });
@@ -41,6 +41,8 @@ export function useRecordTable() {
             page: pagination.current,
             pageSize: pagination.pageSize,
             ...searchForm,
+            user_ids: searchForm.user_ids?.length ? searchForm.user_ids.join(",") : undefined,
+            model_ids: searchForm.model_ids?.length ? searchForm.model_ids.join(",") : undefined,
         };
     }
 
@@ -51,8 +53,8 @@ export function useRecordTable() {
 
     function resetSearchForm(): void {
         searchForm.status = undefined;
-        searchForm.user_name = undefined;
-        searchForm.model_name = undefined;
+        searchForm.user_ids = undefined;
+        searchForm.model_ids = undefined;
         searchForm.start_time = undefined;
         searchForm.end_time = undefined;
     }

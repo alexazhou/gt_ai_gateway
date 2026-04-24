@@ -17,19 +17,27 @@
                         </a-select>
                     </a-form-item>
                     <a-form-item label="用户">
-                        <a-input
-                            v-model:value="searchForm.user_name"
-                            placeholder="搜索用户名"
+                        <a-select
+                            v-model:value="searchForm.user_ids"
+                            mode="multiple"
+                            placeholder="搜索用户"
                             allow-clear
-                            style="width: 150px"
+                            show-search
+                            :filter-option="filterOption"
+                            style="min-width: 150px"
+                            :options="userOptions"
                         />
                     </a-form-item>
                     <a-form-item label="模型">
-                        <a-input
-                            v-model:value="searchForm.model_name"
-                            placeholder="搜索模型名"
+                        <a-select
+                            v-model:value="searchForm.model_ids"
+                            mode="multiple"
+                            placeholder="搜索模型"
                             allow-clear
-                            style="width: 150px"
+                            show-search
+                            :filter-option="filterOption"
+                            style="min-width: 240px"
+                            :options="modelOptions"
                         />
                     </a-form-item>
                     <a-form-item label="时间范围">
@@ -78,10 +86,31 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import { useAutoRefresh } from '@/composables/useAutoRefresh';
 import { useRecordTable } from '@/composables/useRecordTable';
 import RecordTable from '@/components/common/RecordTable.vue';
+import { listUsers } from '@/api/user';
+import { listModels } from '@/api/model';
+
+const userOptions = ref<{ value: number; label: string }[]>([]);
+const modelOptions = ref<{ value: number; label: string }[]>([]);
+
+function filterOption(input: string, option: { label: string }) {
+    return option.label.toLowerCase().includes(input.toLowerCase());
+}
+
+async function loadSelectOptions() {
+    const [usersRes, modelsRes] = await Promise.all([
+        listUsers({ pageSize: 1000 }),
+        listModels({ pageSize: 1000 }),
+    ]);
+    userOptions.value = [
+        { value: -1, label: 'root' },
+        ...(usersRes.list || []).map(u => ({ value: Number(u.id), label: u.name })),
+    ];
+    modelOptions.value = (modelsRes.list || []).map(m => ({ value: Number(m.id), label: m.name }));
+}
 
 const {
     recordStore,
@@ -109,6 +138,7 @@ const {
 });
 
 onMounted(() => {
+    void loadSelectOptions();
     loadData();
 });
 

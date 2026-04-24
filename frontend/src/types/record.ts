@@ -57,8 +57,8 @@ export interface RecordResponseData {
 
 export interface RecordQuery extends PaginationParams {
     status?: RequestStatus;
-    user_name?: string;
-    model_name?: string;
+    user_ids?: string;
+    model_ids?: string;
     start_time?: string;
     end_time?: string;
 }
