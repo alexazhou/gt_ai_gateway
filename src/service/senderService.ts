@@ -260,23 +260,32 @@ async function handleResponsesStreamResponse(
 
                 if (!data) continue;
 
-                if (firstTokenTime === null && eventType === "response.output_text.delta") {
+                // Responses API embeds event type in the JSON `type` field (no SSE `event:` line)
+                let parsedData: any = null;
+                try {
+                    parsedData = JSON.parse(data);
+                } catch (e) {
+                    // ignore unparseable lines
+                }
+
+                const responseEventType = parsedData?.type ?? eventType;
+
+                if (firstTokenTime === null && responseEventType === "response.output_text.delta") {
                     firstTokenTime = Date.now();
                 }
 
                 await stream.writeSSE({ data, event: eventType || undefined });
 
                 // response.completed 包含完整 usage
-                if (eventType === "response.completed") {
+                if (responseEventType === "response.completed" && parsedData) {
                     try {
-                        const parsed = JSON.parse(data);
-                        const usage = parsed?.response?.usage;
+                        const usage = parsedData?.response?.usage;
                         const promptTokens = usage?.input_tokens ?? 0;
                         const outputTokens = usage?.output_tokens ?? 0;
                         const cost = calculateCost(model, promptTokens, outputTokens);
 
                         await recordService.update(record.id, {
-                            response_data: JSON.stringify(parsed.response),
+                            response_data: JSON.stringify(parsedData.response),
                             status: SgRecordStatus.SUCCESS,
                             prompt_tokens: promptTokens,
                             output_tokens: outputTokens,
@@ -291,7 +300,7 @@ async function handleResponsesStreamResponse(
                             await userService.deductBalance(user.id, cost);
                         }
                     } catch (e) {
-                        console.log("Failed to parse response.completed:", e);
+                        console.log("Failed to update record on response.completed:", e);
                     }
                 }
             }

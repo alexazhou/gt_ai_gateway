@@ -156,6 +156,8 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
     // Handle different endpoints
     if (url.includes("/chat/completions")) {
         handleOpenAIChat(req, res);
+    } else if (url.includes("/responses")) {
+        handleOpenAIResponses(req, res);
     } else if (url.includes("/messages")) {
         handleAnthropicMessages(req, res);
     } else {
@@ -417,6 +419,230 @@ function handleOpenAIToolCallStreamResponse(res: ServerResponse, data: any): voi
         }
 
         res.write(`data: ${JSON.stringify(toolChunks[i])}\n\n`);
+        i++;
+    }, 100);
+}
+
+/**
+ * Handle OpenAI Responses API
+ */
+function handleOpenAIResponses(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+
+    req.on("data", (chunk) => {
+        body += chunk.toString();
+    });
+
+    req.on("end", () => {
+        try {
+            const data = body ? JSON.parse(body) : {};
+            const isStream = data.stream === true;
+
+            if (isStream) {
+                handleResponsesStreamResponse(res, data);
+            } else {
+                handleResponsesNonStreamResponse(res, data);
+            }
+        } catch (e) {
+            handleBadRequest(res, "Invalid request body");
+        }
+    });
+}
+
+function handleResponsesNonStreamResponse(res: ServerResponse, data: any): void {
+    const msgId = `msg_mock_${Date.now()}`;
+    const respId = `resp_mock_${Date.now()}`;
+    const now = Math.floor(Date.now() / 1000);
+
+    const response = {
+        id: respId,
+        object: "response",
+        created_at: now,
+        model: data.model || "gpt-4o",
+        status: "completed",
+        output: [
+            {
+                id: msgId,
+                type: "message",
+                role: "assistant",
+                status: "completed",
+                content: [
+                    {
+                        type: "output_text",
+                        text: "Hello! I am a mock AI assistant. How can I help you today?",
+                        annotations: [],
+                    },
+                ],
+            },
+        ],
+        usage: {
+            input_tokens: 10,
+            input_tokens_details: { cached_tokens: 0 },
+            output_tokens: 15,
+            output_tokens_details: { reasoning_tokens: 0 },
+            total_tokens: 25,
+        },
+        error: null,
+        incomplete_details: null,
+        instructions: null,
+        reasoning: { effort: "none", summary: null },
+        temperature: 1.0,
+        tool_choice: "auto",
+        tools: [],
+        completed_at: now,
+    };
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(response));
+}
+
+function handleResponsesStreamResponse(res: ServerResponse, data: any): void {
+    res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+    });
+
+    const msgId = `msg_mock_${Date.now()}`;
+    const respId = `resp_mock_${Date.now()}`;
+    const now = Math.floor(Date.now() / 1000);
+    const model = data.model || "gpt-4o";
+
+    const baseResponse = {
+        id: respId,
+        object: "response",
+        created_at: now,
+        model,
+        status: "in_progress",
+        output: [],
+        error: null,
+        incomplete_details: null,
+        instructions: null,
+        reasoning: { effort: "none", summary: null },
+        temperature: 1.0,
+        tool_choice: "auto",
+        tools: [],
+        usage: null,
+        completed_at: null,
+    };
+
+    const textChunks = ["Hello", "!", " I am", " a mock", " AI assistant."];
+
+    const events: Array<{ type: string; data: object }> = [
+        {
+            type: "response.created",
+            data: { type: "response.created", sequence_number: 0, response: { ...baseResponse } },
+        },
+        {
+            type: "response.in_progress",
+            data: { type: "response.in_progress", sequence_number: 1, response: { ...baseResponse } },
+        },
+        {
+            type: "response.output_item.added",
+            data: {
+                type: "response.output_item.added",
+                sequence_number: 2,
+                output_index: 0,
+                item: { id: msgId, type: "message", role: "assistant", status: "in_progress", content: [] },
+            },
+        },
+        {
+            type: "response.content_part.added",
+            data: {
+                type: "response.content_part.added",
+                sequence_number: 3,
+                output_index: 0,
+                content_index: 0,
+                item_id: msgId,
+                part: { type: "output_text", text: "", annotations: [] },
+            },
+        },
+        ...textChunks.map((delta, i) => ({
+            type: "response.output_text.delta",
+            data: {
+                type: "response.output_text.delta",
+                sequence_number: 4 + i,
+                output_index: 0,
+                content_index: 0,
+                item_id: msgId,
+                delta,
+            },
+        })),
+        {
+            type: "response.output_text.done",
+            data: {
+                type: "response.output_text.done",
+                sequence_number: 4 + textChunks.length,
+                output_index: 0,
+                content_index: 0,
+                item_id: msgId,
+                text: textChunks.join(""),
+            },
+        },
+        {
+            type: "response.content_part.done",
+            data: {
+                type: "response.content_part.done",
+                sequence_number: 5 + textChunks.length,
+                output_index: 0,
+                content_index: 0,
+                item_id: msgId,
+                part: { type: "output_text", text: textChunks.join(""), annotations: [] },
+            },
+        },
+        {
+            type: "response.output_item.done",
+            data: {
+                type: "response.output_item.done",
+                sequence_number: 6 + textChunks.length,
+                output_index: 0,
+                item: {
+                    id: msgId,
+                    type: "message",
+                    role: "assistant",
+                    status: "completed",
+                    content: [{ type: "output_text", text: textChunks.join(""), annotations: [] }],
+                },
+            },
+        },
+        {
+            type: "response.completed",
+            data: {
+                type: "response.completed",
+                sequence_number: 7 + textChunks.length,
+                response: {
+                    ...baseResponse,
+                    status: "completed",
+                    output: [
+                        {
+                            id: msgId,
+                            type: "message",
+                            role: "assistant",
+                            status: "completed",
+                            content: [{ type: "output_text", text: textChunks.join(""), annotations: [] }],
+                        },
+                    ],
+                    usage: {
+                        input_tokens: 10,
+                        input_tokens_details: { cached_tokens: 0 },
+                        output_tokens: 15,
+                        output_tokens_details: { reasoning_tokens: 0 },
+                        total_tokens: 25,
+                    },
+                    completed_at: now,
+                },
+            },
+        },
+    ];
+
+    let i = 0;
+    const interval = setInterval(() => {
+        if (i >= events.length) {
+            res.end();
+            clearInterval(interval);
+            return;
+        }
+        res.write(`data: ${JSON.stringify(events[i].data)}\n\n`);
         i++;
     }, 100);
 }

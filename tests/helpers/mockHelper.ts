@@ -123,6 +123,23 @@ function generateAnthropicMessageRequest(
 }
 
 /**
+ * Generate a mock OpenAI Responses API request
+ */
+function generateResponsesRequest(
+    overrides: Partial<{
+        model: string;
+        input: string;
+        stream: boolean;
+    }> = {},
+) {
+    return {
+        model: overrides.model || "gpt-4o",
+        input: overrides.input || "Hello!",
+        stream: overrides.stream ?? false,
+    };
+}
+
+/**
  * Generate a random string
  */
 function randomString(length: number = 10): string {
@@ -157,6 +174,7 @@ export default {
     generateModel,
     generateOpenAIChatRequest,
     generateAnthropicMessageRequest,
+    generateResponsesRequest,
     randomString,
     randomNumber,
     randomEmail,
