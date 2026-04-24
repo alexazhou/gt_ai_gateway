@@ -13,6 +13,7 @@ interface SSEMessage {
         delta?: {
             role?: string;
             content?: string;
+            reasoning_content?: string;
             function_call?: {
                 name?: string;
                 arguments?: string;
@@ -33,6 +34,9 @@ interface SSEMessage {
         prompt_tokens?: number;
         completion_tokens?: number;
         total_tokens?: number;
+        completion_tokens_details?: {
+            reasoning_tokens?: number;
+        };
     };
 }
 
@@ -89,6 +93,7 @@ interface AccumulatedResponse {
         message: {
             role?: string;
             content: string;
+            reasoning_content?: string;
             thinking?: string;
             signature?: string;
             function_call?: {
@@ -116,6 +121,9 @@ interface AccumulatedResponse {
         prompt_tokens?: number;
         completion_tokens?: number;
         total_tokens?: number;
+        completion_tokens_details?: {
+            reasoning_tokens?: number;
+        };
     };
 }
 
@@ -172,6 +180,13 @@ class SSEAccumulator {
                 if (choice.delta?.content) {
                     this.response.choices[index].message.content +=
                         choice.delta.content;
+                }
+
+                // 累积推理内容（o 系列 reasoning 模型）
+                if (choice.delta?.reasoning_content) {
+                    this.response.choices[index].message.reasoning_content =
+                        (this.response.choices[index].message.reasoning_content ?? "") +
+                        choice.delta.reasoning_content;
                 }
 
                 if (choice.delta?.function_call) {

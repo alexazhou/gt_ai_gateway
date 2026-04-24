@@ -107,6 +107,19 @@ describe("SSE Accumulator Fixtures", () => {
         expect(response.usage?.total_tokens).toBe(229);
     });
 
+    it("parses openai reasoning stream fixture", () => {
+        const response = parseOpenAIStream(requireFixture("openai-reasoning-stream.log"));
+
+        expect(response.object).toBe("chat.completion.chunk");
+        expect(response.model).toBe("qwen3.6-plus");
+        expect(response.choices).toHaveLength(1);
+        expect(response.choices[0].message.role).toBe("assistant");
+        expect(response.choices[0].message.reasoning_content?.length).toBeGreaterThan(0);
+        expect(response.choices[0].message.content.length).toBeGreaterThan(0);
+        expect(response.choices[0].finish_reason).toBe("stop");
+        expect(response.usage?.completion_tokens_details?.reasoning_tokens).toBeGreaterThan(0);
+    });
+
     it("parses anthropic tool-use stream fixture", () => {
         const response = parseAnthropicStream(requireFixture("anthropic-tool-use-stream.log"));
         const toolUseList = response.choices[0].message.tool_use ?? [];
