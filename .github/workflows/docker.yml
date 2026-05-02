@@ -111,21 +111,17 @@ jobs:
                   tags='${{ steps.meta.outputs.tags }}'
                   main_tag=$(echo "$tags" | head -1)
 
-                  # Create manifest list using remote images (no pull needed)
-                  docker manifest create "$main_tag" \
+                  # Create manifest list using buildx imagetools (works with remote images)
+                  docker buildx imagetools create -t "$main_tag" \
                       "$main_tag-amd64" \
                       "$main_tag-arm64"
-
-                  # Push the manifest list
-                  docker manifest push "$main_tag"
 
                   # Create additional tag aliases
                   for tag in $tags; do
                       if [ "$tag" != "$main_tag" ]; then
-                          docker manifest create "$tag" \
+                          docker buildx imagetools create -t "$tag" \
                               "$tag-amd64" \
                               "$tag-arm64"
-                          docker manifest push "$tag"
                       fi
                   done
 
