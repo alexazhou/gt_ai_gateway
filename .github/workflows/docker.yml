@@ -54,6 +54,8 @@ jobs:
               uses: docker/metadata-action@v5
               with:
                   images: alexazhou/serverless_ai_gateway
+                  flavor: |
+                      suffix=-${{ matrix.suffix }}
                   tags: |
                       type=semver,pattern={{version}}
                       type=semver,pattern={{major}}.{{minor}}
@@ -66,7 +68,7 @@ jobs:
               with:
                   context: .
                   push: ${{ github.event_name != 'pull_request' }}
-                  tags: ${{ steps.meta.outputs.tags }}-${{ matrix.suffix }}
+                  tags: ${{ steps.meta.outputs.tags }}
                   labels: ${{ steps.meta.outputs.labels }}
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
