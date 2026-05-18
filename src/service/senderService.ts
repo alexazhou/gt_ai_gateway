@@ -9,7 +9,7 @@ import ormService from "./ormService";
 import { SgRecordStatus, ApiFormat } from "../constants";
 import sseAccumulator from "../util/sseAccumulator";
 import { SgRecord } from "../model/sgRecord";
-import { mkdirSync, writeFileSync, existsSync } from "fs";
+import { mkdirSync, writeFileSync, existsSync, createWriteStream, WriteStream } from "fs";
 import { join } from "path";
 import { getLogDir } from "../util/logger";
 import userService from "./userService";
@@ -28,6 +28,52 @@ function calculateCost(
 }
 
 
+function prepareStreamLog(record: SgRecord): WriteStream | null {
+    const isStreamLogEnabled = ormService.isNode && process.env.STREAM_LOG_ENABLED === "true";
+
+    if (!isStreamLogEnabled) {
+        return null;
+    }
+
+    const baseLogDir = getLogDir();
+    const logDir = join(baseLogDir, "stream");
+    console.log("[senderService] Stream log enabled, dir:", logDir);
+
+    if (!existsSync(logDir)) {
+        console.log("[senderService] Creating log dir...");
+        try {
+            mkdirSync(logDir, { recursive: true });
+        } catch (e: any) {
+            console.log("[senderService] Failed to create log dir:", e);
+            return null;
+        }
+    }
+
+    const logFilePath = join(logDir, `${record.id}.log`);
+    console.log("[senderService] Stream log file path:", logFilePath);
+    
+    return createWriteStream(logFilePath, { flag: "a" });
+}
+
+
+function appendStreamLog(logStream: WriteStream | null, chunk: string): void {
+    if (!logStream) {
+        return;
+    }
+
+    console.log(
+        "[senderService] Chunk length:",
+        chunk.length,
+        "contains \\n:",
+        chunk.includes("\n"),
+        "contains \\n\\n:",
+        chunk.includes("\n\n"),
+    );
+
+    logStream.write(chunk);
+}
+
+
 async function handleStreamResponse(
     c: Context,
     upstreamRes: Response,
@@ -41,30 +87,7 @@ async function handleStreamResponse(
     );
     let firstTokenTime: number | null = null;
 
-    // 检查是否启用流式日志记录（仅本地 Node 模式下可用）
-    const isStreamLogEnabled = ormService.isNode && process.env.STREAM_LOG_ENABLED === "true";
-    let logFilePath: string | null = null;
-
-    if (isStreamLogEnabled) {
-        // 使用统一的日志目录计算方法
-        const baseLogDir = getLogDir();
-        // 创建流式日志目录
-        const logDir = join(baseLogDir, "stream");
-        console.log('[senderService] Stream log enabled, dir:', logDir);
-
-        if (!existsSync(logDir)) {
-            console.log('[senderService] Creating log dir...');
-            try {
-                mkdirSync(logDir, { recursive: true });
-            } catch (e: any) {
-                console.log('[senderService] Failed to create log dir:', e);
-            }
-        }
-
-        // 创建请求 ID 对应的日志文件
-        logFilePath = join(logDir, `${record.id}.log`);
-        console.log('[senderService] Stream log file path:', logFilePath);
-    }
+    const logStream = prepareStreamLog(record);
 
     return streamSSE(c, async (stream: SSEStreamingApi) => {
         const reader = upstreamRes.body!.getReader();
@@ -79,18 +102,7 @@ async function handleStreamResponse(
 
             const chunk = decoder.decode(value, { stream: true });
 
-            // 如果启用了流式日志，则写入文件
-            if (isStreamLogEnabled && logFilePath) {
-                // 调试：打印 chunk 内容
-                console.log('[senderService] Chunk length:', chunk.length, 'contains \\n:', chunk.includes('\n'), 'contains \\n\\n:', chunk.includes('\n\n'));
-
-                // 直接写入原始 chunk 到文件
-                try {
-                    writeFileSync(logFilePath, chunk, { flag: "a" });
-                } catch (e: any) {
-                    console.log('[senderService] Failed to write to log file:', e);
-                }
-            }
+            appendStreamLog(logStream, chunk);
 
             buffer += chunk;
 
@@ -166,6 +178,8 @@ async function handleStreamResponse(
         if (user.type !== "root") {
             await userService.deductBalance(user.id, cost);
         }
+
+        logStream?.end();
     });
 }
 
@@ -229,6 +243,7 @@ async function handleResponsesStreamResponse(
     user: SgUser,
 ): Promise<Response> {
     let firstTokenTime: number | null = null;
+    const logStream = prepareStreamLog(record);
 
     return streamSSE(c, async (stream: SSEStreamingApi) => {
         const reader = upstreamRes.body!.getReader();
@@ -239,7 +254,9 @@ async function handleResponsesStreamResponse(
             const { done, value } = await reader.read();
             if (done) break;
 
-            buffer += decoder.decode(value, { stream: true });
+            const chunk = decoder.decode(value, { stream: true });
+            appendStreamLog(logStream, chunk);
+            buffer += chunk;
 
             const events = buffer.split("\n\n");
             buffer = events.pop() ?? "";
@@ -305,6 +322,8 @@ async function handleResponsesStreamResponse(
                 }
             }
         }
+
+        logStream?.end();
     });
 }
 
