@@ -1,8 +1,9 @@
 use std::fs;
+use std::os::unix::io::{FromRawFd, OwnedFd, RawFd};
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::sync::Mutex;
 
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
@@ -16,11 +17,11 @@ const DEFAULT_HOST: &str = "127.0.0.1";
 /// 存储后端实际使用的 URL，供前端通过 Tauri 命令查询
 struct BackendUrl(String);
 
-/// 持有 PTY master 端。
-/// Tauri 进程退出时（包括 kill -9），OS 自动关闭 master fd，
+/// 持有 PTY master fd（OwnedFd）。
+/// Tauri 进程退出时（包括 kill -9），OwnedFd 被 drop，OS 关闭 master fd，
 /// 内核向 backend 进程组发送 SIGHUP，backend 自动退出，不留孤儿进程。
 #[allow(dead_code)]
-struct BackendPty(Mutex<Option<Box<dyn portable_pty::MasterPty + Send>>>);
+struct PtyMaster(Mutex<Option<OwnedFd>>);
 
 /// Tauri 命令：返回后端服务的实际 URL
 #[tauri::command]
@@ -31,9 +32,6 @@ fn get_backend_url(state: tauri::State<BackendUrl>) -> String {
 struct AppConfig {
     port: u16,
     host: String,
-    /// 可选的 Root Token，用于保护管理接口。
-    /// 在 config.json 中设置 "root_token" 字段；
-    /// 若未配置则回退到环境变量 ROOT_TOKEN（仅终端启动时有效）。
     root_token: String,
 }
 
@@ -42,7 +40,6 @@ struct AppConfig {
 fn read_config(app_data_dir: &Path) -> AppConfig {
     let config_path = app_data_dir.join("config.json");
 
-    // 文件不存在时，写入默认配置
     if !config_path.exists() {
         let default_config = serde_json::json!({
             "port": DEFAULT_PORT,
@@ -59,10 +56,8 @@ fn read_config(app_data_dir: &Path) -> AppConfig {
         };
     }
 
-    // 读取并解析
     let mut port = DEFAULT_PORT;
     let mut host = DEFAULT_HOST.to_string();
-    // config.json 中的 root_token 优先；未设置时回退到环境变量
     let mut root_token = std::env::var("ROOT_TOKEN").unwrap_or_default();
 
     if let Ok(content) = fs::read_to_string(&config_path) {
@@ -88,6 +83,31 @@ fn read_config(app_data_dir: &Path) -> AppConfig {
     AppConfig { port, host, root_token }
 }
 
+/// 打开 PTY，返回 (master_fd, slave_path)。
+/// master 设置了 O_CLOEXEC 避免被子进程继承（子进程通过 slave 通信）。
+unsafe fn open_pty() -> Result<(RawFd, String), String> {
+    let master = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC);
+    if master < 0 {
+        return Err(format!("posix_openpt failed: {}", std::io::Error::last_os_error()));
+    }
+    if libc::grantpt(master) < 0 || libc::unlockpt(master) < 0 {
+        libc::close(master);
+        return Err("grantpt/unlockpt failed".into());
+    }
+
+    // macOS 的 ptsname() 是线程安全的
+    let slave_ptr = libc::ptsname(master);
+    if slave_ptr.is_null() {
+        libc::close(master);
+        return Err("ptsname failed".into());
+    }
+    let slave_path = std::ffi::CStr::from_ptr(slave_ptr)
+        .to_string_lossy()
+        .into_owned();
+
+    Ok((master, slave_path))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -105,40 +125,76 @@ pub fn run() {
             let config = read_config(&app_data_dir);
             let log_dir = app_data_dir.join("logs");
 
-            // sidecar 二进制与主可执行文件同目录
+            // sidecar 二进制与主可执行文件同目录（Tauri bundle 时去掉 target triple）
             let exe_dir = std::env::current_exe()
                 .expect("failed to get exe path")
                 .parent()
                 .expect("exe has no parent dir")
                 .to_path_buf();
+            let sidecar_path = exe_dir.join("ai-gateway-backend");
 
-            let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
-            let sidecar_path = exe_dir.join(format!("backend-{}-apple-darwin", arch));
-
-            // 用 PTY 启动 backend：
-            //   - parent 持有 master fd
-            //   - child 以 slave 端作为控制终端运行
-            //   - Tauri 退出（含 kill -9）→ OS 关闭 master fd
-            //     → 内核向 backend 进程组发 SIGHUP → backend 退出
-            let pty_system = native_pty_system();
-            let pty_pair = pty_system
-                .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            // 打开 PTY pair
+            let (master_raw, slave_path) = unsafe { open_pty() }
                 .expect("failed to open PTY");
 
-            let mut cmd = CommandBuilder::new(&sidecar_path);
-            cmd.env("DB_PATH", db_path.to_str().unwrap());
-            cmd.env("PORT", config.port.to_string());
-            cmd.env("HOST", &config.host);
-            cmd.env("LOG_DIR", log_dir.to_str().unwrap());
-            cmd.env("ROOT_TOKEN", &config.root_token);
+            // 打开 slave
+            let slave_path_c = std::ffi::CString::new(slave_path).unwrap();
+            let slave_raw: RawFd = unsafe {
+                libc::open(slave_path_c.as_ptr(), libc::O_RDWR)
+            };
+            if slave_raw < 0 {
+                panic!("failed to open PTY slave: {}", std::io::Error::last_os_error());
+            }
 
-            pty_pair.slave.spawn_command(cmd).expect("failed to spawn backend sidecar");
+            // 构造命令，继承当前环境并追加我们的变量
+            let mut cmd = std::process::Command::new(&sidecar_path);
+            cmd.env("DB_PATH", db_path.to_str().unwrap())
+               .env("PORT", config.port.to_string())
+               .env("HOST", &config.host)
+               .env("LOG_DIR", log_dir.to_str().unwrap())
+               .env("ROOT_TOKEN", &config.root_token);
 
-            // 父进程必须关闭 slave 端，否则 master 关闭时 SIGHUP 不会触发
-            drop(pty_pair.slave);
+            // pre_exec：在 fork 之后、exec 之前在子进程中执行
+            unsafe {
+                cmd.pre_exec(move || {
+                    // 1. 创建新 session，脱离父进程的进程组
+                    libc::setsid();
 
-            // 将 master 存入 managed state，保持其存活
-            app.manage(BackendPty(Mutex::new(Some(pty_pair.master))));
+                    // 2. 将 PTY slave 设为该 session 的控制终端
+                    libc::ioctl(slave_raw, libc::TIOCSCTTY as u64, 0);
+
+                    // 3. stdin 保持 slave（维持控制终端关系），stdout/stderr 指向 /dev/null
+                    //    这样 backend 写日志不会填满 PTY 缓冲区，也不需要 drain 线程
+                    libc::dup2(slave_raw, 0);
+                    let devnull = libc::open(b"/dev/null\0".as_ptr() as *const _, libc::O_RDWR);
+                    if devnull >= 0 {
+                        libc::dup2(devnull, 1);
+                        libc::dup2(devnull, 2);
+                        libc::close(devnull);
+                    }
+
+                    // 4. 关闭所有多余的 FD（>= 3），包括从 Tauri 继承的
+                    //    WebView/CoreFoundation/网络等 FD，防止干扰 Node.js 事件循环
+                    let mut rl = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+                    libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl);
+                    let max_fd = std::cmp::min(rl.rlim_cur as i32, 4096);
+                    for fd in 3..max_fd {
+                        libc::close(fd);
+                    }
+
+                    Ok(())
+                });
+            }
+
+            cmd.spawn().expect("failed to spawn backend sidecar");
+
+            // 父进程关闭 slave（已在子进程中 dup 到 0/1/2）
+            unsafe { libc::close(slave_raw); }
+
+            // PTY master 存入 managed state，保持其存活
+            // Tauri 退出时 OwnedFd drop → master fd 关闭 → 内核发 SIGHUP → backend 退出
+            let master_owned = unsafe { OwnedFd::from_raw_fd(master_raw) };
+            app.manage(PtyMaster(Mutex::new(Some(master_owned))));
 
             // 存储后端 URL，供前端查询
             let backend_url = format!("http://{}:{}", config.host, config.port);
@@ -153,7 +209,6 @@ pub fn run() {
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &open_config_item, &quit_item])?;
 
-            // 加载专用状态栏模板图标（单色，支持深/浅模式自动反色）
             let tray_icon = Image::from_path(
                 std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("icons/tray-icon@2x.png"),
@@ -185,7 +240,6 @@ pub fn run() {
 
             Ok(())
         })
-        // 关闭窗口时隐藏而不是退出，保持后台运行
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let _ = window.hide();

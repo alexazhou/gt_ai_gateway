@@ -25,7 +25,7 @@
         "active": true,
         "targets": "all",
         "externalBin": [
-            "../build/binaries/backend"
+            "../build/binaries/ai-gateway-backend"
         ],
         "icon": [
             "icons/32x32.png",
