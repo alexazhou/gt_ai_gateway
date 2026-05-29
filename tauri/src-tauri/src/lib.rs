@@ -1,19 +1,26 @@
 use std::fs;
 use std::path::Path;
+use std::sync::Mutex;
 
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     Manager, WindowEvent,
 };
-use tauri_plugin_shell::ShellExt;
 
 const DEFAULT_PORT: u16 = 8787;
 const DEFAULT_HOST: &str = "127.0.0.1";
 
 /// 存储后端实际使用的 URL，供前端通过 Tauri 命令查询
 struct BackendUrl(String);
+
+/// 持有 PTY master 端。
+/// Tauri 进程退出时（包括 kill -9），OS 自动关闭 master fd，
+/// 内核向 backend 进程组发送 SIGHUP，backend 自动退出，不留孤儿进程。
+#[allow(dead_code)]
+struct BackendPty(Mutex<Option<Box<dyn portable_pty::MasterPty + Send>>>);
 
 /// Tauri 命令：返回后端服务的实际 URL
 #[tauri::command]
@@ -96,19 +103,42 @@ pub fn run() {
 
             let db_path = app_data_dir.join("gateway.db");
             let config = read_config(&app_data_dir);
-
             let log_dir = app_data_dir.join("logs");
-            let (_, sidecar) = app
-                .shell()
-                .sidecar("backend")?
-                .env("DB_PATH", db_path.to_str().unwrap())
-                .env("PORT", config.port.to_string())
-                .env("HOST", &config.host)
-                .env("LOG_DIR", log_dir.to_str().unwrap())
-                .env("ROOT_TOKEN", &config.root_token)
-                .spawn()?;
 
-            app.manage(sidecar);
+            // sidecar 二进制与主可执行文件同目录
+            let exe_dir = std::env::current_exe()
+                .expect("failed to get exe path")
+                .parent()
+                .expect("exe has no parent dir")
+                .to_path_buf();
+
+            let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
+            let sidecar_path = exe_dir.join(format!("backend-{}-apple-darwin", arch));
+
+            // 用 PTY 启动 backend：
+            //   - parent 持有 master fd
+            //   - child 以 slave 端作为控制终端运行
+            //   - Tauri 退出（含 kill -9）→ OS 关闭 master fd
+            //     → 内核向 backend 进程组发 SIGHUP → backend 退出
+            let pty_system = native_pty_system();
+            let pty_pair = pty_system
+                .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+                .expect("failed to open PTY");
+
+            let mut cmd = CommandBuilder::new(&sidecar_path);
+            cmd.env("DB_PATH", db_path.to_str().unwrap());
+            cmd.env("PORT", config.port.to_string());
+            cmd.env("HOST", &config.host);
+            cmd.env("LOG_DIR", log_dir.to_str().unwrap());
+            cmd.env("ROOT_TOKEN", &config.root_token);
+
+            pty_pair.slave.spawn_command(cmd).expect("failed to spawn backend sidecar");
+
+            // 父进程必须关闭 slave 端，否则 master 关闭时 SIGHUP 不会触发
+            drop(pty_pair.slave);
+
+            // 将 master 存入 managed state，保持其存活
+            app.manage(BackendPty(Mutex::new(Some(pty_pair.master))));
 
             // 存储后端 URL，供前端查询
             let backend_url = format!("http://{}:{}", config.host, config.port);
@@ -130,7 +160,6 @@ pub fn run() {
             )
             .unwrap_or_else(|_| app.default_window_icon().unwrap().clone());
 
-            // 托盘图标（左键切换窗口显示/隐藏，右键弹菜单）
             TrayIconBuilder::new()
                 .icon(tray_icon)
                 .tooltip("AI Gateway")
