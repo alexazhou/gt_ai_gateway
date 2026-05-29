@@ -117,8 +117,9 @@
 import { computed } from 'vue';
 import { message } from 'ant-design-vue/es';
 import { CopyOutlined } from '@ant-design/icons-vue';
+import { getBaseURL } from '@/utils/request';
 
-const baseUrl = computed(() => window.location.origin);
+const baseUrl = computed(() => getBaseURL());
 
 const openaiUrl = computed(() => `${baseUrl.value}/llm/v1/chat/completions`);
 const anthropicUrl = computed(() => `${baseUrl.value}/llm/v1/messages`);
