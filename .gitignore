@@ -37,6 +37,8 @@ lerna-debug.log*
 
 # build
 .fingerprint
+tauri/src-tauri/target/
+tauri/build/target/
 
 # test config (contains API keys)
 tests/resource/test_real_config.json
