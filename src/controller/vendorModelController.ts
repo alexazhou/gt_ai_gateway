@@ -177,6 +177,24 @@ async function addVendorModel(c: Context) {
 }
 
 
+async function getVendorModelsByIds(c: Context) {
+    const body = await c.req.json();
+    const ids = body.ids;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+        return c.json([]);
+    }
+
+    const idList = ids.map((id: unknown) => parseInt(String(id), 10)).filter((id: number) => !isNaN(id));
+    if (idList.length === 0) {
+        return c.json([]);
+    }
+
+    const models = await SgVendorModel.query().whereIn("id", idList).get();
+    return c.json(models);
+}
+
+
 async function deleteVendorModel(c: Context) {
     const vendorId = parseInt(c.req.param("id"), 10);
     const recordId = parseInt(c.req.param("modelId"), 10);
@@ -206,4 +224,5 @@ export default {
     syncVendorModels,
     addVendorModel,
     deleteVendorModel,
+    getVendorModelsByIds,
 };

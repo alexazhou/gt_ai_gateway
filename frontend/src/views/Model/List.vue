@@ -58,6 +58,12 @@
                 <template v-if="column.key === 'vendor_id'">
                     {{ getVendorName(record.vendor_id) }}
                 </template>
+                <template v-if="column.key === 'vendor_model_id'">
+                    <span v-if="record.vendor_model_id" class="vendor-model-tag">
+                        {{ getVendorModelName(record.vendor_model_id) }}
+                    </span>
+                    <span v-else style="color: #bbb;">—</span>
+                </template>
                 <template v-if="column.key === 'enable'">
                     <a-tag :color="Boolean(record.enable) ? 'green' : 'red'">
                         {{ Boolean(record.enable) ? '启用' : '禁用' }}
@@ -97,19 +103,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import type { TableColumnsType } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import { ArrowUpOutlined, ArrowDownOutlined, InfoCircleOutlined } from '@ant-design/icons-vue';
 import { listModels } from '@/api/model';
-import { listVendors } from '@/api/vendor';
+import { listVendors, fetchVendorModelsByIds } from '@/api/vendor';
 import { useResourceTable } from '@/composables/useResourceTable';
 import { formatDate } from '@/utils/format';
 import { normalizeListResponse } from '@/utils/listResponse';
 import DialogCreate from './DialogCreate.vue';
 import DialogEdit from './DialogEdit.vue';
 import type { Model, ModelQuery } from '@/types/model';
-import type { Vendor as VendorType } from '@/types/vendor';
+import type { Vendor as VendorType, VendorModel } from '@/types/vendor';
 
 const router = useRouter();
 
@@ -130,11 +136,13 @@ const editDialogRef = ref();
 
 const vendors = ref<VendorType[]>([]);
 const vendorsLoading = ref(false);
+const vendorModelsMap = ref<Map<number, string>>(new Map());
 
 const columns: TableColumnsType<Model> = [
     { title: 'ID', key: 'id', dataIndex: 'id', width: 80 },
     { title: '模型名称', key: 'name', dataIndex: 'name' },
     { title: '所属供应商', key: 'vendor_id', dataIndex: 'vendor_id', width: 150 },
+    { title: '供应商模型', key: 'vendor_model_id', dataIndex: 'vendor_model_id', width: 200 },
     { title: '状态', key: 'enable', dataIndex: 'enable', width: 100 },
     { title: '价格', key: 'price', width: 180 },
     { title: '创建时间', key: 'created_at', dataIndex: 'created_at', width: 180 },
@@ -180,6 +188,25 @@ function getVendorName(vendorId: number): string {
     const vendor = vendors.value.find(v => v.id === vendorId);
     return vendor ? vendor.name : `ID: ${vendorId}`;
 }
+
+function getVendorModelName(id: number): string {
+    return vendorModelsMap.value.get(id) ?? `#${id}`;
+}
+
+async function loadVendorModelsForPage(models: Model[]) {
+    const ids = [...new Set(models.map(m => m.vendor_model_id).filter((id): id is number => id != null))];
+    if (ids.length === 0) return;
+    try {
+        const vms = await fetchVendorModelsByIds(ids);
+        vms.forEach((vm: VendorModel) => vendorModelsMap.value.set(vm.id, vm.model_id));
+    } catch {
+        // ignore
+    }
+}
+
+watch(data, (models) => {
+    if (models.length > 0) void loadVendorModelsForPage(models);
+});
 </script>
 
 <style scoped>
@@ -218,5 +245,11 @@ function getVendorName(vendorId: number): string {
 
 .price-icon.output {
     color: #52c41a;
+}
+
+.vendor-model-tag {
+    font-size: 12px;
+    color: #555;
+    font-family: monospace;
 }
 </style>

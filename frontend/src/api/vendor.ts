@@ -40,6 +40,10 @@ export async function listVendorModels(vendorId: number): Promise<import('../typ
     return request.get(`/vendor/${vendorId}/model/list.json`);
 }
 
+export async function fetchVendorModelsByIds(ids: number[]): Promise<import('../types/vendor').VendorModel[]> {
+    return request.post('/vendor-model/batch.json', { ids });
+}
+
 export async function fetchVendorModels(vendorId: number): Promise<{ models: string[] }> {
     return request.get(`/vendor/${vendorId}/model/fetch.json`);
 }

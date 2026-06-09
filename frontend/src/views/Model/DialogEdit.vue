@@ -34,7 +34,7 @@
             <a-form-item label="上游模型" name="vendor_model_id">
                 <a-select
                     v-model:value="formState.vendor_model_id"
-                    placeholder="不指定（使用模型名称）"
+                    placeholder="自动（使用模型名称）"
                     :loading="vendorModelsLoading"
                     allow-clear
                     :disabled="!formState.vendor_id"
