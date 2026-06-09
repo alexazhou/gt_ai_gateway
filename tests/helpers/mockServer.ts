@@ -160,6 +160,8 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleOpenAIResponses(req, res);
     } else if (url.includes("/messages")) {
         handleAnthropicMessages(req, res);
+    } else if (req.method === "GET" && url.includes("/models")) {
+        handleModelsList(req, res);
     } else {
         handleNotFound(res);
     }
@@ -886,6 +888,26 @@ function handleAnthropicToolUseStreamResponse(
         i++;
     }, 100);
 }
+
+/**
+ * Handle GET /v1/models - returns a fixed list of mock models
+ */
+function handleModelsList(_req: IncomingMessage, res: ServerResponse): void {
+    const response = {
+        object: "list",
+        data: [
+            { id: "mock-gpt-4o", object: "model", created: 1234567890, owned_by: "mock" },
+            { id: "mock-gpt-4o-mini", object: "model", created: 1234567890, owned_by: "mock" },
+            { id: "mock-gpt-3.5-turbo", object: "model", created: 1234567890, owned_by: "mock" },
+            // Non-LLM entries that should be filtered out
+            { id: "mock-whisper-1", object: "model", created: 1234567890, owned_by: "mock" },
+            { id: "mock-dall-e-3", object: "model", created: 1234567890, owned_by: "mock" },
+        ],
+    };
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(response));
+}
+
 
 /**
  * Handle 404 Not Found

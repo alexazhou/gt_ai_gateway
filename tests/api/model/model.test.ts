@@ -383,4 +383,85 @@ describe("Model API (Positive)", () => {
             expect(response.body.enable).toBeFalsy();
         });
     });
+
+    describe("vendor_model_id field", () => {
+        let vendorModelId: number;
+
+        beforeAll(async () => {
+            // Add a vendor model to use as upstream reference
+            const res = await requestHelper.post(
+                `/vendor/${openaiVendorId}/model/add.json`,
+                { model_id: "actual-upstream-model" },
+                adminToken,
+            );
+            vendorModelId = res.body.id;
+        });
+
+        it("should default vendor_model_id to null when not provided", async () => {
+            const response = await requestHelper.post(
+                "/model/create.json",
+                modelFixtures.createRandomModel(openaiVendorId, "no-vendor-model"),
+                adminToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.vendor_model_id).toBeNull();
+        });
+
+        it("should create a model with vendor_model_id set", async () => {
+            const response = await requestHelper.post(
+                "/model/create.json",
+                {
+                    name: "model-with-vendor-model",
+                    vendor_id: openaiVendorId,
+                    vendor_model_id: vendorModelId,
+                },
+                adminToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.vendor_model_id).toBe(vendorModelId);
+        });
+
+        it("should update model to set vendor_model_id", async () => {
+            const createRes = await requestHelper.post(
+                "/model/create.json",
+                modelFixtures.createRandomModel(openaiVendorId, "update-vendor-model-test"),
+                adminToken,
+            );
+            const modelId = createRes.body.id;
+            expect(createRes.body.vendor_model_id).toBeNull();
+
+            const response = await requestHelper.put(
+                `/model/${modelId}`,
+                { vendor_model_id: vendorModelId },
+                adminToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.vendor_model_id).toBe(vendorModelId);
+        });
+
+        it("should update model to clear vendor_model_id", async () => {
+            const createRes = await requestHelper.post(
+                "/model/create.json",
+                {
+                    name: "clear-vendor-model-test",
+                    vendor_id: openaiVendorId,
+                    vendor_model_id: vendorModelId,
+                },
+                adminToken,
+            );
+            const modelId = createRes.body.id;
+
+            const response = await requestHelper.put(
+                `/model/${modelId}`,
+                { vendor_model_id: null },
+                adminToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.vendor_model_id).toBeNull();
+        });
+    });
 });

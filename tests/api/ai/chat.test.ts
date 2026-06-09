@@ -317,4 +317,59 @@ describe("AI Chat API", () => {
             expect(receivedHeaders["authorization"] || receivedHeaders["x-api-key"]).toBeTruthy();
         }, 30000);
     });
+
+    describe("vendor_model_id substitution", () => {
+        it("should substitute gateway model name with vendor model_id in upstream request", async () => {
+            // Add a vendor model that represents the real upstream model name
+            const addVmRes = await requestHelper.post(
+                `/vendor/${openaiVendorId}/model/add.json`,
+                { model_id: "actual-upstream-model-id" },
+                adminToken,
+            );
+            const vendorModelId = addVmRes.body.id;
+
+            // Create a gateway model with a different name, linked to the vendor model
+            const createModelRes = await requestHelper.post(
+                "/model/create.json",
+                {
+                    name: "gateway-alias-model",
+                    vendor_id: openaiVendorId,
+                    vendor_model_id: vendorModelId,
+                    enable: true,
+                },
+                adminToken,
+            );
+            expect(createModelRes.status).toBe(200);
+
+            // Send a chat request using the gateway alias name
+            const response = await requestHelper.post(
+                "/llm/v1/chat/completions",
+                {
+                    model: "gateway-alias-model",
+                    messages: [{ role: "user", content: "ping" }],
+                    stream: false,
+                },
+                testUserToken,
+            );
+
+            expect(response.status).toBe(200);
+            // The mock server echoes back data.model — should be the substituted upstream id
+            expect(response.body.model).toBe("actual-upstream-model-id");
+        });
+
+        it("should use gateway model name as-is when vendor_model_id is null", async () => {
+            const response = await requestHelper.post(
+                "/llm/v1/chat/completions",
+                {
+                    model: openaiModelName,
+                    messages: [{ role: "user", content: "ping" }],
+                    stream: false,
+                },
+                testUserToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.model).toBe(openaiModelName);
+        });
+    });
 });
