@@ -33,47 +33,50 @@
             <a-form-item label="状态" name="enable">
                 <a-switch v-model:checked="formState.enable" />
             </a-form-item>
-            <a-divider>计费设置</a-divider>
-            <a-form-item>
-                <template #label>
-                    <span style="display: flex; align-items: center; gap: 4px;">
-                        输入价格
-                        <a-tooltip title="元/千tokens">
-                            <InfoCircleOutlined style="font-size: 12px; color: #999;" />
-                        </a-tooltip>
-                    </span>
-                </template>
-                <a-input-number
-                    v-model:value="formState.input_price"
-                    placeholder="请输入输入价格"
-                    :min="0"
-                    :precision="6"
-                    style="width: 100%"
-                />
-                <template #extra>
-                    <span style="color: #999; font-size: 12px">输入token的计费价格</span>
-                </template>
-            </a-form-item>
-            <a-form-item>
-                <template #label>
-                    <span style="display: flex; align-items: center; gap: 4px;">
-                        输出价格
-                        <a-tooltip title="元/千tokens">
-                            <InfoCircleOutlined style="font-size: 12px; color: #999;" />
-                        </a-tooltip>
-                    </span>
-                </template>
-                <a-input-number
-                    v-model:value="formState.output_price"
-                    placeholder="请输入输出价格"
-                    :min="0"
-                    :precision="6"
-                    style="width: 100%"
-                />
-                <template #extra>
-                    <span style="color: #999; font-size: 12px">输出token的计费价格</span>
-                </template>
-            </a-form-item>
+            <a-collapse v-model:activeKey="billingExpanded" ghost>
+                <a-collapse-panel key="billing" header="计费设置">
+                    <a-form-item>
+                        <template #label>
+                            <span style="display: flex; align-items: center; gap: 4px;">
+                                输入价格
+                                <a-tooltip title="元/千tokens">
+                                    <InfoCircleOutlined style="font-size: 12px; color: #999;" />
+                                </a-tooltip>
+                            </span>
+                        </template>
+                        <a-input-number
+                            v-model:value="formState.input_price"
+                            placeholder="请输入输入价格"
+                            :min="0"
+                            :precision="6"
+                            style="width: 100%"
+                        />
+                        <template #extra>
+                            <span style="color: #999; font-size: 12px">输入token的计费价格</span>
+                        </template>
+                    </a-form-item>
+                    <a-form-item>
+                        <template #label>
+                            <span style="display: flex; align-items: center; gap: 4px;">
+                                输出价格
+                                <a-tooltip title="元/千tokens">
+                                    <InfoCircleOutlined style="font-size: 12px; color: #999;" />
+                                </a-tooltip>
+                            </span>
+                        </template>
+                        <a-input-number
+                            v-model:value="formState.output_price"
+                            placeholder="请输入输出价格"
+                            :min="0"
+                            :precision="6"
+                            style="width: 100%"
+                        />
+                        <template #extra>
+                            <span style="color: #999; font-size: 12px">输出token的计费价格</span>
+                        </template>
+                    </a-form-item>
+                </a-collapse-panel>
+            </a-collapse>
         </a-form>
     </a-modal>
 </template>
@@ -96,6 +99,7 @@ const emit = defineEmits<{
 const visible = ref(false);
 const loading = ref(false);
 const formRef = ref<FormInstance>();
+const billingExpanded = ref<string[]>([]);
 
 const currentId = ref<number>(0);
 
