@@ -1,7 +1,7 @@
 {
     "name": "ai-gateway-tauri",
     "private": true,
-    "version": "1.4.7",
+    "version": "1.5.0",
     "scripts": {
         "dev": "tauri dev",
         "build": "tauri build",
