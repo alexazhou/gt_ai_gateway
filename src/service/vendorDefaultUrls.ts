@@ -24,7 +24,13 @@ function loadDefaultUrls(): void {
     console.log("Vendor default URLs service initialized");
 }
 
+function getAllUrls(): VendorDefaultUrls {
+    return defaultUrls as VendorDefaultUrls;
+}
+
+
 export default {
     loadDefaultUrls,
     getDefaultUrl,
+    getAllUrls,
 };

@@ -60,6 +60,11 @@ export async function deleteVendorModel(vendorId: number, id: number): Promise<{
     return request.delete(`/vendor/${vendorId}/model/${id}`);
 }
 
+export async function getVendorPresetUrls(): Promise<Record<string, Record<string, string>>> {
+    return request.get('/vendor/preset-urls.json');
+}
+
+
 export async function testVendor(
     id: number,
     format: string = 'openai',

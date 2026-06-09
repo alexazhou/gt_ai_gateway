@@ -76,6 +76,7 @@ app.get("/welcome", systemController.welcome);
 app.get("/status.json", authMiddleware.requireAdmin, systemController.status);
 
 // Vendor (需要管理员权限)
+app.get("/vendor/preset-urls.json", authMiddleware.requireAdmin, vendorController.getPresetUrls);
 app.get("/vendor/list.json", authMiddleware.requireAdmin, vendorController.listVendors);
 app.post("/vendor/batch.json", authMiddleware.requireAdmin, vendorController.getVendorsByIds);
 app.post("/vendor/create.json", authMiddleware.requireAdmin, vendorController.createVendor);

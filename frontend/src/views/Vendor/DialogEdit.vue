@@ -85,7 +85,7 @@
                     >
                         <PlusOutlined /> 添加 URL
                     </a-button>
-                    <a-button v-if="presetUrls" type="link" size="small" class="toggle-btn" @click="urlsMode = 'view'">
+                    <a-button v-if="currentTypePreset" type="link" size="small" class="toggle-btn" @click="urlsMode = 'view'">
                         返回查看
                     </a-button>
                 </template>
@@ -101,7 +101,7 @@ import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons-vu
 import { updateVendor } from '@/api/vendor';
 import type { UpdateVendorRequest, Vendor, VendorType, VendorUrls } from '@/types/vendor';
 import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
-import { VENDOR_PRESET_URLS } from '@/utils/vendorPresets';
+import { useVendorPresets } from '@/composables/useVendorPresets';
 
 const emit = defineEmits<{
     success: [vendor: Vendor];
@@ -116,8 +116,8 @@ const URL_TYPES = [
     { label: 'Anthropic', value: 'anthropic' },
 ];
 
-// 与后端 vendorDefaultUrls.json 保持一致
-const PRESET_URLS = VENDOR_PRESET_URLS;
+const { presetUrls, load: loadPresets } = useVendorPresets();
+const PRESET_URLS = presetUrls;
 
 const currentId = ref<number>(0);
 
@@ -132,11 +132,11 @@ const urlsMode = ref<'view' | 'edit'>('view');
 // 用户自定义条目（从 vendor.urls 初始化）
 const urlsForm = reactive<{ type: string; url: string }[]>([]);
 
-const presetUrls = computed(() => PRESET_URLS[formState.type] ?? null);
+const currentTypePreset = computed(() => PRESET_URLS.value[formState.type] ?? null);
 
 // 查看模式：preset 为底，用户自定义覆盖，有自定义的标记
 const mergedUrls = computed(() => {
-    const preset = PRESET_URLS[formState.type] ?? {};
+    const preset = PRESET_URLS.value[formState.type] ?? {};
     const customMap: Record<string, string> = {};
     urlsForm.forEach(item => {
         if (item.url) customMap[item.type] = item.url;
@@ -151,7 +151,7 @@ const mergedUrls = computed(() => {
 
 // 切换类型时只更新模式，保留用户已填写的自定义 URLs
 watch(() => formState.type, (newType) => {
-    urlsMode.value = PRESET_URLS[newType] ? 'view' : 'edit';
+    urlsMode.value = PRESET_URLS.value[newType] ? 'view' : 'edit';
 });
 
 const rules = {
@@ -172,7 +172,8 @@ function open(vendor: Vendor) {
         if (url !== undefined) urlsForm.push({ type: key, url });
     });
 
-    urlsMode.value = PRESET_URLS[vendor.type] ? 'view' : 'edit';
+    void loadPresets();
+    urlsMode.value = PRESET_URLS.value[vendor.type] ? 'view' : 'edit';
     visible.value = true;
 }
 

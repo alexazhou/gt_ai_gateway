@@ -2,6 +2,7 @@ import { Context } from "hono";
 import { SgVendor } from "../model/sgVendor";
 import { SgModel } from "../model/sgModel";
 import vendorService from "../service/vendorService";
+import vendorDefaultUrls from "../service/vendorDefaultUrls";
 import customError from "../util/customError";
 import { ApiFormat } from "../constants";
 import { createListResponse, parsePaginationQuery } from "../util/pagination";
@@ -222,6 +223,11 @@ async function testVendor(c: Context) {
     }
 }
 
+async function getPresetUrls(c: Context) {
+    return c.json(vendorDefaultUrls.getAllUrls());
+}
+
+
 export default {
     listVendors,
     getVendor,
@@ -230,4 +236,5 @@ export default {
     updateVendor,
     deleteVendor,
     testVendor,
+    getPresetUrls,
 };

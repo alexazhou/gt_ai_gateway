@@ -85,7 +85,7 @@
                     >
                         <PlusOutlined /> 添加 URL
                     </a-button>
-                    <a-button v-if="presetUrls" type="link" size="small" class="toggle-btn" @click="urlsMode = 'view'">
+                    <a-button v-if="currentTypePreset" type="link" size="small" class="toggle-btn" @click="urlsMode = 'view'">
                         返回查看
                     </a-button>
                 </template>
@@ -101,7 +101,7 @@ import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons-vu
 import { createVendor } from '@/api/vendor';
 import type { CreateVendorRequest, Vendor, VendorType, VendorUrls } from '@/types/vendor';
 import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
-import { VENDOR_PRESET_URLS } from '@/utils/vendorPresets';
+import { useVendorPresets } from '@/composables/useVendorPresets';
 
 const emit = defineEmits<{
     success: [vendor: Vendor];
@@ -116,7 +116,8 @@ const URL_TYPES = [
     { label: 'Anthropic', value: 'anthropic' },
 ];
 
-const PRESET_URLS = VENDOR_PRESET_URLS;
+const { presetUrls, load: loadPresets } = useVendorPresets();
+const PRESET_URLS = presetUrls;
 
 const formState = reactive({
     type: 'openai' as VendorType,
@@ -129,11 +130,11 @@ const urlsMode = ref<'view' | 'edit'>('view');
 // 用户自定义条目，初始为空
 const urlsForm = reactive<{ type: string; url: string }[]>([]);
 
-const presetUrls = computed(() => PRESET_URLS[formState.type] ?? null);
+const currentTypePreset = computed(() => PRESET_URLS.value[formState.type] ?? null);
 
 // 查看模式展示：preset 为底，用户自定义条目覆盖
 const mergedUrls = computed(() => {
-    const preset = PRESET_URLS[formState.type] ?? {};
+    const preset = PRESET_URLS.value[formState.type] ?? {};
     const customMap: Record<string, string> = {};
     urlsForm.forEach(item => {
         if (item.url) customMap[item.type] = item.url;
@@ -148,7 +149,7 @@ const mergedUrls = computed(() => {
 
 watch(() => formState.type, (newType) => {
     urlsForm.splice(0, urlsForm.length);
-    urlsMode.value = PRESET_URLS[newType] ? 'view' : 'edit';
+    urlsMode.value = PRESET_URLS.value[newType] ? 'view' : 'edit';
 });
 
 const rules = {
@@ -158,6 +159,7 @@ const rules = {
 };
 
 function open() {
+    void loadPresets();
     formState.type = 'openai';
     formState.name = '';
     formState.token = '';

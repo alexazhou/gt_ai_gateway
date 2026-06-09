@@ -40,10 +40,11 @@ import { getVendor } from '@/api/vendor';
 import { formatDate } from '@/utils/format';
 import TokenDisplay from '@/components/common/TokenDisplay.vue';
 import type { Vendor, VendorType } from '@/types/vendor';
-import { VENDOR_PRESET_URLS } from '@/utils/vendorPresets';
+import { useVendorPresets } from '@/composables/useVendorPresets';
 
 const route = useRoute();
 const router = useRouter();
+const { presetUrls, load: loadPresets } = useVendorPresets();
 
 const loading = ref(false);
 const vendor = ref<Vendor | null>(null);
@@ -51,6 +52,7 @@ const vendor = ref<Vendor | null>(null);
 onMounted(async () => {
     const id = Number(route.params.id);
     if (id) {
+        void loadPresets();
         await loadVendor(id);
     }
 });
@@ -67,7 +69,7 @@ async function loadVendor(id: number) {
 }
 
 function getMergedUrls(v: Vendor): { key: string; url: string; isCustom: boolean }[] {
-    const preset = VENDOR_PRESET_URLS[v.type] ?? {};
+    const preset = presetUrls.value[v.type] ?? {};
     const custom = v.urls ?? {};
     const keys = new Set([...Object.keys(preset), ...Object.keys(custom)]);
     return [...keys].map(key => ({
