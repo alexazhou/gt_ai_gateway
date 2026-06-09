@@ -11,9 +11,12 @@
         <a-card>
             <div class="card-toolbar">
                 <span class="model-count">共 {{ models.length }} 个模型</span>
-                <a-button type="primary" :loading="fetchLoading" @click="handleFetch">
-                    从供应商获取
-                </a-button>
+                <a-space>
+                    <a-button @click="addModalVisible = true">手动添加</a-button>
+                    <a-button type="primary" :loading="fetchLoading" @click="handleFetch">
+                        自动获取
+                    </a-button>
+                </a-space>
             </div>
 
             <a-table
@@ -36,6 +39,26 @@
                 </template>
             </a-table>
         </a-card>
+
+        <!-- 手动添加模型弹窗 -->
+        <a-modal
+            v-model:open="addModalVisible"
+            title="手动添加模型"
+            :confirm-loading="addLoading"
+            @ok="handleManualAdd"
+            @cancel="addModalVisible = false; manualModelId = ''"
+        >
+            <a-form layout="vertical" style="margin-top: 8px">
+                <a-form-item label="Model ID">
+                    <a-input
+                        v-model:value="manualModelId"
+                        placeholder="例如：deepseek-v4-pro"
+                        allow-clear
+                        @pressEnter="handleManualAdd"
+                    />
+                </a-form-item>
+            </a-form>
+        </a-modal>
 
         <!-- 从供应商获取模型的确认弹窗 -->
         <a-modal
@@ -86,7 +109,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { TableColumnsType } from 'ant-design-vue';
 import { Modal } from 'ant-design-vue/es';
-import { getVendor, listVendorModels, fetchVendorModels, syncVendorModels, deleteVendorModel } from '@/api/vendor';
+import { getVendor, listVendorModels, fetchVendorModels, syncVendorModels, addVendorModel, deleteVendorModel } from '@/api/vendor';
 import { formatDate } from '@/utils/format';
 import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 import type { VendorModel } from '@/types/vendor';
@@ -100,6 +123,10 @@ const models = ref<VendorModel[]>([]);
 const listLoading = ref(false);
 const fetchLoading = ref(false);
 const syncLoading = ref(false);
+
+const manualModelId = ref('');
+const addLoading = ref(false);
+const addModalVisible = ref(false);
 
 const syncModalVisible = ref(false);
 const fetchedModels = ref<string[]>([]);
@@ -141,6 +168,24 @@ async function loadModels() {
         listLoading.value = false;
     }
 }
+
+async function handleManualAdd() {
+    const id = manualModelId.value.trim();
+    if (!id) return;
+    addLoading.value = true;
+    try {
+        await addVendorModel(vendorId, id);
+        notifySuccess('添加成功');
+        manualModelId.value = '';
+        addModalVisible.value = false;
+        await loadModels();
+    } catch (error) {
+        notifyRequestError(error, '添加失败');
+    } finally {
+        addLoading.value = false;
+    }
+}
+
 
 async function handleFetch() {
     fetchLoading.value = true;

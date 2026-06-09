@@ -139,6 +139,44 @@ async function syncVendorModels(c: Context) {
 }
 
 
+async function addVendorModel(c: Context) {
+    const vendorId = parseInt(c.req.param("id"), 10);
+    if (isNaN(vendorId)) {
+        throw new customError.AppError("Invalid ID format");
+    }
+
+    const vendor = await SgVendor.query().find(vendorId);
+    if (!vendor) {
+        throw new customError.NotFoundError("Vendor not found");
+    }
+
+    const body = await c.req.json();
+    const { model_id } = body;
+
+    if (!model_id || typeof model_id !== "string" || !model_id.trim()) {
+        throw new customError.AppError("model_id is required");
+    }
+
+    const trimmed = model_id.trim();
+
+    const existing = await SgVendorModel.query()
+        .where("vendor_id", vendorId)
+        .where("model_id", trimmed)
+        .first();
+
+    if (existing) {
+        throw new customError.AppError("Model already exists", 409);
+    }
+
+    const record = await SgVendorModel.query().create({
+        vendor_id: vendorId,
+        model_id: trimmed,
+    });
+
+    return c.json(record);
+}
+
+
 async function deleteVendorModel(c: Context) {
     const vendorId = parseInt(c.req.param("id"), 10);
     const recordId = parseInt(c.req.param("modelId"), 10);
@@ -166,5 +204,6 @@ export default {
     listVendorModels,
     fetchVendorModels,
     syncVendorModels,
+    addVendorModel,
     deleteVendorModel,
 };
