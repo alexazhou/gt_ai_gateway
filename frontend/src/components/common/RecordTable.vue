@@ -11,7 +11,7 @@
         <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'status'">
                 <a-tag :color="getStatusColor(record.status)">
-                    {{ getStatusText(record.status) }}
+                    {{ getStatusText(record.status, record.failed_code) }}
                 </a-tag>
             </template>
             <template v-else-if="column.key === 'token_stats'">
@@ -86,7 +86,7 @@ const defaultColumns: TableColumnsType<Record> = [
     { title: '模型', key: 'model_name', dataIndex: 'model_name' },
     { title: 'Token', key: 'token_stats', width: 140 },
     { title: '时间', key: 'timing', width: 140 },
-    { title: '状态', key: 'status', dataIndex: 'status', width: 100 },
+    { title: '状态', key: 'status', dataIndex: 'status', width: 140 },
     { title: '创建时间', key: 'created_at', dataIndex: 'created_at', width: 180 },
     { title: '操作', key: 'action', width: 80, fixed: 'right' as const },
 ];
@@ -149,12 +149,20 @@ function getStatusColor(status: string | null): string {
     }
 }
 
-function getStatusText(status: string | null): string {
+const FAILED_CODE_LABELS: { [key: string]: string } = {
+    client_disconnected: '客户端断开',
+    upstream_disconnected: '上游断开',
+    stream_incomplete: '流不完整',
+};
+
+function getStatusText(status: string | null, failedCode?: string | null): string {
     switch (status) {
         case 'success':
             return '成功';
         case 'failed':
-            return '失败';
+            return failedCode
+                ? `失败：${FAILED_CODE_LABELS[failedCode] ?? failedCode}`
+                : '失败';
         case 'processing':
             return '处理中';
         case 'init':

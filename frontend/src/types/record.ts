@@ -1,6 +1,7 @@
 import type { BaseEntity, PaginationParams } from './index';
 
 export type RequestStatus = 'init' | 'processing' | 'success' | 'failed';
+export type FailedCode = 'client_disconnected' | 'upstream_disconnected' | 'stream_incomplete' | null;
 
 export interface Record extends BaseEntity {
     user_id: number | null;
@@ -8,6 +9,7 @@ export interface Record extends BaseEntity {
     request_data: string | null;
     response_data: string | null;
     status: RequestStatus | null;
+    failed_code: FailedCode;
     prompt_tokens: number | null;
     output_tokens: number | null;
     first_token_latency: number | null;
