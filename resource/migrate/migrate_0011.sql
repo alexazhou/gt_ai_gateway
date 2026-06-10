@@ -1,0 +1,1 @@
+ALTER TABLE record ADD COLUMN failed_code TEXT NULL;

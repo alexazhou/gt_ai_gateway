@@ -7,7 +7,7 @@ import { SgVendor } from "../model/sgVendor";
 import { SgVendorModel } from "../model/sgVendorModel";
 import recordService from "./recordService";
 import ormService from "./ormService";
-import { SgRecordStatus, ApiFormat } from "../constants";
+import { SgRecordStatus, FailedCode, ApiFormat } from "../constants";
 import sseAccumulator from "../util/sseAccumulator";
 import { SgRecord } from "../model/sgRecord";
 import { mkdirSync, writeFileSync, existsSync, createWriteStream, WriteStream } from "fs";
@@ -95,89 +95,132 @@ async function handleStreamResponse(
         const decoder = new TextDecoder();
         let buffer = "";
         let eventCount = 0;
+        let streamCompleted = false;
+        let failedCode: string | null = null;
 
-        // 逐块读取上游 SSE 字节流
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+        try {
+            // 逐块读取上游 SSE 字节流
+            while (true) {
+                let done: boolean;
+                let value: Uint8Array | undefined;
+                try {
+                    const result = await reader.read();
+                    done = result.done;
+                    value = result.value;
+                } catch (e: any) {
+                    console.error("[senderService] Upstream read error:", e);
+                    failedCode = FailedCode.UPSTREAM_DISCONNECTED;
+                    break;
+                }
+                if (done) break;
 
-            const chunk = decoder.decode(value, { stream: true });
+                const chunk = decoder.decode(value, { stream: true });
+                appendStreamLog(logStream, chunk);
+                buffer += chunk;
 
-            appendStreamLog(logStream, chunk);
+                // 按 \n\n 切割出完整的 SSE event
+                const events = buffer.split("\n\n");
+                // 最后一段可能不完整，留到下一轮拼接
+                buffer = events.pop() ?? "";
 
-            buffer += chunk;
+                let clientDisconnected = false;
+                for (const event of events) {
+                    if (!event.trim()) continue;
 
-            // 按 \n\n 切割出完整的 SSE event
-            const events = buffer.split("\n\n");
-            // 最后一段可能不完整，留到下一轮拼接
-            buffer = events.pop() ?? "";
+                    eventCount++;
 
-            for (const event of events) {
-                if (!event.trim()) continue;
+                    // 解析 SSE event 中的各字段行（data / event / id / retry）
+                    const lines = event.split("\n");
+                    let data = "";
+                    let eventType = "";
+                    let id = "";
+                    for (const line of lines) {
+                        if (line.startsWith("data:")) {
+                            data = line.slice(5).trim();
+                        } else if (line.startsWith("event:")) {
+                            eventType = line.slice(6).trim();
+                        } else if (line.startsWith("id:")) {
+                            id = line.slice(3).trim();
+                        }
+                    }
 
-                eventCount++;
+                    if (!data) continue;
 
-                // 解析 SSE event 中的各字段行（data / event / id / retry）
-                const lines = event.split("\n");
-                let data = "";
-                let eventType = "";
-                let id = "";
-                for (const line of lines) {
-                    if (line.startsWith("data:")) {
-                        data = line.slice(5).trim();
-                    } else if (line.startsWith("event:")) {
-                        eventType = line.slice(6).trim();
-                    } else if (line.startsWith("id:")) {
-                        id = line.slice(3).trim();
+                    // 记录首个 token 时间
+                    if (firstTokenTime === null && data !== "[DONE]") {
+                        firstTokenTime = Date.now();
+                    }
+
+                    // 上游流完成标志：OpenAI 用 [DONE]，Anthropic 用 message_stop event
+                    if (
+                        data === "[DONE]" ||
+                        (format === ApiFormat.ANTHROPIC && eventType === "message_stop")
+                    ) {
+                        streamCompleted = true;
+                    }
+
+                    // 转发给客户端
+                    try {
+                        await stream.writeSSE({ data, event: eventType || undefined, id: id || undefined });
+                    } catch (e: any) {
+                        console.error("[senderService] Client write error (client disconnected):", e);
+                        failedCode = FailedCode.CLIENT_DISCONNECTED;
+                        clientDisconnected = true;
+                        break;
+                    }
+
+                    // [DONE] 之后不需要解析内容
+                    if (data === "[DONE]") continue;
+
+                    // 累积消息用于保存完整响应
+                    try {
+                        const parsedData = JSON.parse(data);
+                        accumulator.addMessage(parsedData, eventType);
+                    } catch (e) {
+                        console.log("Failed to parse SSE data:", data, e);
                     }
                 }
 
-                if (!data) continue;
-
-                // 记录首个 token 时间
-                if (firstTokenTime === null && data !== "[DONE]") {
-                    firstTokenTime = Date.now();
-                }
-
-                // 转发给客户端
-                await stream.writeSSE({ data, event: eventType || undefined, id: id || undefined });
-
-                // [DONE] 之后不需要解析内容
-                if (data === "[DONE]") continue;
-
-                // 累积消息用于保存完整响应
-                try {
-                    const parsedData = JSON.parse(data);
-                    accumulator.addMessage(parsedData, eventType);
-                } catch (e) {
-                    console.log("Failed to parse SSE data:", data, e);
-                }
+                if (clientDisconnected) break;
+            }
+        } catch (e: any) {
+            console.error("[senderService] Unexpected stream error:", e);
+            if (!failedCode) {
+                failedCode = FailedCode.UPSTREAM_DISCONNECTED;
             }
         }
 
-        console.log(`[senderService] Stream ended, total events: ${eventCount}`);
+        console.log(`[senderService] Stream ended, events: ${eventCount}, completed: ${streamCompleted}, failedCode: ${failedCode}`);
 
-        // 流结束，保存完整响应到数据库
-        const fullResponse = accumulator.getResponse();
-        const promptTokens = fullResponse.usage?.prompt_tokens ?? 0;
-        const outputTokens = fullResponse.usage?.completion_tokens ?? 0;
-        const cost = calculateCost(model, promptTokens, outputTokens);
+        if (streamCompleted) {
+            // 流结束，保存完整响应到数据库
+            const fullResponse = accumulator.getResponse();
+            const promptTokens = fullResponse.usage?.prompt_tokens ?? 0;
+            const outputTokens = fullResponse.usage?.completion_tokens ?? 0;
+            const cost = calculateCost(model, promptTokens, outputTokens);
 
-        await recordService.update(record.id, {
-            response_data: JSON.stringify(fullResponse),
-            status: SgRecordStatus.SUCCESS,
-            prompt_tokens: promptTokens,
-            output_tokens: outputTokens,
-            first_token_latency: firstTokenTime !== null
-                ? firstTokenTime - record.created_at.getTime()
-                : null,
-            end_at: new Date(),
-            cost: cost,
-        });
+            await recordService.update(record.id, {
+                response_data: JSON.stringify(fullResponse),
+                status: SgRecordStatus.SUCCESS,
+                prompt_tokens: promptTokens,
+                output_tokens: outputTokens,
+                first_token_latency: firstTokenTime !== null
+                    ? firstTokenTime - record.created_at.getTime()
+                    : null,
+                end_at: new Date(),
+                cost: cost,
+            });
 
-        // 扣除用户余额（仅非 Root 用户）
-        if (user.type !== "root") {
-            await userService.deductBalance(user.id, cost);
+            // 扣除用户余额（仅非 Root 用户）
+            if (user.type !== "root") {
+                await userService.deductBalance(user.id, cost);
+            }
+        } else {
+            await recordService.update(record.id, {
+                status: SgRecordStatus.FAILED,
+                failed_code: failedCode ?? FailedCode.STREAM_INCOMPLETE,
+                end_at: new Date(),
+            });
         }
 
         logStream?.end();
@@ -250,78 +293,120 @@ async function handleResponsesStreamResponse(
         const reader = upstreamRes.body!.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let streamCompleted = false;
+        let failedCode: string | null = null;
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            const chunk = decoder.decode(value, { stream: true });
-            appendStreamLog(logStream, chunk);
-            buffer += chunk;
-
-            const events = buffer.split("\n\n");
-            buffer = events.pop() ?? "";
-
-            for (const event of events) {
-                if (!event.trim()) continue;
-
-                const lines = event.split("\n");
-                let data = "";
-                let eventType = "";
-                for (const line of lines) {
-                    if (line.startsWith("data:")) {
-                        data = line.slice(5).trim();
-                    } else if (line.startsWith("event:")) {
-                        eventType = line.slice(6).trim();
-                    }
-                }
-
-                if (!data) continue;
-
-                // Responses API embeds event type in the JSON `type` field (no SSE `event:` line)
-                let parsedData: any = null;
+        try {
+            while (true) {
+                let done: boolean;
+                let value: Uint8Array | undefined;
                 try {
-                    parsedData = JSON.parse(data);
-                } catch (e) {
-                    // ignore unparseable lines
+                    const result = await reader.read();
+                    done = result.done;
+                    value = result.value;
+                } catch (e: any) {
+                    console.error("[senderService] Upstream read error (responses):", e);
+                    failedCode = FailedCode.UPSTREAM_DISCONNECTED;
+                    break;
                 }
+                if (done) break;
 
-                const responseEventType = parsedData?.type ?? eventType;
+                const chunk = decoder.decode(value, { stream: true });
+                appendStreamLog(logStream, chunk);
+                buffer += chunk;
 
-                if (firstTokenTime === null && responseEventType === "response.output_text.delta") {
-                    firstTokenTime = Date.now();
-                }
+                const events = buffer.split("\n\n");
+                buffer = events.pop() ?? "";
 
-                await stream.writeSSE({ data, event: eventType || undefined });
+                let clientDisconnected = false;
+                for (const event of events) {
+                    if (!event.trim()) continue;
 
-                // response.completed 包含完整 usage
-                if (responseEventType === "response.completed" && parsedData) {
-                    try {
-                        const usage = parsedData?.response?.usage;
-                        const promptTokens = usage?.input_tokens ?? 0;
-                        const outputTokens = usage?.output_tokens ?? 0;
-                        const cost = calculateCost(model, promptTokens, outputTokens);
-
-                        await recordService.update(record.id, {
-                            response_data: JSON.stringify(parsedData.response),
-                            status: SgRecordStatus.SUCCESS,
-                            prompt_tokens: promptTokens,
-                            output_tokens: outputTokens,
-                            first_token_latency: firstTokenTime !== null
-                                ? firstTokenTime - record.created_at.getTime()
-                                : null,
-                            end_at: new Date(),
-                            cost,
-                        });
-
-                        if (user.type !== "root") {
-                            await userService.deductBalance(user.id, cost);
+                    const lines = event.split("\n");
+                    let data = "";
+                    let eventType = "";
+                    for (const line of lines) {
+                        if (line.startsWith("data:")) {
+                            data = line.slice(5).trim();
+                        } else if (line.startsWith("event:")) {
+                            eventType = line.slice(6).trim();
                         }
+                    }
+
+                    if (!data) continue;
+
+                    // Responses API embeds event type in the JSON `type` field (no SSE `event:` line)
+                    let parsedData: any = null;
+                    try {
+                        parsedData = JSON.parse(data);
                     } catch (e) {
-                        console.log("Failed to update record on response.completed:", e);
+                        // ignore unparseable lines
+                    }
+
+                    const responseEventType = parsedData?.type ?? eventType;
+
+                    if (firstTokenTime === null && responseEventType === "response.output_text.delta") {
+                        firstTokenTime = Date.now();
+                    }
+
+                    // response.completed 表示上游已完成，在转发前标记
+                    if (responseEventType === "response.completed" && parsedData) {
+                        streamCompleted = true;
+                    }
+
+                    try {
+                        await stream.writeSSE({ data, event: eventType || undefined });
+                    } catch (e: any) {
+                        console.error("[senderService] Client write error (client disconnected, responses):", e);
+                        failedCode = FailedCode.CLIENT_DISCONNECTED;
+                        clientDisconnected = true;
+                        break;
+                    }
+
+                    // response.completed 包含完整 usage，保存记录
+                    if (responseEventType === "response.completed" && parsedData) {
+                        try {
+                            const usage = parsedData?.response?.usage;
+                            const promptTokens = usage?.input_tokens ?? 0;
+                            const outputTokens = usage?.output_tokens ?? 0;
+                            const cost = calculateCost(model, promptTokens, outputTokens);
+
+                            await recordService.update(record.id, {
+                                response_data: JSON.stringify(parsedData.response),
+                                status: SgRecordStatus.SUCCESS,
+                                prompt_tokens: promptTokens,
+                                output_tokens: outputTokens,
+                                first_token_latency: firstTokenTime !== null
+                                    ? firstTokenTime - record.created_at.getTime()
+                                    : null,
+                                end_at: new Date(),
+                                cost,
+                            });
+
+                            if (user.type !== "root") {
+                                await userService.deductBalance(user.id, cost);
+                            }
+                        } catch (e) {
+                            console.log("Failed to update record on response.completed:", e);
+                        }
                     }
                 }
+
+                if (clientDisconnected) break;
             }
+        } catch (e: any) {
+            console.error("[senderService] Unexpected stream error (responses):", e);
+            if (!failedCode) {
+                failedCode = FailedCode.UPSTREAM_DISCONNECTED;
+            }
+        }
+
+        if (!streamCompleted) {
+            await recordService.update(record.id, {
+                status: SgRecordStatus.FAILED,
+                failed_code: failedCode ?? FailedCode.STREAM_INCOMPLETE,
+                end_at: new Date(),
+            });
         }
 
         logStream?.end();

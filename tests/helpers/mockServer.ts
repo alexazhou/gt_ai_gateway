@@ -153,11 +153,19 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
     console.log(requestMsg);
     mockLog(requestMsg);
 
-    // Handle different endpoints
-    if (url.includes("/chat/completions")) {
+    // Handle different endpoints (more specific paths must come before generic ones)
+    if (url.includes("/chat/completions/incomplete")) {
+        handleOpenAIStreamIncomplete(req, res);
+    } else if (url.includes("/chat/completions/disconnect")) {
+        handleOpenAIStreamDisconnect(req, res);
+    } else if (url.includes("/chat/completions")) {
         handleOpenAIChat(req, res);
+    } else if (url.includes("/responses/incomplete")) {
+        handleResponsesStreamIncomplete(req, res);
     } else if (url.includes("/responses")) {
         handleOpenAIResponses(req, res);
+    } else if (url.includes("/messages/incomplete")) {
+        handleAnthropicStreamIncomplete(req, res);
     } else if (url.includes("/messages")) {
         handleAnthropicMessages(req, res);
     } else if (req.method === "GET" && url.includes("/models")) {
@@ -906,6 +914,172 @@ function handleModelsList(_req: IncomingMessage, res: ServerResponse): void {
     };
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(response));
+}
+
+
+/**
+ * OpenAI stream that closes without sending [DONE] (simulates stream_incomplete)
+ */
+function handleOpenAIStreamIncomplete(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+
+        // Send 2 partial chunks then close without [DONE]
+        const partialChunks = [
+            { role: "assistant", content: "Hello" },
+            { content: "..." },
+        ];
+        let i = 0;
+        const interval = setInterval(() => {
+            if (i >= partialChunks.length) {
+                // Close without sending [DONE]
+                res.end();
+                clearInterval(interval);
+                return;
+            }
+            const chunk = {
+                id: `chatcmpl-${Date.now()}`,
+                object: "chat.completion.chunk",
+                created: Math.floor(Date.now() / 1000),
+                model: data.model || "gpt-3.5-turbo",
+                choices: [{ index: 0, delta: partialChunks[i], finish_reason: null }],
+            };
+            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+            i++;
+        }, 50);
+    });
+}
+
+
+/**
+ * OpenAI stream that destroys the socket mid-stream (simulates upstream_disconnected)
+ */
+function handleOpenAIStreamDisconnect(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+
+        // Send 1 chunk, then destroy socket abruptly
+        const chunk = {
+            id: `chatcmpl-${Date.now()}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: data.model || "gpt-3.5-turbo",
+            choices: [{ index: 0, delta: { role: "assistant", content: "Hi" }, finish_reason: null }],
+        };
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+
+        setTimeout(() => {
+            res.socket?.destroy();
+        }, 50);
+    });
+}
+
+
+/**
+ * Anthropic stream that closes without message_stop (simulates stream_incomplete)
+ */
+function handleAnthropicStreamIncomplete(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+
+        const startEvent = {
+            type: "message_start",
+            message: {
+                id: `msg_${Date.now()}`,
+                type: "message",
+                role: "assistant",
+                content: [],
+                model: data.model || "claude-3-haiku-20240307",
+                stop_reason: null,
+                usage: { input_tokens: 8, output_tokens: 0 },
+            },
+        };
+        res.write(`event: message_start\ndata: ${JSON.stringify(startEvent)}\n\n`);
+
+        // Send one delta then close without message_stop
+        setTimeout(() => {
+            const deltaEvent = {
+                type: "content_block_delta",
+                index: 0,
+                delta: { type: "text_delta", text: "Hello" },
+            };
+            res.write(`event: content_block_delta\ndata: ${JSON.stringify(deltaEvent)}\n\n`);
+            // Close without message_stop
+            res.end();
+        }, 50);
+    });
+}
+
+
+/**
+ * Responses API stream that closes without response.completed (simulates stream_incomplete)
+ */
+function handleResponsesStreamIncomplete(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+        const respId = `resp_mock_${Date.now()}`;
+        const now = Math.floor(Date.now() / 1000);
+        const model = data.model || "gpt-4o";
+
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+
+        const baseResponse = {
+            id: respId,
+            object: "response",
+            created_at: now,
+            model,
+            status: "in_progress",
+            output: [],
+            error: null,
+            incomplete_details: null,
+            instructions: null,
+            reasoning: { effort: "none", summary: null },
+            temperature: 1.0,
+            tool_choice: "auto",
+            tools: [],
+            usage: null,
+            completed_at: null,
+        };
+
+        res.write(`data: ${JSON.stringify({ type: "response.created", sequence_number: 0, response: { ...baseResponse } })}\n\n`);
+
+        // Send one delta then close without response.completed
+        setTimeout(() => {
+            res.write(`data: ${JSON.stringify({ type: "response.output_text.delta", sequence_number: 1, output_index: 0, content_index: 0, delta: "Hello" })}\n\n`);
+            // Close without response.completed
+            res.end();
+        }, 50);
+    });
 }
 
 
