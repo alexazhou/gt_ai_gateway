@@ -148,8 +148,8 @@ const vendorModelsMap = ref<Map<number, string>>(new Map());
 const columns: TableColumnsType<Model> = [
     { title: 'ID', key: 'id', dataIndex: 'id', width: 80 },
     { title: '模型名称', key: 'name', dataIndex: 'name' },
-    { title: '供应商', key: 'vendor_id', dataIndex: 'vendor_id', width: 150 },
-    { title: '供应商模型', key: 'vendor_model_id', dataIndex: 'vendor_model_id', width: 200 },
+    { title: '供应商', key: 'vendor_id', dataIndex: 'vendor_id' },
+    { title: '供应商模型', key: 'vendor_model_id', dataIndex: 'vendor_model_id' },
     { title: '状态', key: 'enable', dataIndex: 'enable', width: 100 },
     { title: '价格', key: 'price', width: 180 },
     { title: '创建时间', key: 'created_at', dataIndex: 'created_at', width: 180 },
