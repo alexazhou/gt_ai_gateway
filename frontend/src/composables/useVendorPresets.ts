@@ -1,7 +1,8 @@
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { getVendorPresetUrls } from '@/api/vendor';
 
-type PresetUrls = Record<string, Record<string, string>>;
+export type VendorPreset = { label?: string } & Record<string, string>;
+export type PresetUrls = Record<string, VendorPreset>;
 
 const presetUrls = ref<PresetUrls>({});
 let loadPromise: Promise<void> | null = null;
@@ -16,5 +17,12 @@ export function useVendorPresets() {
         return loadPromise;
     }
 
-    return { presetUrls, load };
+    const vendorTypeOptions = computed(() =>
+        Object.entries(presetUrls.value).map(([value, preset]) => ({
+            value,
+            label: preset.label ?? value,
+        })),
+    );
+
+    return { presetUrls, vendorTypeOptions, load };
 }
