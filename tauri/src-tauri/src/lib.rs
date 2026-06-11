@@ -135,6 +135,24 @@ unsafe fn open_pty() -> Result<(RawFd, String), String> {
     Ok((master, slave_path))
 }
 
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    } else {
+        let _ = tauri::WebviewWindowBuilder::new(
+            app,
+            "main",
+            tauri::WebviewUrl::App("index.html".into())
+        )
+        .title("")
+        .inner_size(1280.0, 800.0)
+        .resizable(true)
+        .hidden_title(true)
+        .build();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -256,21 +274,7 @@ pub fn run() {
                 .menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        } else {
-                            let _ = tauri::WebviewWindowBuilder::new(
-                                app,
-                                "main",
-                                tauri::WebviewUrl::App("index.html".into())
-                            )
-                            .title("")
-                            .inner_size(1280.0, 800.0)
-                            .resizable(true)
-                            .hidden_title(true)
-                            .build();
-                        }
+                        show_main_window(app);
                     }
                     "open_config" => {
                         let dir = app.state::<std::path::PathBuf>().inner().clone();
@@ -292,10 +296,16 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| match event {
+        .run(|app_handle, event| match event {
             tauri::RunEvent::ExitRequested { api, .. } => {
                 // Prevent the app from completely exiting when the last window closes
                 api.prevent_exit();
+            }
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { has_visible_windows, .. } => {
+                if !has_visible_windows {
+                    show_main_window(app_handle);
+                }
             }
             _ => {}
         });
