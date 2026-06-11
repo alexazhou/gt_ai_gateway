@@ -11,7 +11,8 @@
     "lint:fix": "eslint . --fix",
     "test": "vitest",
     "test:run": "vitest run",
-    "build:tauri": "vite build --mode tauri"
+    "build:tauri": "vite build --mode tauri",
+    "postinstall": "cd public/data_viewer && npm install && npm run build"
   },
   "dependencies": {
     "@microsoft/fetch-event-source": "^2.0.1",
