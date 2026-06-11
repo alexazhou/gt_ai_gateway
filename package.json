@@ -32,7 +32,7 @@
     "db:migrate:worker-cloud": "npx tsx script/db.ts migrate --env worker-cloud",
     "db:clear:worker-cloud": "npx tsx script/db.ts clear --env worker-cloud",
     "db:status:worker-cloud": "npx tsx script/db.ts status --env worker-cloud",
-    "tauri:build-backend": "npx esbuild src/local.ts --bundle --platform=node --target=node18 --outfile=tauri/build/dist-backend/index.js --external:better-sqlite3 --external:mysql2 --external:mysql --external:tedious --external:pg --external:pg-native --external:oracledb --external:sqlite3 --external:pg-query-stream --format=cjs --supported:dynamic-import=false && npx pkg tauri/build/dist-backend/index.js --target node24-macos-arm64 --output tauri/build/binaries/ai-gateway-backend-aarch64-apple-darwin --config package.json"
+    "tauri:build-backend": "npx esbuild src/local.ts --bundle --platform=node --target=node18 --outfile=tauri/build/dist-backend/index.js --external:better-sqlite3 --external:mysql2 --external:mysql --external:tedious --external:pg --external:pg-native --external:oracledb --external:sqlite3 --external:pg-query-stream --format=cjs --supported:dynamic-import=false && npx pkg tauri/build/dist-backend/index.js --target node18-macos-arm64 --output tauri/build/binaries/ai-gateway-backend-aarch64-apple-darwin --config package.json"
   },
   "pkg": {
     "assets": [
