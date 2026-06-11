@@ -1,16 +1,6 @@
 <template>
     <div class="json-viewer">
-        <div class="json-header">
-            <a-space>
-                <a-button size="small" @click="toggleExpand">
-                    {{ isExpanded ? '收起' : '展开' }}
-                </a-button>
-                <a-button size="small" @click="handleCopy">
-                    复制
-                </a-button>
-            </a-space>
-        </div>
-        <div class="json-content" :class="{ expanded: isExpanded }">
+        <div class="json-content" :class="{ expanded: expanded }">
             <pre v-if="formattedData">{{ formattedData }}</pre>
             <div v-else class="empty">无数据</div>
         </div>
@@ -23,11 +13,12 @@ import { message } from 'ant-design-vue/es';
 
 interface Props {
     data: unknown;
+    expanded?: boolean;
 }
 
-const props = defineProps<Props>();
-
-const isExpanded = ref(true);
+const props = withDefaults(defineProps<Props>(), {
+    expanded: true
+});
 
 const formattedData = computed(() => {
     if (!props.data) return null;
@@ -44,9 +35,6 @@ const formattedData = computed(() => {
     }
 });
 
-function toggleExpand() {
-    isExpanded.value = !isExpanded.value;
-}
 
 async function handleCopy() {
     if (!formattedData.value) return;
@@ -57,22 +45,17 @@ async function handleCopy() {
         message.error('复制失败');
     }
 }
+
+defineExpose({
+    handleCopy
+});
 </script>
 
 <style scoped>
 .json-viewer {
     background: var(--bg-code);
-    border: 1px solid var(--border-color);
     border-radius: 6px;
     overflow: hidden;
-}
-
-.json-header {
-    padding: 8px 12px;
-    background: var(--bg-code-header);
-    border-bottom: 1px solid var(--border-color);
-    display: flex;
-    justify-content: flex-end;
 }
 
 .json-content {

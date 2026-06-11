@@ -82,26 +82,40 @@
                 <a-card class="detail-card request-tabs-card">
                     <a-tabs v-model:activeKey="activeRequestTab">
                         <template #rightExtra>
-                            <a-button
-                                v-if="activeRequestTab === 'request_json'"
-                                type="link"
-                                size="small"
-                                :disabled="!recordStore.currentRecord?.request_data"
-                                @click="downloadJson(recordStore.currentRecord?.request_data, 'request')"
-                            >
-                                <template #icon><DownloadOutlined /></template>
-                                下载
-                            </a-button>
-                            <a-button
-                                v-else-if="activeRequestTab === 'response_json'"
-                                type="link"
-                                size="small"
-                                :disabled="!recordStore.currentRecord?.response_data"
-                                @click="downloadJson(recordStore.currentRecord?.response_data, 'response')"
-                            >
-                                <template #icon><DownloadOutlined /></template>
-                                下载
-                            </a-button>
+                            <a-space v-if="activeRequestTab === 'request_json'">
+                                <a-button type="link" size="small" @click="isRequestExpanded = !isRequestExpanded">
+                                    {{ isRequestExpanded ? '收起' : '展开' }}
+                                </a-button>
+                                <a-button type="link" size="small" @click="requestJsonRef?.handleCopy()">
+                                    复制
+                                </a-button>
+                                <a-button
+                                    type="link"
+                                    size="small"
+                                    :disabled="!recordStore.currentRecord?.request_data"
+                                    @click="downloadJson(recordStore.currentRecord?.request_data, 'request')"
+                                >
+                                    <template #icon><DownloadOutlined /></template>
+                                    下载
+                                </a-button>
+                            </a-space>
+                            <a-space v-else-if="activeRequestTab === 'response_json'">
+                                <a-button type="link" size="small" @click="isResponseExpanded = !isResponseExpanded">
+                                    {{ isResponseExpanded ? '收起' : '展开' }}
+                                </a-button>
+                                <a-button type="link" size="small" @click="responseJsonRef?.handleCopy()">
+                                    复制
+                                </a-button>
+                                <a-button
+                                    type="link"
+                                    size="small"
+                                    :disabled="!recordStore.currentRecord?.response_data"
+                                    @click="downloadJson(recordStore.currentRecord?.response_data, 'response')"
+                                >
+                                    <template #icon><DownloadOutlined /></template>
+                                    下载
+                                </a-button>
+                            </a-space>
                         </template>
 
                         <a-tab-pane key="visual" tab="可视化对话" v-if="conversationMessages.length > 0">
@@ -118,13 +132,13 @@
 
                         <a-tab-pane key="request_json" tab="请求数据 (JSON)">
                             <div class="json-pane-content">
-                                <JsonViewer :data="recordStore.currentRecord.request_data" />
+                                <JsonViewer ref="requestJsonRef" :data="recordStore.currentRecord.request_data" :expanded="isRequestExpanded" />
                             </div>
                         </a-tab-pane>
 
                         <a-tab-pane key="response_json" tab="响应数据 (JSON)">
                             <div class="json-pane-content">
-                                <JsonViewer :data="recordStore.currentRecord.response_data" />
+                                <JsonViewer ref="responseJsonRef" :data="recordStore.currentRecord.response_data" :expanded="isResponseExpanded" />
                             </div>
                         </a-tab-pane>
                     </a-tabs>
@@ -164,6 +178,12 @@ const recordStore = useRecordStore();
 
 const viewerIframe = ref<HTMLIFrameElement | null>(null);
 const activeRequestTab = ref<string>('request_json');
+
+const requestJsonRef = ref<any>(null);
+const responseJsonRef = ref<any>(null);
+
+const isRequestExpanded = ref(true);
+const isResponseExpanded = ref(true);
 
 const conversationMessages = computed(() => {
     const msgs: any[] = [];
