@@ -14,19 +14,13 @@
             ref="formRef"
         >
             <a-form-item label="类型" name="type">
-                <a-select v-model:value="formState.type" placeholder="请选择供应商类型">
-                    <a-select-option value="aliyun">Aliyun (通义千问)</a-select-option>
-                    <a-select-option value="aliyun_coding">Aliyun Coding</a-select-option>
-                    <a-select-option value="volcengine_coding">Volcengine Coding</a-select-option>
-                    <a-select-option value="deepseek">DeepSeek</a-select-option>
-                    <a-select-option value="mimo">Mimo</a-select-option>
-                    <a-select-option value="mimo_token_plan">Mimo Token Plan</a-select-option>
-                    <a-select-option value="opencode_go">OpenCode Go</a-select-option>
-                    <a-select-option value="openai">OpenAI</a-select-option>
-                    <a-select-option value="anthropic">Anthropic</a-select-option>
-                    <a-select-option value="google">Google</a-select-option>
-                    <a-select-option value="other">Other</a-select-option>
-                </a-select>
+                <a-select
+                    v-model:value="formState.type"
+                    placeholder="请选择供应商类型"
+                    show-search
+                    option-filter-prop="label"
+                    :options="vendorTypeOptions"
+                />
             </a-form-item>
             <a-form-item label="名称" name="name">
                 <a-input v-model:value="formState.name" placeholder="请输入供应商名称" />
@@ -116,7 +110,7 @@ const URL_TYPES = [
     { label: 'Anthropic', value: 'anthropic' },
 ];
 
-const { presetUrls, load: loadPresets } = useVendorPresets();
+const { presetUrls, vendorTypeOptions, load: loadPresets } = useVendorPresets();
 const PRESET_URLS = presetUrls;
 
 const formState = reactive({
@@ -140,11 +134,13 @@ const mergedUrls = computed(() => {
         if (item.url) customMap[item.type] = item.url;
     });
     const keys = new Set([...Object.keys(preset), ...Object.keys(customMap)]);
-    return Array.from(keys).map(key => ({
-        key,
-        url: customMap[key] ?? preset[key] ?? '',
-        isCustom: !!customMap[key],
-    }));
+    return Array.from(keys)
+        .filter(k => k !== 'label')
+        .map(key => ({
+            key,
+            url: customMap[key] ?? preset[key] ?? '',
+            isCustom: !!customMap[key],
+        }));
 });
 
 watch(() => formState.type, (newType) => {

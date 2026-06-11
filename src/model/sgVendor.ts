@@ -34,10 +34,9 @@ class SgVendor extends Model {
      */
     getMergedUrls(): Record<string, string> {
         const presetUrls = vendorDefaultUrls.getAllUrls()[this.type] ?? {};
-        return {
-            ...presetUrls,
-            ...this.getUrls(),
-        };
+        const merged = { ...presetUrls, ...this.getUrls() };
+        delete merged['label'];
+        return merged;
     }
 
     /**

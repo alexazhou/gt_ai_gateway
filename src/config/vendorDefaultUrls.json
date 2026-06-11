@@ -1,38 +1,51 @@
 {
     "aliyun": {
+        "label": "Aliyun (通义千问)",
         "openai": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "anthropic": "https://dashscope.aliyuncs.com/apps/anthropic"
     },
     "aliyun_coding": {
+        "label": "Aliyun Coding",
         "openai": "https://coding.dashscope.aliyuncs.com/v1",
         "anthropic": "https://coding.dashscope.aliyuncs.com/apps/anthropic"
     },
     "volcengine_coding": {
+        "label": "Volcengine Coding",
         "openai": "https://ark.cn-beijing.volces.com/api/coding/v3",
         "anthropic": "https://ark.cn-beijing.volces.com/api/coding"
     },
     "openai": {
+        "label": "OpenAI",
         "openai": "https://api.openai.com/v1/chat/completions"
     },
     "deepseek": {
+        "label": "DeepSeek",
         "openai": "https://api.deepseek.com/v1/chat/completions",
         "anthropic": "https://api.deepseek.com/anthropic"
     },
     "mimo": {
+        "label": "Mimo",
         "openai": "https://api.xiaomimimo.com/v1",
         "anthropic": "https://api.xiaomimimo.com/anthropic"
     },
     "mimo_token_plan": {
+        "label": "Mimo Token Plan",
         "openai": "https://token-plan-cn.xiaomimimo.com/v1",
         "anthropic": "https://token-plan-cn.xiaomimimo.com/anthropic"
     },
     "opencode_go": {
+        "label": "OpenCode Go",
         "openai": "https://opencode.ai/zen/go/v1"
     },
     "anthropic": {
+        "label": "Anthropic",
         "anthropic": "https://api.anthropic.com"
     },
     "google": {
+        "label": "Google",
         "openai": "https://generativelanguage.googleapis.com/v1beta/openai"
+    },
+    "other": {
+        "label": "Other"
     }
 }
