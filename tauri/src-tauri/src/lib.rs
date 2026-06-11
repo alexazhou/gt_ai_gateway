@@ -259,6 +259,17 @@ pub fn run() {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
+                        } else {
+                            let _ = tauri::WebviewWindowBuilder::new(
+                                app,
+                                "main",
+                                tauri::WebviewUrl::App("index.html".into())
+                            )
+                            .title("")
+                            .inner_size(1280.0, 800.0)
+                            .resizable(true)
+                            .hidden_title(true)
+                            .build();
                         }
                     }
                     "open_config" => {
@@ -274,12 +285,18 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
-                api.prevent_close();
+        .on_window_event(|_window, event| {
+            if let WindowEvent::CloseRequested { .. } = event {
+                // window is naturally closed and destroyed, saving memory
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| match event {
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                // Prevent the app from completely exiting when the last window closes
+                api.prevent_exit();
+            }
+            _ => {}
+        });
 }
