@@ -367,7 +367,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                             type: "message_delta",
                             delta: { stop_reason: stopReason, stop_sequence: null },
                             usage: {
-                                input_tokens: chunk.usage.prompt_tokens || 0,
+                                input_tokens: (chunk.usage.prompt_tokens || 0) - (cachedTokens || 0),
                                 output_tokens: chunk.usage.completion_tokens || 0,
                                 ...(cachedTokens !== undefined ? { cache_read_input_tokens: cachedTokens } : {}),
                             },
@@ -393,7 +393,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                     type: "message_delta",
                     delta: { stop_reason: this.pendingStopReason, stop_sequence: null },
                     usage: {
-                        input_tokens: chunk.usage.prompt_tokens || 0,
+                        input_tokens: (chunk.usage.prompt_tokens || 0) - (cachedTokens || 0),
                         output_tokens: chunk.usage.completion_tokens || 0,
                         ...(cachedTokens !== undefined ? { cache_read_input_tokens: cachedTokens } : {}),
                     },

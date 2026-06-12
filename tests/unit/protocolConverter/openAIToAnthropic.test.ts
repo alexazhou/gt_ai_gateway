@@ -643,6 +643,30 @@ describe("OpenAIToAnthropicConverter - convertStreamEvent", () => {
         expect(parseStreamEventData(usageEvents, 1).type).toBe("message_stop");
     });
 
+    it("should normalize input_tokens to non-cached in deferred usage chunk", () => {
+        const converter2 = new OpenAIToAnthropicConverter();
+        converter2.convertStreamEvent(JSON.stringify({
+            id: "chatcmpl-123", object: "chat.completion.chunk", created: 1677652288, model: "gpt-4",
+            choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+        }));
+        converter2.convertStreamEvent(JSON.stringify({
+            id: "chatcmpl-123", object: "chat.completion.chunk", created: 1677652288, model: "gpt-4",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        }));
+        const usageEvents2 = converter2.convertStreamEvent(JSON.stringify({
+            id: "chatcmpl-123", object: "chat.completion.chunk", created: 1677652288, model: "gpt-4",
+            choices: [],
+            usage: {
+                prompt_tokens: 1000, completion_tokens: 50, total_tokens: 1050,
+                prompt_tokens_details: { cached_tokens: 900 },
+            },
+        }));
+        const usageDelta = parseStreamEventData(usageEvents2, 0);
+        expect(usageDelta.usage.input_tokens).toBe(100);
+        expect(usageDelta.usage.output_tokens).toBe(50);
+        expect(usageDelta.usage.cache_read_input_tokens).toBe(900);
+    });
+
     it("should include usage in message_delta on finish", () => {
         converter.convertStreamEvent(JSON.stringify({
             id: "chatcmpl-123",
@@ -665,5 +689,25 @@ describe("OpenAIToAnthropicConverter - convertStreamEvent", () => {
         expect(events.map((event) => event.event)).toEqual(["message_delta", "message_stop"]);
         expect(messageDelta.delta.stop_reason).toBe("tool_use");
         expect(messageDelta.usage.output_tokens).toBe(20);
+    });
+
+    it("should normalize input_tokens to non-cached in inline usage on finish", () => {
+        const converter2 = new OpenAIToAnthropicConverter();
+        converter2.convertStreamEvent(JSON.stringify({
+            id: "chatcmpl-123", object: "chat.completion.chunk", created: 1677652288, model: "gpt-4",
+            choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+        }));
+        const events = converter2.convertStreamEvent(JSON.stringify({
+            id: "chatcmpl-123", object: "chat.completion.chunk", created: 1677652288, model: "gpt-4",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: {
+                prompt_tokens: 500, completion_tokens: 30, total_tokens: 530,
+                prompt_tokens_details: { cached_tokens: 480 },
+            },
+        }));
+        const messageDelta = parseStreamEventData(events, 0);
+        expect(messageDelta.usage.input_tokens).toBe(20);
+        expect(messageDelta.usage.output_tokens).toBe(30);
+        expect(messageDelta.usage.cache_read_input_tokens).toBe(480);
     });
 });

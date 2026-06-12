@@ -272,10 +272,11 @@ async function handleNonStreamResponse(
             promptTokens = responseJson.usage?.prompt_tokens ?? null;
             outputTokens = responseJson.usage?.completion_tokens ?? null;
             if (responseJson.usage) {
+                const cachedTokens = responseJson.usage.prompt_tokens_details?.cached_tokens;
                 const u = new SgRecordUsage();
-                u.prompt_tokens = promptTokens ?? undefined;
+                u.prompt_tokens = (promptTokens ?? 0) - (cachedTokens ?? 0);
                 u.completion_tokens = outputTokens ?? undefined;
-                u.cache_read_tokens = responseJson.usage.prompt_tokens_details?.cached_tokens ?? undefined;
+                u.cache_read_tokens = cachedTokens ?? undefined;
                 usageJson = JSON.stringify(u);
             }
         }
