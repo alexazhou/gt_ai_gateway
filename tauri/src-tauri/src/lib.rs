@@ -269,6 +269,7 @@ pub fn run() {
 
             TrayIconBuilder::new()
                 .icon(tray_icon)
+                .icon_as_template(true)
                 .tooltip("GT AI Gateway")
                 .menu(&menu)
                 .show_menu_on_left_click(true)
