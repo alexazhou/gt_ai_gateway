@@ -48,32 +48,40 @@
                             {{ recordStore.currentRecord.vendor_model_name || '-' }}
                         </a-descriptions-item>
                         <a-descriptions-item label="协议">
-                            <span v-if="recordStore.currentRecord.client_format">
+                            <div v-if="recordStore.currentRecord.client_format" class="protocol-row">
                                 <a-tag>{{ recordStore.currentRecord.client_format.toUpperCase() }}</a-tag>
                                 <template v-if="recordStore.currentRecord.upstream_format">
                                     <span class="protocol-arrow">→</span>
                                     <a-tag color="orange">{{ recordStore.currentRecord.upstream_format.toUpperCase() }}</a-tag>
                                 </template>
-                            </span>
+                            </div>
                             <span v-else>-</span>
                         </a-descriptions-item>
                         <a-descriptions-item label="创建时间">
                             {{ formatDate(recordStore.currentRecord.created_at) }}
                         </a-descriptions-item>
-                        <a-descriptions-item label="提示词 Token" v-if="usageTokens?.prompt">
-                            <span class="token-item">
-                                <ArrowUpOutlined class="token-icon input" />
-                                {{ usageTokens.prompt }}
-                            </span>
+                        <a-descriptions-item label="Token">
+                            <div v-if="usageTokens" class="token-row">
+                                <span class="token-item" title="输入 Token">
+                                    <ArrowUpOutlined class="token-icon input" />
+                                    {{ usageTokens.prompt }}<template v-if="usageTokens.cacheReadTokens !== null"> (+ {{ usageTokens.cacheReadTokens!.toLocaleString() }})</template>
+                                </span>
+                                <span class="token-divider">/</span>
+                                <span class="token-item" title="输出 Token">
+                                    <ArrowDownOutlined class="token-icon output" />
+                                    {{ usageTokens.output }}
+                                </span>
+                            </div>
+                            <span v-else>-</span>
                         </a-descriptions-item>
-                        <a-descriptions-item label="输出 Token" v-if="usageTokens?.output">
-                            <span class="token-item">
-                                <ArrowDownOutlined class="token-icon output" />
-                                {{ usageTokens.output }}
-                            </span>
+                        <a-descriptions-item label="缓存命中">
+                            {{ usageTokens?.cacheHitRate != null ? usageTokens!.cacheHitRate!.toFixed(1) + '%' : '-' }}
                         </a-descriptions-item>
-                        <a-descriptions-item label="首 Token 延迟" v-if="recordStore.currentRecord.first_token_latency">
-                            {{ recordStore.currentRecord.first_token_latency }}ms
+                        <a-descriptions-item label="总耗时">
+                            {{ totalDuration !== null ? totalDuration.toLocaleString() + 'ms' : '-' }}
+                        </a-descriptions-item>
+                        <a-descriptions-item label="首 Token 延迟">
+                            {{ recordStore.currentRecord.first_token_latency ? recordStore.currentRecord.first_token_latency + 'ms' : '-' }}
                         </a-descriptions-item>
                     </a-descriptions>
                 </a-card>
@@ -141,20 +149,16 @@
                                 <JsonViewer ref="responseJsonRef" :data="recordStore.currentRecord.response_data" :expanded="isResponseExpanded" />
                             </div>
                         </a-tab-pane>
-                    </a-tabs>
-                </a-card>
 
-                <!-- 错误信息 -->
-                <a-card
-                    v-if="recordStore.currentRecord.status === 'failed'"
-                    title="错误信息"
-                    class="detail-card error-card"
-                >
-                    <a-alert
-                        type="error"
-                        :message="getErrorMessage(recordStore.currentRecord.response_data)"
-                        show-icon
-                    />
+                        <a-tab-pane v-if="recordStore.currentRecord.status === 'failed'" key="error" tab="报错信息">
+                            <div class="error-pane-content">
+                                <div v-if="recordStore.currentRecord.failed_code" class="error-type">
+                                    {{ FAILED_CODE_LABELS[recordStore.currentRecord.failed_code] ?? recordStore.currentRecord.failed_code }}
+                                </div>
+                                <div class="error-message-text">{{ getErrorMessage(recordStore.currentRecord.response_data) }}</div>
+                            </div>
+                        </a-tab-pane>
+                    </a-tabs>
                 </a-card>
             </div>
 
@@ -231,6 +235,8 @@ function onIframeLoad() {
 watch(conversationData, (newVal) => {
     if (getMessageCount(newVal) > 0) {
         activeRequestTab.value = 'visual';
+    } else if (recordStore.currentRecord?.status === 'failed') {
+        activeRequestTab.value = 'error';
     } else {
         activeRequestTab.value = 'request_json';
     }
@@ -249,10 +255,27 @@ const usageTokens = computed(() => {
     try {
         const u = JSON.parse(usage);
         if (u.prompt_tokens === undefined && u.completion_tokens === undefined) return null;
-        return { prompt: u.prompt_tokens ?? 0, output: u.completion_tokens ?? 0 };
+        const prompt: number = u.prompt_tokens ?? 0;
+        const output: number = u.completion_tokens ?? 0;
+        const cacheRead = u.cache_read_tokens;
+        let cacheHitRate: number | null = null;
+        if (cacheRead !== undefined && cacheRead !== null) {
+            const total = prompt + cacheRead;
+            cacheHitRate = total > 0 ? Math.floor(cacheRead / total * 1000) / 10 : 0;
+        }
+        return { prompt, output, cacheHitRate, cacheReadTokens: cacheRead ?? null };
     } catch {
         return null;
     }
+});
+
+const totalDuration = computed(() => {
+    const r = recordStore.currentRecord;
+    if (!r?.start_at || !r?.end_at) return null;
+    const start = new Date(r.start_at).getTime();
+    const end = new Date(r.end_at).getTime();
+    if (isNaN(start) || isNaN(end)) return null;
+    return end - start;
 });
 
 const currentRecordId = computed<number>(() => {
@@ -292,6 +315,13 @@ function handleBack() {
 onUnmounted(() => {
     recordStore.clearCurrentRecord();
 });
+
+const FAILED_CODE_LABELS: Record<string, string> = {
+    client_disconnected: '客户端断开连接',
+    upstream_disconnected: '上游断开连接',
+    stream_incomplete: '流式响应不完整',
+};
+
 
 function getStatusColor(status: string | null): string {
     switch (status) {
@@ -388,12 +418,17 @@ function downloadJson(data: string | null, type: 'request' | 'response') {
     margin-top: 0;
 }
 
-.error-card {
-    border-color: #ff4d4f;
+.error-pane-content {
+    padding: 8px 0;
 }
 
-.error-card :deep(.ant-card-head) {
-    border-color: #ff4d4f;
+.error-type {
+    color: #8c8c8c;
+    font-size: 13px;
+    margin-bottom: 6px;
+}
+
+.error-message-text {
     color: #ff4d4f;
 }
 
@@ -415,10 +450,33 @@ function downloadJson(data: string | null, type: 'request' | 'response') {
     color: #52c41a;
 }
 
+.token-row {
+    display: flex;
+    align-items: center;
+}
+
+.token-divider {
+    margin: 0 6px;
+    color: #d9d9d9;
+    line-height: 1;
+}
+
+.protocol-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.protocol-row :deep(.ant-tag) {
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+}
+
 .protocol-arrow {
-    margin: 0 4px;
     color: #8c8c8c;
     font-size: 12px;
+    line-height: 1;
 }
 
 .visualization-container {

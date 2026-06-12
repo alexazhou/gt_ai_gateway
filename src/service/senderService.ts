@@ -577,6 +577,24 @@ async function sendRequest(
         }
     }
 
+    // 4. 请求体改写：将 system 中 x-anthropic-billing-header 的 cch 值固定为 A1234
+    try {
+        const bodyJson = JSON.parse(upstreamBody);
+        if (typeof bodyJson.system === "string" && bodyJson.system.includes("cch=")) {
+            bodyJson.system = bodyJson.system.replace(/(cch=)[^;]*(;)/, "$1A1234$2");
+            upstreamBody = JSON.stringify(bodyJson);
+        } else if (Array.isArray(bodyJson.system)) {
+            for (const block of bodyJson.system) {
+                if (block.type === "text" && typeof block.text === "string" && block.text.includes("cch=")) {
+                    block.text = block.text.replace(/(cch=)[^;]*(;)/, "$1A1234$2");
+                }
+            }
+            upstreamBody = JSON.stringify(bodyJson);
+        }
+    } catch (e) {
+        console.log("[senderService] Failed to rewrite cch:", e);
+    }
+
     let converter: BaseConverter | null = null;
     if (needsConversion) {
         if (format === ApiFormat.RESPONSES || upstreamFormat === ApiFormat.RESPONSES) {

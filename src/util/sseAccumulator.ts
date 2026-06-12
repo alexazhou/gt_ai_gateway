@@ -121,7 +121,6 @@ interface AccumulatedResponse {
     usage?: {
         prompt_tokens?: number;
         completion_tokens?: number;
-        total_tokens?: number;
         cache_read_tokens?: number;
         completion_tokens_details?: {
             reasoning_tokens?: number;
@@ -241,8 +240,10 @@ class SSEAccumulator {
         // 保存 usage 信息（最后一个消息中才包含）
         if (msg.usage) {
             this.response.usage = {
-                ...msg.usage,
+                prompt_tokens: msg.usage.prompt_tokens,
+                completion_tokens: msg.usage.completion_tokens,
                 cache_read_tokens: (msg.usage as any).prompt_tokens_details?.cached_tokens ?? this.response.usage?.cache_read_tokens,
+                completion_tokens_details: msg.usage.completion_tokens_details,
             };
         }
     }
@@ -273,7 +274,6 @@ class SSEAccumulator {
                 this.response.usage = {
                     prompt_tokens: msg.message.usage.input_tokens,
                     completion_tokens: msg.message.usage.output_tokens || 0,
-                    total_tokens: (msg.message.usage.input_tokens || 0) + (msg.message.usage.output_tokens || 0),
                     cache_read_tokens: msg.message.usage.cache_read_input_tokens,
                 };
             }
@@ -347,7 +347,6 @@ class SSEAccumulator {
                 this.response.usage = {
                     prompt_tokens: promptTokens,
                     completion_tokens: completionTokens,
-                    total_tokens: promptTokens + completionTokens,
                     cache_read_tokens: usage.cache_read_input_tokens ?? this.response.usage?.cache_read_tokens,
                 };
             }

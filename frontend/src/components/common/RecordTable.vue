@@ -20,7 +20,7 @@
                     <div v-if="getTokens(record) !== null">
                         <span class="token-item" title="输入 Token">
                             <ArrowUpOutlined class="token-icon input" />
-                            {{ getTokens(record)!.prompt }}
+                            {{ getTokens(record)!.prompt }}<template v-if="getTokens(record)!.cacheRead !== null"> (+ {{ getTokens(record)!.cacheRead!.toLocaleString() }})</template>
                         </span>
                         <span class="token-divider">/</span>
                         <span class="token-item" title="输出 Token">
@@ -30,7 +30,7 @@
                     </div>
                     <div v-else>-</div>
                     <div v-if="getCacheHitRate(record) !== null" class="metric-sub">
-                        缓存 {{ getCacheHitRate(record) }}%
+                        缓存 {{ getCacheHitRate(record)!.rate.toFixed(1) }}%
                     </div>
                 </div>
             </template>
@@ -46,13 +46,13 @@
                 {{ formatDate(record.created_at) }}
             </template>
             <template v-else-if="column.key === 'protocol'">
-                <span v-if="record.client_format">
+                <div v-if="record.client_format" class="protocol-row">
                     <a-tag>{{ record.client_format.toUpperCase() }}</a-tag>
                     <template v-if="record.upstream_format">
                         <span class="protocol-arrow">→</span>
                         <a-tag color="orange">{{ record.upstream_format.toUpperCase() }}</a-tag>
                     </template>
-                </span>
+                </div>
                 <span v-else>-</span>
             </template>
             <template v-if="column.key === 'action'">
@@ -121,18 +121,21 @@ function handleView(record: Record) {
     });
 }
 
-function getTokens(record: Record): { prompt: number; output: number } | null {
+function getTokens(record: Record): { prompt: number; output: number; cacheRead: number | null } | null {
     if (!record.usage) return null;
     try {
         const u = JSON.parse(record.usage);
         if (u.prompt_tokens === undefined && u.completion_tokens === undefined) return null;
-        return { prompt: u.prompt_tokens ?? 0, output: u.completion_tokens ?? 0 };
+        const cacheRead = (u.cache_read_tokens !== undefined && u.cache_read_tokens !== null)
+            ? (u.cache_read_tokens as number)
+            : null;
+        return { prompt: u.prompt_tokens ?? 0, output: u.completion_tokens ?? 0, cacheRead };
     } catch {
         return null;
     }
 }
 
-function getCacheHitRate(record: Record): number | null {
+function getCacheHitRate(record: Record): { rate: number; tokens: number } | null {
     if (!record.usage) return null;
     try {
         const u = JSON.parse(record.usage);
@@ -140,8 +143,8 @@ function getCacheHitRate(record: Record): number | null {
         const cacheRead = u.cache_read_tokens;
         const promptTokens = u.prompt_tokens ?? 0;
         const total = promptTokens + cacheRead;
-        if (total <= 0) return 0;
-        return Math.round(cacheRead / total * 100);
+        const rate = total <= 0 ? 0 : Math.floor(cacheRead / total * 1000) / 10;
+        return { rate, tokens: cacheRead };
     } catch {
         return null;
     }
@@ -248,9 +251,21 @@ function getStatusText(status: string | null, failedCode?: string | null): strin
     color: #8c8c8c;
 }
 
+.protocol-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.protocol-row :deep(.ant-tag) {
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+}
+
 .protocol-arrow {
-    margin: 0 4px;
     color: #8c8c8c;
     font-size: 12px;
+    line-height: 1;
 }
 </style>

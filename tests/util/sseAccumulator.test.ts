@@ -67,11 +67,8 @@ describe("SSE Accumulator Fixtures", () => {
             "Hello! I am a mock AI assistant. How can I help you?",
         );
         expect(response.choices[0].finish_reason).toBe("stop");
-        expect(response.usage).toEqual({
-            prompt_tokens: 8,
-            completion_tokens: 12,
-            total_tokens: 20,
-        });
+        expect(response.usage?.prompt_tokens).toBe(8);
+        expect(response.usage?.completion_tokens).toBe(12);
     });
 
     it("parses openai tool-call stream fixture", () => {
@@ -104,7 +101,6 @@ describe("SSE Accumulator Fixtures", () => {
         expect(response.choices[0].finish_reason).toBe("max_tokens");
         expect(response.usage?.prompt_tokens).toBe(6);
         expect(response.usage?.completion_tokens).toBe(223);
-        expect(response.usage?.total_tokens).toBe(229);
     });
 
     it("parses openai reasoning stream fixture", () => {
@@ -139,6 +135,5 @@ describe("SSE Accumulator Fixtures", () => {
         );
         expect(response.usage?.prompt_tokens).toBe(197);
         expect(response.usage?.completion_tokens).toBe(77);
-        expect(response.usage?.total_tokens).toBe(274);
     });
 });
