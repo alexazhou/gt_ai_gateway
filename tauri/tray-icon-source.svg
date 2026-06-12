@@ -1,0 +1,18 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <polygon 
+    points="256,76 412,166 412,346 256,436 100,346 100,166" 
+    fill="none" 
+    stroke="#000000" 
+    stroke-width="32" 
+    stroke-linejoin="round" 
+  />
+
+  <line x1="256" y1="256" x2="256" y2="76" stroke="#000000" stroke-width="28" stroke-linecap="round" />
+  <line x1="256" y1="256" x2="412" y2="166" stroke="#000000" stroke-width="28" stroke-linecap="round" />
+  <line x1="256" y1="256" x2="412" y2="346" stroke="#000000" stroke-width="28" stroke-linecap="round" />
+  <line x1="256" y1="256" x2="256" y2="436" stroke="#000000" stroke-width="28" stroke-linecap="round" />
+  <line x1="256" y1="256" x2="100" y2="346" stroke="#000000" stroke-width="28" stroke-linecap="round" />
+  <line x1="256" y1="256" x2="100" y2="166" stroke="#000000" stroke-width="28" stroke-linecap="round" />
+
+  <circle cx="256" cy="256" r="64" fill="#000000" />
+</svg>
