@@ -118,7 +118,7 @@
                             </a-space>
                         </template>
 
-                        <a-tab-pane key="visual" tab="可视化对话" v-if="conversationMessages.length > 0">
+                        <a-tab-pane key="visual" tab="可视化对话" v-if="Array.isArray(conversationData) ? conversationData.length > 0 : conversationData.messages.length > 0">
                             <div class="visualization-container">
                                 <iframe 
                                     ref="viewerIframe" 
@@ -185,13 +185,17 @@ const responseJsonRef = ref<any>(null);
 const isRequestExpanded = ref(true);
 const isResponseExpanded = ref(true);
 
-const conversationMessages = computed(() => {
-    const msgs: any[] = [];
+const conversationData = computed(() => {
+    const messages: any[] = [];
+    let system: any = undefined;
     try {
         if (recordStore.currentRecord?.request_data) {
             const req = JSON.parse(recordStore.currentRecord.request_data);
             if (req.messages && Array.isArray(req.messages)) {
-                msgs.push(...req.messages);
+                messages.push(...req.messages);
+            }
+            if (req.system != null) {
+                system = req.system;
             }
         }
     } catch(e) {}
@@ -199,34 +203,39 @@ const conversationMessages = computed(() => {
         if (recordStore.currentRecord?.response_data) {
             const res = JSON.parse(recordStore.currentRecord.response_data);
             if (res.choices && res.choices.length > 0 && res.choices[0].message) {
-                msgs.push(res.choices[0].message);
+                messages.push(res.choices[0].message);
             } else if (res.message) {
-                msgs.push(res.message);
+                messages.push(res.message);
             }
         }
     } catch(e) {}
-    return msgs;
+    return system !== undefined ? { system, messages } : messages;
 });
+
+function getMessageCount(data: any): number {
+    if (Array.isArray(data)) return data.length;
+    return data?.messages?.length ?? 0;
+}
 
 function onIframeLoad() {
     if (viewerIframe.value && viewerIframe.value.contentWindow) {
         setTimeout(() => {
             const bridge = (viewerIframe.value!.contentWindow as any).gt_bridge;
             if (bridge && typeof bridge.setLlmData === 'function') {
-                bridge.setLlmData(JSON.parse(JSON.stringify(conversationMessages.value)));
+                bridge.setLlmData(JSON.parse(JSON.stringify(conversationData.value)));
             }
         }, 300);
     }
 }
 
-watch(conversationMessages, (newVal) => {
-    if (newVal.length > 0) {
+watch(conversationData, (newVal) => {
+    if (getMessageCount(newVal) > 0) {
         activeRequestTab.value = 'visual';
     } else {
         activeRequestTab.value = 'request_json';
     }
 
-    if (newVal.length > 0 && viewerIframe.value && viewerIframe.value.contentWindow) {
+    if (getMessageCount(newVal) > 0 && viewerIframe.value && viewerIframe.value.contentWindow) {
         const bridge = (viewerIframe.value.contentWindow as any).gt_bridge;
         if (bridge && typeof bridge.setLlmData === 'function') {
             bridge.setLlmData(JSON.parse(JSON.stringify(newVal)));
