@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ESNext",
     "module": "ESNext",
-    "moduleResolution": "node",
+    "moduleResolution": "Node16",
     "strict": true,
     "skipLibCheck": true,
     "lib": [
@@ -16,4 +16,9 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true
   },
+  "exclude": [
+    "node_modules",
+    "tauri/build",
+    "frontend"
+  ]
 }

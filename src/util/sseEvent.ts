@@ -47,6 +47,10 @@ function isClientStreamCompleted(format: ApiFormat, event: ProtocolStreamEvent):
         return event.event === "message_stop" || getJsonEventType(event.data) === "message_stop";
     }
 
+    if (format === ApiFormat.RESPONSES) {
+        return getJsonEventType(event.data) === "response.completed";
+    }
+
     return false;
 }
 

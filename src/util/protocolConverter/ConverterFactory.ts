@@ -2,6 +2,8 @@ import { ApiFormat } from "../../constants";
 import { BaseConverter } from "./BaseConverter";
 import { AnthropicToOpenAIConverter } from "./AnthropicToOpenAIConverter";
 import { OpenAIToAnthropicConverter } from "./OpenAIToAnthropicConverter";
+import { ResponsesToAnthropicConverter } from "./ResponsesToAnthropicConverter";
+import { AnthropicToResponsesConverter } from "./AnthropicToResponsesConverter";
 import { ProtocolPairConverter } from "./ProtocolPairConverter";
 
 export class ConverterFactory {
@@ -21,11 +23,24 @@ export class ConverterFactory {
             return null;
         }
 
+        // Anthropic ↔ OpenAI
         if (clientFormat === ApiFormat.ANTHROPIC && upstreamFormat === ApiFormat.OPENAI) {
             return new AnthropicToOpenAIConverter(requestModel);
         } else if (clientFormat === ApiFormat.OPENAI && upstreamFormat === ApiFormat.ANTHROPIC) {
             return new OpenAIToAnthropicConverter(requestModel);
         }
+
+        // Responses ↔ Anthropic
+        if (clientFormat === ApiFormat.RESPONSES && upstreamFormat === ApiFormat.ANTHROPIC) {
+            return new ResponsesToAnthropicConverter(requestModel);
+        } else if (clientFormat === ApiFormat.ANTHROPIC && upstreamFormat === ApiFormat.RESPONSES) {
+            return new AnthropicToResponsesConverter(requestModel);
+        }
+
+        // Responses ↔ OpenAI（Responses 和 Chat Completions 都是 OpenAI 体系，
+        // 但格式差异大，目前暂不支持互转，后续可扩展）
+        // if (clientFormat === ApiFormat.RESPONSES && upstreamFormat === ApiFormat.OPENAI) { ... }
+        // if (clientFormat === ApiFormat.OPENAI && upstreamFormat === ApiFormat.RESPONSES) { ... }
 
         return null;
     }

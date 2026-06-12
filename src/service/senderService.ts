@@ -17,6 +17,7 @@ import userService from "./userService";
 import customError from "../util/customError";
 import { ConverterFactory } from "../util/protocolConverter/ConverterFactory";
 import type { BaseConverter } from "../util/protocolConverter/BaseConverter";
+import type { ProtocolStreamEvent } from "../util/protocolConverter/protocolTypes";
 import sseEvent from "../util/sseEvent";
 
 
@@ -313,9 +314,12 @@ async function handleResponsesStreamResponse(
     record: SgRecord,
     model: SgModel,
     user: SgUser,
+    converter: BaseConverter | null = null,
+    upstreamFormat: ApiFormat = ApiFormat.RESPONSES,
 ): Promise<Response> {
     let firstTokenTime: number | null = null;
     const logStream = prepareStreamLog(record);
+    const needsConversion = converter !== null;
 
     return streamSSE(c, async (stream: SSEStreamingApi) => {
         const reader = upstreamRes.body!.getReader();
@@ -365,59 +369,77 @@ async function handleResponsesStreamResponse(
                     const eventType = parsedEvent.event ?? "";
                     const responseEventType = parsedData?.type ?? eventType;
 
-                    if (firstTokenTime === null && responseEventType === "response.output_text.delta") {
-                        firstTokenTime = Date.now();
+                    // 如果需要协议转换，将上游事件转换为 Responses 事件
+                    let clientEvents: ProtocolStreamEvent[];
+                    if (needsConversion && converter) {
+                        clientEvents = converter.convertStreamEvent(parsedEvent.data, parsedEvent.event, parsedEvent.id);
+                    } else {
+                        clientEvents = [parsedEvent];
                     }
 
-                    // response.completed 表示上游已完成，在转发前标记
-                    if (responseEventType === "response.completed" && parsedData) {
-                        streamCompleted = true;
-                    }
+                    for (const clientEvent of clientEvents) {
+                        if (!clientEvent.data) continue;
 
-                    try {
-                        await stream.writeSSE({
-                            data: parsedEvent.data,
-                            event: parsedEvent.event,
-                            id: parsedEvent.id,
-                        });
-                    } catch (e: any) {
-                        console.error("[senderService] Client write error (client disconnected, responses):", e);
-                        failedCode = FailedCode.CLIENT_DISCONNECTED;
-                        clientDisconnected = true;
-                        break;
-                    }
-
-                    // response.completed 包含完整 usage，保存记录
-                    if (responseEventType === "response.completed" && parsedData) {
+                        let clientParsedData: any = null;
                         try {
-                            const usage = parsedData?.response?.usage;
-                            const promptTokens = usage?.input_tokens ?? 0;
-                            const outputTokens = usage?.output_tokens ?? 0;
-                            const cost = calculateCost(model, promptTokens, outputTokens);
-                            let usageJson: string | null = null;
-                            if (usage) {
-                                const u = new SgRecordUsage();
-                                u.prompt_tokens = promptTokens;
-                                u.completion_tokens = outputTokens;
-                                usageJson = JSON.stringify(u);
-                            }
+                            clientParsedData = JSON.parse(clientEvent.data);
+                        } catch {}
+                        const clientEventType = clientParsedData?.type ?? "";
 
-                            await recordService.update(record.id, {
-                                response_data: JSON.stringify(parsedData.response),
-                                status: SgRecordStatus.SUCCESS,
-                                usage: usageJson,
-                                first_token_latency: firstTokenTime !== null
-                                    ? firstTokenTime - record.created_at.getTime()
-                                    : null,
-                                end_at: new Date(),
-                                cost,
+                        if (firstTokenTime === null && clientEventType === "response.output_text.delta") {
+                            firstTokenTime = Date.now();
+                        }
+
+                        // response.completed 表示上游已完成，在转发前标记
+                        if (clientEventType === "response.completed" && clientParsedData) {
+                            streamCompleted = true;
+                        }
+
+                        try {
+                            await stream.writeSSE({
+                                data: clientEvent.data,
+                                event: clientEvent.event,
+                                id: clientEvent.id,
                             });
+                        } catch (e: any) {
+                            console.error("[senderService] Client write error (client disconnected, responses):", e);
+                            failedCode = FailedCode.CLIENT_DISCONNECTED;
+                            clientDisconnected = true;
+                            break;
+                        }
 
-                            if (user.type !== "root") {
-                                await userService.deductBalance(user.id, cost);
+                        // response.completed 包含完整 usage，保存记录
+                        if (clientEventType === "response.completed" && clientParsedData) {
+                            try {
+                                const usage = clientParsedData?.response?.usage;
+                                const promptTokens = usage?.input_tokens ?? 0;
+                                const outputTokens = usage?.output_tokens ?? 0;
+                                const cost = calculateCost(model, promptTokens, outputTokens);
+                                let usageJson: string | null = null;
+                                if (usage) {
+                                    const u = new SgRecordUsage();
+                                    u.prompt_tokens = promptTokens;
+                                    u.completion_tokens = outputTokens;
+                                    usageJson = JSON.stringify(u);
+                                }
+
+                                await recordService.update(record.id, {
+                                    response_data: JSON.stringify(clientParsedData.response),
+                                    status: SgRecordStatus.SUCCESS,
+                                    usage: usageJson,
+                                    first_token_latency: firstTokenTime !== null
+                                        ? firstTokenTime - record.created_at.getTime()
+                                        : null,
+                                    end_at: new Date(),
+                                    cost,
+                                });
+
+                                if (user.type !== "root") {
+                                    await userService.deductBalance(user.id, cost);
+                                }
+                            } catch (e) {
+                                console.log("Failed to update record on response.completed:", e);
                             }
-                        } catch (e) {
-                            console.log("Failed to update record on response.completed:", e);
                         }
                     }
                 }
@@ -450,17 +472,36 @@ async function handleResponsesNonStreamResponse(
     record: SgRecord,
     model: SgModel,
     user: SgUser,
+    converter: BaseConverter | null = null,
+    upstreamFormat: ApiFormat = ApiFormat.RESPONSES,
 ): Promise<Response> {
     const responseText = await upstreamRes.text();
     const statusCode = upstreamRes.status as StatusCode;
+    const needsConversion = converter !== null;
+
+    let clientResponseText = responseText;
+    if (needsConversion && converter) {
+        try {
+            const responseJson = JSON.parse(responseText);
+            const clientRes = converter.convertResponse(responseJson);
+            clientResponseText = JSON.stringify(clientRes);
+        } catch (e) {
+            console.error("[senderService] Failed to convert responses non-stream response:", e);
+        }
+    }
 
     let promptTokens = 0;
     let outputTokens = 0;
     let usageJson: string | null = null;
     try {
         const responseJson = JSON.parse(responseText);
-        promptTokens = responseJson.usage?.input_tokens ?? 0;
-        outputTokens = responseJson.usage?.output_tokens ?? 0;
+        if (upstreamFormat === ApiFormat.ANTHROPIC) {
+            promptTokens = responseJson.usage?.input_tokens ?? 0;
+            outputTokens = responseJson.usage?.output_tokens ?? 0;
+        } else {
+            promptTokens = responseJson.usage?.input_tokens ?? responseJson.usage?.prompt_tokens ?? 0;
+            outputTokens = responseJson.usage?.output_tokens ?? responseJson.usage?.completion_tokens ?? 0;
+        }
         if (responseJson.usage) {
             const u = new SgRecordUsage();
             u.prompt_tokens = promptTokens;
@@ -474,7 +515,7 @@ async function handleResponsesNonStreamResponse(
     const cost = calculateCost(model, promptTokens, outputTokens);
 
     await recordService.update(record.id, {
-        response_data: responseText,
+        response_data: clientResponseText,
         status: statusCode === 200 ? SgRecordStatus.SUCCESS : SgRecordStatus.FAILED,
         usage: usageJson,
         end_at: new Date(),
@@ -487,7 +528,7 @@ async function handleResponsesNonStreamResponse(
 
     c.status(statusCode);
     c.res.headers.set("Content-Type", "application/json");
-    return c.text(responseText);
+    return c.text(clientResponseText);
 }
 
 
@@ -615,13 +656,6 @@ async function sendRequest(
 
     let converter: BaseConverter | null = null;
     if (needsConversion) {
-        if (format === ApiFormat.RESPONSES || upstreamFormat === ApiFormat.RESPONSES) {
-            throw new customError.AppError(
-                `Protocol conversion is not supported for Responses API format`,
-                400,
-            );
-        }
-
         converter = ConverterFactory.createPair(format, upstreamFormat);
         if (!converter) {
             throw new customError.AppError(
@@ -675,9 +709,9 @@ async function sendRequest(
     // 4. 按响应类型分发处理
     if (format === ApiFormat.RESPONSES) {
         if (isStream) {
-            return handleResponsesStreamResponse(c, upstreamRes, record, modelConfig, user);
+            return handleResponsesStreamResponse(c, upstreamRes, record, modelConfig, user, converter, upstreamFormat);
         } else {
-            return handleResponsesNonStreamResponse(c, upstreamRes, record, modelConfig, user);
+            return handleResponsesNonStreamResponse(c, upstreamRes, record, modelConfig, user, converter, upstreamFormat);
         }
     }
 
