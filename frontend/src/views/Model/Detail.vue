@@ -16,17 +16,21 @@
                         {{ Boolean(model.enable) ? '启用' : '禁用' }}
                     </a-tag>
                 </a-descriptions-item>
-                <a-descriptions-item label="输入价格">
-                    ¥{{ (model.input_price || 0).toFixed(6) }} / 千tokens
-                    <a-tooltip title="元/千tokens" placement="right">
-                        <InfoCircleOutlined style="font-size: 12px; color: #999; margin-left: 4px;" />
-                    </a-tooltip>
+                <a-descriptions-item label="供应商模型">
+                    {{ vendorModel?.model_id || '-' }}
                 </a-descriptions-item>
-                <a-descriptions-item label="输出价格">
-                    ¥{{ (model.output_price || 0).toFixed(6) }} / 千tokens
-                    <a-tooltip title="元/千tokens" placement="right">
-                        <InfoCircleOutlined style="font-size: 12px; color: #999; margin-left: 4px;" />
-                    </a-tooltip>
+                <a-descriptions-item label="支持协议">
+                    <template v-if="vendorModel?.allowed_formats?.length">
+                        <a-tag v-for="fmt in vendorModel.allowed_formats" :key="fmt" color="blue">
+                            {{ fmt }}
+                        </a-tag>
+                    </template>
+                    <span v-else>-</span>
+                </a-descriptions-item>
+                <a-descriptions-item label="价格">
+                    输入: ¥{{ (model.prices?.input || 0).toFixed(6) }} / 千tokens<br/>
+                    输出: ¥{{ (model.prices?.output || 0).toFixed(6) }} / 千tokens<br/>
+                    缓存读取: ¥{{ (model.prices?.cache_read || 0).toFixed(6) }} / 千tokens
                 </a-descriptions-item>
                 <a-descriptions-item label="创建时间">
                     {{ formatDate(model.created_at) }}
@@ -42,16 +46,18 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { InfoCircleOutlined } from '@ant-design/icons-vue';
 import { getModel } from '@/api/model';
+import { fetchVendorModelsByIds } from '@/api/vendor';
 import { formatDate } from '@/utils/format';
 import type { Model } from '@/types/model';
+import type { VendorModel } from '@/types/vendor';
 
 const route = useRoute();
 const router = useRouter();
 
 const loading = ref(false);
 const model = ref<Model | null>(null);
+const vendorModel = ref<VendorModel | null>(null);
 
 onMounted(async () => {
     const id = Number(route.params.id);
@@ -63,7 +69,14 @@ onMounted(async () => {
 async function loadModel(id: number) {
     loading.value = true;
     try {
-        model.value = await getModel(id);
+        const m = await getModel(id);
+        model.value = m;
+        if (m.vendor_model_id) {
+            const vms = await fetchVendorModelsByIds([m.vendor_model_id]);
+            if (vms && vms.length > 0) {
+                vendorModel.value = vms[0] ?? null;
+            }
+        }
     } catch (error) {
         console.error('加载模型失败:', error);
     } finally {

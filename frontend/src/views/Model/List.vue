@@ -71,16 +71,12 @@
                     </a-tag>
                 </template>
                 <template v-if="column.key === 'price'">
-                    <div class="price-display">
-                        <div class="price-row">
-                            <ArrowUpOutlined class="price-icon input" />
-                            <span>¥{{ (record.input_price || 0).toFixed(6) }}</span>
-                        </div>
-                        <div class="price-row">
-                            <ArrowDownOutlined class="price-icon output" />
-                            <span>¥{{ (record.output_price || 0).toFixed(6) }}</span>
-                        </div>
-                    </div>
+                    <a-tag 
+                        :color="((record.prices?.input || 0) > 0 || (record.prices?.output || 0) > 0 || (record.prices?.cache_read || 0) > 0) ? 'blue' : 'default'"
+                        :style="{ color: ((record.prices?.input || 0) > 0 || (record.prices?.output || 0) > 0 || (record.prices?.cache_read || 0) > 0) ? undefined : '#999' }"
+                    >
+                        {{ ((record.prices?.input || 0) > 0 || (record.prices?.output || 0) > 0 || (record.prices?.cache_read || 0) > 0) ? '已配置' : '未配置' }}
+                    </a-tag>
                 </template>
                 <template v-if="column.key === 'created_at'">
                     {{ formatDate(record.created_at) }}
@@ -111,7 +107,7 @@
 import { ref, watch, onMounted } from 'vue';
 import type { TableColumnsType } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
-import { ArrowUpOutlined, ArrowDownOutlined, InfoCircleOutlined } from '@ant-design/icons-vue';
+import { InfoCircleOutlined } from '@ant-design/icons-vue';
 import { listModels } from '@/api/model';
 import { listVendors, fetchVendorModelsByIds } from '@/api/vendor';
 import { useResourceTable } from '@/composables/useResourceTable';

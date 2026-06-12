@@ -60,46 +60,65 @@
                 <a-switch v-model:checked="formState.enable" />
             </a-form-item>
             <a-collapse v-model:activeKey="billingExpanded" ghost>
-                <a-collapse-panel key="billing" header="计费设置">
-                    <a-form-item>
-                        <template #label>
-                            <span style="display: flex; align-items: center; gap: 4px;">
+                <a-collapse-panel key="billing" header="价格设置">
+                    <a-form-item style="margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center;">
+                            <div style="flex: 0 0 110px; display: flex; align-items: center; gap: 4px; color: rgba(0, 0, 0, 0.88);">
                                 输入价格
-                                <a-tooltip title="元/千tokens">
+                                <a-tooltip title="输入token的计费价格 (元/千tokens)">
                                     <InfoCircleOutlined style="font-size: 12px; color: #999;" />
                                 </a-tooltip>
-                            </span>
-                        </template>
-                        <a-input-number
-                            v-model:value="formState.input_price"
-                            placeholder="请输入输入价格"
-                            :min="0"
-                            :precision="6"
-                            style="width: 100%"
-                        />
-                        <template #extra>
-                            <span style="color: #999; font-size: 12px">输入token的计费价格</span>
-                        </template>
+                            </div>
+                            <div style="flex: 1;">
+                                <a-input-number
+                                    v-model:value="formState.prices.input"
+                                    placeholder="请输入输入价格"
+                                    :min="0"
+                                    :precision="6"
+                                    style="width: 100%"
+                                />
+                            </div>
+                        </div>
                     </a-form-item>
-                    <a-form-item>
-                        <template #label>
-                            <span style="display: flex; align-items: center; gap: 4px;">
+
+                    <a-form-item style="margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center;">
+                            <div style="flex: 0 0 110px; display: flex; align-items: center; gap: 4px; color: rgba(0, 0, 0, 0.88);">
                                 输出价格
-                                <a-tooltip title="元/千tokens">
+                                <a-tooltip title="输出token的计费价格 (元/千tokens)">
                                     <InfoCircleOutlined style="font-size: 12px; color: #999;" />
                                 </a-tooltip>
-                            </span>
-                        </template>
-                        <a-input-number
-                            v-model:value="formState.output_price"
-                            placeholder="请输入输出价格"
-                            :min="0"
-                            :precision="6"
-                            style="width: 100%"
-                        />
-                        <template #extra>
-                            <span style="color: #999; font-size: 12px">输出token的计费价格</span>
-                        </template>
+                            </div>
+                            <div style="flex: 1;">
+                                <a-input-number
+                                    v-model:value="formState.prices.output"
+                                    placeholder="请输入输出价格"
+                                    :min="0"
+                                    :precision="6"
+                                    style="width: 100%"
+                                />
+                            </div>
+                        </div>
+                    </a-form-item>
+
+                    <a-form-item style="margin-bottom: 0;">
+                        <div style="display: flex; align-items: center;">
+                            <div style="flex: 0 0 110px; display: flex; align-items: center; gap: 4px; color: rgba(0, 0, 0, 0.88);">
+                                缓存读取价格
+                                <a-tooltip title="缓存命中时读取token的计费价格 (元/千tokens)">
+                                    <InfoCircleOutlined style="font-size: 12px; color: #999;" />
+                                </a-tooltip>
+                            </div>
+                            <div style="flex: 1;">
+                                <a-input-number
+                                    v-model:value="formState.prices.cache_read"
+                                    placeholder="请输入缓存读取价格"
+                                    :min="0"
+                                    :precision="6"
+                                    style="width: 100%"
+                                />
+                            </div>
+                        </div>
                     </a-form-item>
                 </a-collapse-panel>
             </a-collapse>
@@ -138,8 +157,11 @@ const formState = reactive({
     vendor_id: undefined as number | undefined,
     vendor_model_id: undefined as number | undefined,
     enable: true,
-    input_price: 0,
-    output_price: 0,
+    prices: {
+        input: undefined as number | undefined,
+        output: undefined as number | undefined,
+        cache_read: undefined as number | undefined,
+    },
 });
 
 const rules = {
@@ -206,8 +228,11 @@ function open(model: Model) {
     formState.vendor_id = model.vendor_id;
     formState.vendor_model_id = model.vendor_model_id ?? undefined;
     formState.enable = Boolean(model.enable);
-    formState.input_price = model.input_price;
-    formState.output_price = model.output_price;
+    formState.prices = {
+        input: model.prices?.input || undefined,
+        output: model.prices?.output || undefined,
+        cache_read: model.prices?.cache_read || undefined,
+    };
     currentId.value = model.id;
     void loadVendors();
     if (model.vendor_id) {
@@ -240,8 +265,11 @@ function handleCancel() {
     formState.vendor_id = undefined;
     formState.vendor_model_id = undefined;
     formState.enable = true;
-    formState.input_price = 0;
-    formState.output_price = 0;
+    formState.prices = {
+        input: undefined,
+        output: undefined,
+        cache_read: undefined,
+    };
     vendorModels.value = [];
 }
 
@@ -260,4 +288,5 @@ defineExpose({ open });
     display: flex;
     gap: 8px;
 }
+
 </style>

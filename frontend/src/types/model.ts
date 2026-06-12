@@ -5,16 +5,22 @@ export interface Model extends BaseEntity {
     vendor_id: number;
     vendor_model_id: number | null;
     enable: boolean;
-    input_price: number;
-    output_price: number;
+    prices?: {
+        input?: number;
+        output?: number;
+        cache_read?: number;
+    } | null;
 }
 
 export interface CreateModelRequest {
     name: string;
     vendor_id: number;
     enable?: boolean;
-    input_price?: number;
-    output_price?: number;
+    prices?: {
+        input?: number;
+        output?: number;
+        cache_read?: number;
+    } | null;
     vendor_model_id?: number | null;
 }
 
@@ -22,8 +28,11 @@ export interface UpdateModelRequest {
     name?: string;
     vendor_id?: number;
     enable?: boolean;
-    input_price?: number;
-    output_price?: number;
+    prices?: {
+        input?: number;
+        output?: number;
+        cache_read?: number;
+    } | null;
     vendor_model_id?: number | null;
 }
 

@@ -35,7 +35,7 @@ async function checkDuplicateEnabledModel(
 
 async function updateModel(
     modelId: number,
-    data: { name?: string; vendor_id?: number; enable?: boolean; input_price?: number; output_price?: number; vendor_model_id?: number | null },
+    data: { name?: string; vendor_id?: number; enable?: boolean; prices?: any; vendor_model_id?: number | null },
 ): Promise<SgModel | null> {
     const model = await SgModel.query().find(modelId);
 
@@ -69,12 +69,8 @@ async function updateModel(
         enable: newEnable,
     };
 
-    if (data.input_price !== undefined) {
-        updateData.input_price = data.input_price;
-    }
-
-    if (data.output_price !== undefined) {
-        updateData.output_price = data.output_price;
+    if (data.prices !== undefined) {
+        updateData.prices = JSON.stringify(data.prices);
     }
 
     if ("vendor_model_id" in data) {

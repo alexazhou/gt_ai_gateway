@@ -45,8 +45,10 @@ describe("Billing API", () => {
                 name: "gpt-3.5-turbo-billing",
                 vendor_id: openaiVendorId,
                 enable: true,
-                input_price: 0.5,
-                output_price: 1.5,
+                prices: {
+                    input: 0.5,
+                    output: 1.5,
+                }
             };
             const response = await requestHelper.post(
                 "/model/create.json",
@@ -57,8 +59,8 @@ describe("Billing API", () => {
             expect(response.status).toBe(200);
             expect(response.body).toHaveProperty("id");
             expect(response.body.name).toBe("gpt-3.5-turbo-billing");
-            expect(response.body.input_price).toBe(0.5);
-            expect(response.body.output_price).toBe(1.5);
+            expect(response.body.prices.input).toBe(0.5);
+            expect(response.body.prices.output).toBe(1.5);
 
             modelId = response.body.id;
         });
@@ -76,23 +78,24 @@ describe("Billing API", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(response.body.input_price).toBe(0);
-            expect(response.body.output_price).toBe(0);
+            expect(response.body.prices).toBeDefined();
         });
 
         it("should update model pricing fields", async () => {
             const response = await requestHelper.put(
                 `/model/${modelId}`,
                 {
-                    input_price: 1.0,
-                    output_price: 2.0,
+                    prices: {
+                        input: 1.0,
+                        output: 2.0,
+                    }
                 },
                 adminToken,
             );
 
             expect(response.status).toBe(200);
-            expect(response.body.input_price).toBe(1.0);
-            expect(response.body.output_price).toBe(2.0);
+            expect(response.body.prices.input).toBe(1.0);
+            expect(response.body.prices.output).toBe(2.0);
         });
 
         it("should get model with pricing fields", async () => {
@@ -102,10 +105,9 @@ describe("Billing API", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(response.body).toHaveProperty("input_price");
-            expect(response.body).toHaveProperty("output_price");
-            expect(response.body.input_price).toBe(1.0);
-            expect(response.body.output_price).toBe(2.0);
+            expect(response.body).toHaveProperty("prices");
+            expect(response.body.prices.input).toBe(1.0);
+            expect(response.body.prices.output).toBe(2.0);
         });
 
         it("should list models with pricing fields", async () => {
@@ -117,8 +119,8 @@ describe("Billing API", () => {
             expect(response.status).toBe(200);
             const model = response.body.list.find((m: any) => m.id === modelId);
             expect(model).toBeDefined();
-            expect(model.input_price).toBe(1.0);
-            expect(model.output_price).toBe(2.0);
+            expect(model.prices.input).toBe(1.0);
+            expect(model.prices.output).toBe(2.0);
         });
     });
 

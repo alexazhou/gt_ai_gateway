@@ -10,8 +10,11 @@ class SgModel extends Model {
     vendor_id!: number | null;
     vendor_model_id!: number | null;
     enable!: boolean;
-    input_price!: number;
-    output_price!: number;
+    prices!: { input?: number, output?: number, cache_read?: number } | null;
+
+    casts = {
+        prices: 'json'
+    };
 
     created_at!: Date;
     updated_at!: Date;
