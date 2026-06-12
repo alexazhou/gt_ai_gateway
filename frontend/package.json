@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build:viewer": "cd public/data_viewer && npm install && npm run build",
+    "build:viewer": "if [ -f public/data_viewer/package.json ]; then cd public/data_viewer && npm install && npm run build; else echo 'Data viewer submodule not found, skipping build'; fi",
     "build": "npm run build:viewer && vue-tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
