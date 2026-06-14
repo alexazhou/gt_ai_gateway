@@ -11,6 +11,7 @@ import recordController from "./controller/recordController";
 import systemController from "./controller/systemController";
 import statsController from "./controller/statsController";
 import balanceController from "./controller/balanceController";
+import configController from "./controller/configController";
 import ormService from "./service/ormService";
 import authMiddleware from "./middleware/authMiddleware";
 import corsMiddleware from "./middleware/corsMiddleware";
@@ -74,6 +75,8 @@ app.onError((err, c) => {
 // System
 app.get("/welcome", systemController.welcome);
 app.get("/status.json", authMiddleware.requireAdmin, systemController.status);
+app.get("/config.json", authMiddleware.requireAdmin, configController.getConfig);
+app.put("/config.json", authMiddleware.requireAdmin, configController.updateConfig);
 
 // Vendor (需要管理员权限)
 app.get("/vendor/preset-urls.json", authMiddleware.requireAdmin, vendorController.getPresetUrls);

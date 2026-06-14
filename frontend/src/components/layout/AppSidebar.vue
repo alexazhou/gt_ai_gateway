@@ -39,6 +39,10 @@
                     <LinkOutlined />
                     <span>接入配置</span>
                 </a-menu-item>
+                <a-menu-item key="/advanced-settings">
+                    <ControlOutlined />
+                    <span>高级设置</span>
+                </a-menu-item>
             </a-menu>
         </div>
         <div class="sidebar-footer">
@@ -62,7 +66,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { DashboardOutlined, UserOutlined, ApiOutlined, SettingOutlined, FileTextOutlined, ExperimentOutlined, MenuFoldOutlined, MenuUnfoldOutlined, LinkOutlined, DollarOutlined } from '@ant-design/icons-vue';
+import { DashboardOutlined, UserOutlined, ApiOutlined, SettingOutlined, FileTextOutlined, ExperimentOutlined, MenuFoldOutlined, MenuUnfoldOutlined, LinkOutlined, DollarOutlined, ControlOutlined } from '@ant-design/icons-vue';
 import { useAppStore } from '@/stores/app';
 
 const router = useRouter();
@@ -81,6 +85,7 @@ const selectedKeys = computed(() => {
     if (path.startsWith('/balance')) return ['/balance'];
     if (path.startsWith('/api-test')) return ['/api-test'];
     if (path.startsWith('/integration')) return ['/integration'];
+    if (path.startsWith('/advanced-settings')) return ['/advanced-settings'];
     return [path];
 });
 

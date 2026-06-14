@@ -21,6 +21,7 @@ import RecordDetail from '@/views/Record/Detail.vue';
 import BalanceIndex from '@/views/Balance/Index.vue';
 import ApiTestIndex from '@/views/ApiTest/Index.vue';
 import IntegrationIndex from '@/views/Integration/Index.vue';
+import AdvancedSettings from '@/views/AdvancedSettings.vue';
 
 const routes: RouteRecordRaw[] = [
     {
@@ -136,6 +137,12 @@ const routes: RouteRecordRaw[] = [
                 name: 'Integration',
                 component: IntegrationIndex,
                 meta: { title: '接入配置' },
+            },
+            {
+                path: 'advanced-settings',
+                name: 'AdvancedSettings',
+                component: AdvancedSettings,
+                meta: { title: '高级设置' },
             },
         ],
     },
