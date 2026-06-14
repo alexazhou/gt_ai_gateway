@@ -12,6 +12,7 @@ static BACKEND_IS_READY: AtomicBool = AtomicBool::new(false);
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
+    path::BaseDirectory,
     tray::TrayIconBuilder,
     Manager, WindowEvent,
 };
@@ -361,11 +362,13 @@ pub fn run() {
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &open_config_item, &quit_item])?;
 
-            let tray_icon = Image::from_path(
-                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("icons/tray-icon@2x.png"),
-            )
-            .unwrap_or_else(|_| app.default_window_icon().unwrap().clone());
+            let tray_icon_path = app
+                .path()
+                .resolve("icons/tray-icon@2x.png", BaseDirectory::Resource);
+            let tray_icon = tray_icon_path
+                .ok()
+                .and_then(|path| Image::from_path(path).ok())
+                .unwrap_or_else(|| app.default_window_icon().unwrap().clone());
 
             TrayIconBuilder::new()
                 .icon(tray_icon)
