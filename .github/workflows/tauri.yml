@@ -64,7 +64,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: './tauri'
-          args: '--target aarch64-apple-darwin'
+          args: '--target aarch64-apple-darwin --bundles app'
 
       - name: Manual Code Sign and Notarization
         env:
