@@ -21,7 +21,7 @@
     "backend:test:worker": "TEST_MODE=worker vitest --run --config vitest.worker.config.ts",
     "backend:test:all": "npm run backend:test:node && npm run backend:test:worker",
     "predeploy": "npm run frontend:build",
-    "deploy": "wrangler deploy --minify",
+    "deploy": "node scripts/cf-setup.js && wrangler deploy --minify",
     "db:init:node": "npx tsx script/db.ts init --env node",
     "db:migrate:node": "npx tsx script/db.ts migrate --env node",
     "db:clear:node": "npx tsx script/db.ts clear --env node",
