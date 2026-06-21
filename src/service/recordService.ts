@@ -11,6 +11,8 @@ async function create(
     requestData: string | null,
     clientFormat: string | null = null,
     upstreamFormat: string | null = null,
+    vendorId: number | null = null,
+    vendorModelName: string | null = null,
 ) {
     if (isLogEnabled()) {
         console.log(`[RecordService] Creating record: user=${userId}, model=${modelId}`);
@@ -22,6 +24,8 @@ async function create(
     return SgRecord.query().create({
         user_id: userId,
         model_id: modelId,
+        vendor_id: vendorId,
+        vendor_model_name: vendorModelName,
         request_data: requestData,
         response_data: null,
         status: SgRecordStatus.INIT,

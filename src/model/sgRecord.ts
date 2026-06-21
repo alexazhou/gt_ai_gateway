@@ -24,6 +24,9 @@ class SgRecord extends Model {
 
     user_id!: number | null;
     model_id!: number | null;
+    vendor_id!: number | null;
+    vendor_model_name!: string | null;
+
     request_data!: string | null;
     response_data!: string | null;
     status!: SgRecordStatus | null;

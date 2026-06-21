@@ -55,6 +55,12 @@
                 </div>
                 <span v-else>-</span>
             </template>
+            <template v-else-if="column.key === 'upstream_model'">
+                <div class="upstream-model-cell">
+                    <div class="vendor-name">{{ record.vendor_name || '-' }}</div>
+                    <div class="vendor-model-name">{{ record.vendor_model_name || '-' }}</div>
+                </div>
+            </template>
             <template v-if="column.key === 'action'">
                 <a-button type="link" size="small" @click="handleView(record)">
                     查看
@@ -96,8 +102,8 @@ const router = useRouter();
 const defaultColumns: TableColumnsType<Record> = [
     { title: 'ID', key: 'id', dataIndex: 'id' },
     { title: '用户', key: 'user_name', dataIndex: 'user_name' },
-    { title: '供应商', key: 'vendor_name', dataIndex: 'vendor_name' },
-    { title: '模型', key: 'model_name', dataIndex: 'model_name' },
+    { title: '请求模型', key: 'model_name', dataIndex: 'model_name' },
+    { title: '上游模型', key: 'upstream_model' },
     { title: '协议', key: 'protocol' },
     { title: 'Token', key: 'token_stats' },
     { title: '时间', key: 'timing' },
@@ -267,5 +273,18 @@ function getStatusText(status: string | null, failedCode?: string | null): strin
     color: #8c8c8c;
     font-size: 12px;
     line-height: 1;
+}
+
+.upstream-model-cell {
+    line-height: 1.4;
+}
+
+.vendor-name {
+    font-size: 14px;
+}
+
+.vendor-model-name {
+    font-size: 12px;
+    color: #8c8c8c;
 }
 </style>

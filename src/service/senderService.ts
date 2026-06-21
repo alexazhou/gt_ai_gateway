@@ -708,10 +708,17 @@ async function sendRequest(
 ): Promise<Response> {
     let upstreamFormat = vendor.getUpstreamFormat(format);
 
+    let vendorModelName: string | null = null;
     if (modelConfig.vendor_model_id) {
         const vendorModel = await SgVendorModel.query().find(modelConfig.vendor_model_id);
         const allowed = vendorModel?.getAllowedFormats();
         upstreamFormat = resolveUpstreamFormat(vendor, format, upstreamFormat, allowed);
+        if (vendorModel) {
+            vendorModelName = vendorModel.model_id;
+        }
+    } else {
+        // 自动模式：由于未指定上游映射，实际上游接收到的模型名称就是用户请求的模型名（或网关模型名）
+        vendorModelName = modelConfig.name;
     }
 
     const needsConversion = format !== upstreamFormat;
@@ -728,7 +735,15 @@ async function sendRequest(
     }
 
     // 1. 创建数据库记录
-    const record = await recordService.create(user.id, modelConfig.id, body, format, upstreamFormat);
+    const record = await recordService.create(
+        user.id,
+        modelConfig.id,
+        body,
+        format,
+        upstreamFormat,
+        modelConfig.vendor_id,
+        vendorModelName
+    );
     await recordService.update(record.id, {
         status: SgRecordStatus.PROCESSING,
         start_at: new Date(),

@@ -20,8 +20,10 @@ export interface Record extends BaseEntity {
 
     // 关联数据
     user_name?: string | null;
+    vendor_id?: number | null;
     vendor_name?: string | null;
     model_name?: string | null;
+    vendor_model_name?: string | null;
 }
 
 export interface RecordRequestData {

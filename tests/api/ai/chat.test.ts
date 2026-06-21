@@ -376,9 +376,19 @@ describe("AI Chat API", () => {
             expect(response.status).toBe(200);
             // The mock server echoes back data.model — should be the substituted upstream id
             expect(response.body.model).toBe("actual-upstream-model-id");
+
+            // Verify the record captured vendor_id and the actual vendor_model_name
+            const recordsResponse = await requestHelper.get(
+                "/record/latest.json?limit=1",
+                adminToken,
+            );
+            expect(recordsResponse.status).toBe(200);
+            const latestRecord = recordsResponse.body[0];
+            expect(latestRecord.vendor_id).toBe(openaiVendorId);
+            expect(latestRecord.vendor_model_name).toBe("actual-upstream-model-id");
         });
 
-        it("should use gateway model name as-is when vendor_model_id is null", async () => {
+        it("should use gateway model name as-is when vendor_model_id is null and record it correctly", async () => {
             const response = await requestHelper.post(
                 "/llm/v1/chat/completions",
                 {
@@ -391,6 +401,16 @@ describe("AI Chat API", () => {
 
             expect(response.status).toBe(200);
             expect(response.body.model).toBe(openaiModelName);
+
+            // Verify the record captured vendor_id and vendor_model_name
+            const recordsResponse = await requestHelper.get(
+                "/record/latest.json?limit=1",
+                adminToken,
+            );
+            expect(recordsResponse.status).toBe(200);
+            const latestRecord = recordsResponse.body[0];
+            expect(latestRecord.vendor_id).toBe(openaiVendorId);
+            expect(latestRecord.vendor_model_name).toBe(openaiModelName);
         });
     });
 
