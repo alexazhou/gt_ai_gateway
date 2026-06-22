@@ -17,8 +17,9 @@ const wranglerArgs = [];
 
 function printHelp() {
     console.log("Usage:");
+    console.log("  npm run deploy");
+    console.log("  npm run deploy -- --auto-create-db");
     console.log("  npm run deploy:cloudflare");
-    console.log("  npm run deploy:cloudflare -- --auto-migrate");
     console.log("  npm run deploy:cloudflare -- --auto-create-db --auto-migrate --auto-create-root-token");
     console.log("");
     console.log("Options:");
@@ -125,7 +126,7 @@ function ensureDatabaseIdConfigured() {
     }
 
     console.error(`${WRANGLER_CONFIG_PATH} still contains the D1 database_id placeholder.`);
-    console.error("Run `npm run deploy:cloudflare -- --auto-create-db` to create/link D1 automatically,");
+    console.error("Run `npm run deploy -- --auto-create-db` to create/link D1 automatically,");
     console.error("or manually create a D1 database and replace database_id before deploying.");
     process.exit(1);
 }

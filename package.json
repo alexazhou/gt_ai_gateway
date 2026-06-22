@@ -20,6 +20,7 @@
     "backend:test:node": "TEST_MODE=node vitest --run --config vitest.config.ts",
     "backend:test:worker": "TEST_MODE=worker vitest --run --config vitest.worker.config.ts",
     "backend:test:all": "npm run backend:test:node && npm run backend:test:worker",
+    "deploy": "npm run deploy:cloudflare -- --auto-migrate --auto-create-root-token",
     "deploy:cloudflare": "node script/deploy-cloudflare.js",
     "db:init:node": "npx tsx script/db.ts init --env node",
     "db:migrate:node": "npx tsx script/db.ts migrate --env node",

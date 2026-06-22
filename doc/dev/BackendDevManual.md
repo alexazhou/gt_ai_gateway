@@ -113,9 +113,9 @@ Wrangler 会启动本地开发服务器，模拟 Cloudflare Workers 环境
 | `npm run backend:dev` | Cloudflare Workers 开发模式 |
 | `npm run backend:dev:local` | Node 本地开发模式（watch 自动重启） |
 | `npm run backend:start` | Node 生产模式 |
-| `npm run deploy:cloudflare` | 部署到 Cloudflare Workers |
-| `npm run deploy:cloudflare -- --auto-migrate` | 部署前对已绑定的 D1 执行迁移 |
-| `npm run deploy:cloudflare -- --auto-create-db --auto-migrate --auto-create-root-token` | 自动创建 D1、执行迁移，并在缺失时创建 ROOT_TOKEN |
+| `npm run deploy` | 部署到 Cloudflare Workers，部署前自动执行 D1 migrations，并在缺失时创建 ROOT_TOKEN |
+| `npm run deploy -- --auto-create-db` | 如果当前账号下没有可用 D1，则自动创建 D1 后部署 |
+| `npm run deploy:cloudflare` | 底层 Cloudflare 部署脚本；不带参数时要求 `wrangler.toml` 已配置 `database_id` |
 | `npm run backend:test` | 运行后端测试 |
 
 ### 请求记录与流式日志
