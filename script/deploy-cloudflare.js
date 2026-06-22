@@ -197,7 +197,11 @@ function runMigrations(bindingName) {
     }
 
     console.log(`Applying D1 migrations to binding ${bindingName}...`);
-    run("npx", ["wrangler", "d1", "migrations", "apply", bindingName, "--remote"]);
+    const migrateArgs = ["run", "db:migrate:worker-cloud"];
+    if (bindingName !== DEFAULT_D1_BINDING) {
+        migrateArgs.push("--", "--db-name", bindingName);
+    }
+    run("npm", migrateArgs);
 }
 
 function setupDatabase() {

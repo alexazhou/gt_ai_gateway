@@ -19,7 +19,7 @@ export interface Migration {
 let command = "";
 let env = "node"; // default
 let dbConfigPath = ""; // optional custom wrangler config
-let dbName = "gt_ai_gateway"; // default database name
+let dbName = "DB"; // default D1 binding name
 
 for (let i = 0; i < args.length; i++) {
     if (args[i] === "--env" || args[i] === "-e") {

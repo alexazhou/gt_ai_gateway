@@ -20,7 +20,6 @@ compatibility_flags = [ "nodejs_compat", "no_handle_cross_request_promise_resolu
 binding = "DB"
 database_name = "gt_ai_gateway"
 database_id = "replace-with-your-d1-database-id"
-migrations_dir = "resource/migrate"
 
 # [ai]
 # binding = "AI"
