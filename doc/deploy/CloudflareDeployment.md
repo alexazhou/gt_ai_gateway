@@ -18,7 +18,7 @@
 
 3. **等待自动化部署**：
    - 点击部署后，系统会自动进入 Cloudflare 的原生 CI/CD 构建流程。
-   - 脚本会使用 `npm run deploy:cloudflare -- --auto-create-db --migrate --auto-root-token` 全自动创建 D1 数据库、初始化表结构、配置 ROOT_TOKEN 并部署代码，全程约 2 分钟。
+   - 脚本会使用 `npm run deploy:cloudflare -- --auto-create-db --auto-migrate --auto-create-root-token` 全自动创建 D1 数据库、初始化表结构、配置 ROOT_TOKEN 并部署代码，全程约 2 分钟。
 
 4. **获取超级管理员密码并登录**：
    - 部署完成后，点开 Cloudflare 页面的 **Deploy Log (部署日志)**，在最后的构建步骤中，您会看到自动生成的 **ROOT_TOKEN 密码** 以及应用的 **访问链接**。
@@ -99,18 +99,18 @@ npm run deploy:cloudflare
 如果需要让部署脚本自动创建/绑定 D1 数据库、执行远程 migrations 并配置 `ROOT_TOKEN`，使用：
 
 ```bash
-npm run deploy:cloudflare -- --auto-create-db --migrate --auto-root-token
+npm run deploy:cloudflare -- --auto-create-db --auto-migrate --auto-create-root-token
 ```
 
 如果只需要对已有数据库执行 migrations，使用：
 
 ```bash
-npm run deploy:cloudflare -- --migrate
+npm run deploy:cloudflare -- --auto-migrate
 ```
 
 部署脚本会优先读取当前已部署 Worker 的 `DB` D1 binding 并复用原有数据库，因此已部署实例的数据库名称不需要固定为 `gt_ai_gateway`。如果当前账号下还没有已部署的 Worker，脚本才会按 `wrangler.toml` 中的 `database_name` 查找 D1 数据库；找不到时，只有传入 `--auto-create-db` 才会自动创建，否则直接报错。
 
-`ROOT_TOKEN` 也只会在传入 `--auto-root-token` 时自动创建；如果不传该参数，请手动使用 `npx wrangler secret put ROOT_TOKEN` 配置。
+`ROOT_TOKEN` 也只会在传入 `--auto-create-root-token` 时自动创建；如果不传该参数，请手动使用 `npx wrangler secret put ROOT_TOKEN` 配置。
 
 ---
 
