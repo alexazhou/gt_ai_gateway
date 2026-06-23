@@ -163,6 +163,7 @@ fn show_main_window(app: &tauri::AppHandle) {
         tauri::WebviewUrl::App("index.html".into())
     )
     .title("GT AI Gateway")
+    .title_bar_style(tauri::TitleBarStyle::Transparent)
     .hidden_title(true)
     .inner_size(1280.0, 800.0)
     .resizable(true)
