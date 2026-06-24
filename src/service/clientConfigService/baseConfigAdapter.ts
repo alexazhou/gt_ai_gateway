@@ -10,6 +10,7 @@ import configAdapterUtils from "./configAdapterUtils";
 
 
 abstract class BaseConfigAdapter implements ConfigAdapter {
+    // 注入 fs 和 path 的目的是为了跨环境兼容（例如在 Node.js 和 Tauri 前端直连时可能采用不同的 API实现）
     protected fs: FileSystemApi;
     protected path: PathApi;
     readonly client: ClientName;
