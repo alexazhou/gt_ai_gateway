@@ -99,8 +99,19 @@
                                                     color="warning"
                                                     class="current-config-tag"
                                                 >
-                                                    被修改
+                                                    配置已修改
                                                 </a-tag>
+                                                <a-button
+                                                    v-if="backup.enabled && client.activeConfigModified"
+                                                    type="primary"
+                                                    ghost
+                                                    size="small"
+                                                    style="margin-left: 4px; font-size: 12px; height: 22px; line-height: 20px;"
+                                                    @click="applyConfig(client.client, backup.id)"
+                                                    :loading="savingClient === client.client"
+                                                >
+                                                    写入本地
+                                                </a-button>
                                                 <a-button
                                                     type="text"
                                                     size="small"
