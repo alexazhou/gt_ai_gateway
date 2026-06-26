@@ -44,6 +44,17 @@
                                     <a-tag :color="client.configured ? 'blue' : 'default'">
                                         {{ client.configured ? '已配置' : '未配置' }}
                                     </a-tag>
+                                    <div style="flex: 1"></div>
+                                    <a-button
+                                        type="primary"
+                                        size="small"
+                                        style="font-size: 13px;"
+                                        :disabled="!client.installed"
+                                        :loading="savingClient === client.client"
+                                        @click="openConfigDialog(client)"
+                                    >
+                                        <PlusOutlined /> 新配置
+                                    </a-button>
                                 </div>
                                 <div class="config-row-list">
                                     <div class="config-row current-config-row">
@@ -492,7 +503,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { message, Modal } from 'ant-design-vue/es';
-import { ArrowRightOutlined, CheckCircleFilled, CopyOutlined, EditOutlined, InfoCircleOutlined, ReloadOutlined, ToolOutlined } from '@ant-design/icons-vue';
+import { ArrowRightOutlined, CheckCircleFilled, CopyOutlined, EditOutlined, InfoCircleOutlined, ReloadOutlined, ToolOutlined, PlusOutlined } from '@ant-design/icons-vue';
 import {
     applyClientConfig,
     createClientConfigBackup,
