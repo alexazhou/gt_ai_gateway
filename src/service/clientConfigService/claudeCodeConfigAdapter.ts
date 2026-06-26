@@ -16,7 +16,7 @@ class ClaudeCodeConfigAdapter extends BaseConfigAdapter {
                 .replace(/\/v1\/messages\/?$/, "")
                 .replace(/\/v1\/?$/, "");
         }
-        return `${url}/llm`;
+        return params.gatewayUrl;
     }
 
 

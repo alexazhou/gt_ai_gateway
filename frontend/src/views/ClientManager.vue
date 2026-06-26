@@ -657,7 +657,7 @@ async function openConfigDialog(client: ClientConfigStatus, backup?: ClientConfi
     } else {
         configForm.connectionMode = 'gateway';
         configForm.protocol = protocolByClient[client.client];
-        configForm.gatewayUrl = getDefaultGatewayUrl();
+        configForm.gatewayUrl = getDefaultGatewayUrl(client.client);
         configForm.upstreamUrl = '';
         configForm.userId = null;
         configForm.vendorId = null;
@@ -683,17 +683,23 @@ async function openConfigDialog(client: ClientConfigStatus, backup?: ClientConfi
     }
 }
 
-function getDefaultGatewayUrl(): string {
+function getDefaultGatewayUrl(clientName?: ClientName): string {
     const baseUrl = getBaseURL();
+    let url = '';
     if (/^https?:\/\//.test(baseUrl)) {
-        return baseUrl.replace(/\/+$/, '').replace('://localhost', '://127.0.0.1');
+        url = baseUrl.replace(/\/+$/, '').replace('://localhost', '://127.0.0.1');
+    } else if (baseUrl === '/api' && import.meta.env.DEV) {
+        url = 'http://127.0.0.1:8720';
+    } else {
+        url = window.location.origin.replace('://localhost', '://127.0.0.1');
     }
 
-    if (baseUrl === '/api' && import.meta.env.DEV) {
-        return 'http://127.0.0.1:8720';
+    if (clientName === ClientName.CLAUDE_CODE) {
+        return `${url}/llm`;
+    } else if (clientName === ClientName.CODEX) {
+        return `${url}/llm/v1`;
     }
-
-    return window.location.origin.replace('://localhost', '://127.0.0.1');
+    return url;
 }
 
 async function loadDialogOptions(): Promise<void> {

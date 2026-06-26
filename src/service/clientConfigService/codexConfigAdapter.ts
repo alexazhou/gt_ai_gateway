@@ -21,7 +21,7 @@ class CodexConfigAdapter extends BaseConfigAdapter {
                 .replace(/\/responses\/?$/, "")
                 .replace(/\/chat\/completions\/?$/, "");
         }
-        return `${url}/llm/v1`;
+        return params.gatewayUrl;
     }
 
 
