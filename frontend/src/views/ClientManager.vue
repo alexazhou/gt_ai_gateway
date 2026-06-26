@@ -54,10 +54,10 @@
                                             </div>
                                             <template v-if="client.currentConfig">
                                                 <div class="config-summary-line">
+                                                    <a-tag v-if="client.currentConfig.model" color="purple" class="model-tag">
+                                                        模型 {{ client.currentConfig.model }}
+                                                    </a-tag>
                                                     <div class="config-flow">
-                                                        <a-tag v-if="client.currentConfig.model" color="purple" class="model-tag">
-                                                            模型 {{ client.currentConfig.model }}
-                                                        </a-tag>
                                                         <a-tag :color="getConnectionModeColor(client.currentConfig.connectionMode)" class="merged-mode-tag">
                                                             {{ getConnectionModeLabel(client.currentConfig.connectionMode) }}
                                                         </a-tag>
@@ -128,10 +128,10 @@
                                                 </a-button>
                                             </div>
                                             <div v-if="backup.config" class="config-summary-line">
+                                                <a-tag v-if="backup.config.model" color="purple" class="model-tag">
+                                                    模型 {{ backup.config.model }}
+                                                </a-tag>
                                                 <div class="config-flow">
-                                                    <a-tag v-if="backup.config.model" color="purple" class="model-tag">
-                                                        模型 {{ backup.config.model }}
-                                                    </a-tag>
                                                     <a-tag :color="getConnectionModeColor(backup.config.connectionMode)" class="merged-mode-tag">
                                                         {{ getConnectionModeLabel(backup.config.connectionMode) }}
                                                     </a-tag>
