@@ -29,6 +29,9 @@ class CodexConfigAdapter extends BaseConfigAdapter {
                 .replace(/\/responses\/?$/, "")
                 .replace(/\/chat\/completions\/?$/, "");
         }
+        if (url.endsWith(this.defaultGatewaySuffix)) {
+            return url;
+        }
         return `${url}${this.defaultGatewaySuffix}`;
     }
 
@@ -47,7 +50,7 @@ class CodexConfigAdapter extends BaseConfigAdapter {
         }
 
         return {
-            connectionMode: backendUrl?.includes(this.defaultGatewaySuffix) ? "gateway" : "vendor",
+            connectionMode: this.isGatewayUrl(backendUrl) ? "gateway" : "vendor",
             gatewayUrl: backendUrl,
             apiKey: token,
             model: tomlUtil.getTomlValue(content, "model") || "",

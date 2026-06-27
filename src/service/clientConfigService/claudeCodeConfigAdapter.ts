@@ -18,6 +18,9 @@ class ClaudeCodeConfigAdapter extends BaseConfigAdapter {
                 .replace(/\/v1\/messages\/?$/, "")
                 .replace(/\/v1\/?$/, "");
         }
+        if (url.endsWith(this.defaultGatewaySuffix)) {
+            return url;
+        }
         return `${url}${this.defaultGatewaySuffix}`;
     }
 
@@ -35,7 +38,7 @@ class ClaudeCodeConfigAdapter extends BaseConfigAdapter {
         }
 
         return {
-            connectionMode: config.env?.ANTHROPIC_BASE_URL?.includes(this.defaultGatewaySuffix) ? "gateway" : "vendor", // Approximate deduction
+            connectionMode: this.isGatewayUrl(config.env?.ANTHROPIC_BASE_URL) ? "gateway" : "vendor", // Accurate deduction by host and port
             gatewayUrl: backendUrl,
             apiKey: token,
             model: config.env?.ANTHROPIC_MODEL || config.env?.CLAUDE_CODE_SUBAGENT_MODEL || config.model || "",
