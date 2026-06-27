@@ -3,7 +3,9 @@ import { inspect, InspectOptions } from "util";
 import { ClientName } from "../constants";
 
 
-type ClientConfigContent = Record<string, string>;
+import { ClientConfigFields } from "../service/clientConfigService/types";
+
+type ClientConfigContent = ClientConfigFields | Record<string, string>;
 
 
 class SgClientConfigBackup extends Model {

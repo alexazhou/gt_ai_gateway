@@ -98,9 +98,10 @@ describe("clientConfigService", () => {
         expect(appliedStatus.activeConfigModified).toBe(false);
         expect(appliedStatus.backups.find(item => item.id === backup.id)?.enabled).toBe(true);
         const applied = JSON.parse(await readFile(configPath, "utf-8"));
-        expect(applied).toEqual({ permissions: { allow: ["Bash(npm test)"] } });
+        expect(applied.permissions.allow).toEqual(["Bash(npm test)"]);
+        expect(applied.env.ANTHROPIC_BASE_URL).toBe("/llm"); // Patched empty gateway URL
 
-        await writeFile(configPath, JSON.stringify({ permissions: { allow: ["Bash(npm test)"] }, model: "changed" }, null, 4));
+        await writeFile(configPath, JSON.stringify({ permissions: { allow: ["Bash(npm test)"] }, env: { ANTHROPIC_BASE_URL: "modified", ANTHROPIC_AUTH_TOKEN: "token" } }, null, 4));
         const modifiedStatus = await clientConfigService.getStatus();
         const claudeStatus = modifiedStatus.clients.find(client => client.client === ClientName.CLAUDE_CODE);
         expect(claudeStatus?.activeBackupId).toBe(backup.id);
@@ -192,8 +193,12 @@ describe("clientConfigService", () => {
         expect(updated).toContain("[features]");
 
         await clientConfigService.applyConfig({ client: ClientName.CODEX, backupId: backup.id });
-        expect(await readFile(configPath, "utf-8")).toBe("approval_policy = \"on-request\"\n\n[features]\nhooks = true\n");
-        expect(await readFile(authPath, "utf-8")).toBe("{\"auth_mode\":\"chatgpt\"}\n");
+        const appliedCodex = await readFile(configPath, "utf-8");
+        expect(appliedCodex).toContain("approval_policy = \"on-request\"");
+        expect(appliedCodex).toContain("base_url = \"/llm/v1\""); // Patched empty gateway URL
+        
+        const appliedAuth = JSON.parse(await readFile(authPath, "utf-8"));
+        expect(appliedAuth).toEqual({ auth_mode: "chatgpt" });
     });
 
     it("writes direct upstream Claude Code settings without gateway path", async () => {

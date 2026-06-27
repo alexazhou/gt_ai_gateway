@@ -105,17 +105,27 @@ async function enrichGatewayUser(config: ClientConfigFields | null): Promise<Cur
 }
 
 
-async function toBackupInfo(record: any, adapter: ConfigAdapter): Promise<ClientConfigBackupInfo> {
-    const parsedConfig = await adapter.parseConfigContent(record.configContent || {});
+function extractFieldsFromBackup(backupContent: any, adapter: ConfigAdapter): ClientConfigFields | null {
+    if (!backupContent || typeof backupContent !== "object") return null;
+    if ("gatewayUrl" in backupContent || "connectionMode" in backupContent) {
+        return backupContent as ClientConfigFields;
+    }
+    return adapter.parseConfigContent(backupContent);
+}
+
+async function toBackupInfo(record: SgClientConfigBackup, adapter: ConfigAdapter): Promise<ClientConfigBackupInfo> {
+    const rawContent = typeof record.configContent === "string" ? JSON.parse(record.configContent) : record.configContent || {};
+    const parsedConfig = extractFieldsFromBackup(rawContent, adapter);
+
     return {
         id: Number(record.id),
         client: record.client as ClientName,
         name: record.name,
-        fileCount: Object.keys(record.configContent || {}).length,
+        fileCount: 1, // simplified since we just store fields now
         createdAt: String(record.created_at || record.createdAt || ""),
         enabled: isEnabled(record.enabled),
         config: await enrichGatewayUser(parsedConfig),
-        configContent: typeof record.configContent === "string" ? JSON.parse(record.configContent) : record.configContent || {},
+        configContent: rawContent,
     };
 }
 
@@ -162,7 +172,7 @@ async function enrichStatus(adapterStatus: AdapterConfigStatus, adapter: ConfigA
     let activeConfigModified = false;
     if (activeRecord) {
         const currentContent = await adapter.readConfig();
-        const activeConfig = adapter.parseConfigContent(activeRecord.configContent);
+        const activeConfig = extractFieldsFromBackup(activeRecord.configContent, adapter);
         const currentConfig = adapter.parseConfigContent(currentContent);
 
         if (activeConfig && currentConfig) {
@@ -174,8 +184,6 @@ async function enrichStatus(adapterStatus: AdapterConfigStatus, adapter: ConfigA
                 protocol: c.protocol,
             });
             activeConfigModified = serializeRelevant(activeConfig) !== serializeRelevant(currentConfig);
-        } else {
-            activeConfigModified = serializeConfigContent(activeRecord.configContent) !== serializeConfigContent(currentContent);
         }
     }
 
@@ -230,19 +238,19 @@ async function createConfig(params: CreateClientConfigParams): Promise<ClientCon
 
     const adapter = await getAdapter(params.client);
     const existingContent = await adapter.readConfig();
-    const configContent = adapter.patchConfigContent(existingContent, {
+    const fields: ClientConfigFields = {
         connectionMode: params.connectionMode || "gateway",
         protocol: params.protocol,
         gatewayUrl: params.gatewayUrl.trim(),
         apiKey: params.apiKey.trim(),
         model: params.model?.trim() || "",
         effortLevel: params.effortLevel?.trim(),
-    });
+    };
     
     await SgClientConfigBackup.query().create({
         client: params.client,
         name: await formatUniqueBackupName(params.client, "未命名配置"),
-        configContent,
+        configContent: fields,
         enabled: false,
     });
 
@@ -259,10 +267,11 @@ async function createBackup(params: CreateClientConfigBackupParams): Promise<Cli
 
     const adapter = await getAdapter(params.client);
     const configContent = await adapter.readConfig();
+    const fields = adapter.parseConfigContent(configContent) || { gatewayUrl: "", apiKey: "", model: "" };
     const record = await SgClientConfigBackup.query().create({
         client: params.client,
         name: params.name?.trim() || await formatUniqueBackupName(params.client, "未命名配置"),
-        configContent,
+        configContent: fields,
         enabled: false,
     });
 
@@ -322,30 +331,24 @@ async function updateBackupConfig(params: UpdateClientConfigBackupParams): Promi
         throw new Error("Backup not found");
     }
 
-    const configContent = adapter.patchConfigContent(backup.configContent, {
+    const fields: ClientConfigFields = {
         connectionMode: params.connectionMode || "gateway",
         protocol: params.protocol,
         gatewayUrl: params.gatewayUrl.trim(),
         apiKey: params.apiKey.trim(),
         model: params.model?.trim() || "",
         effortLevel: params.effortLevel?.trim(),
-    });
+    };
 
-    await backup.update({ configContent });
-    backup.configContent = configContent;
+    await backup.update({ configContent: fields });
+    backup.configContent = fields;
 
     if (backup.enabled) {
         // If the backup being updated is currently enabled, apply changes to local config immediately
         // BUT we must patch the current local file to preserve any manual additions like mcpServers!
-        const parsedBackup = adapter.parseConfigContent(backup.configContent);
-        if (parsedBackup) {
-            const currentContent = await adapter.readConfig();
-            const patchedContent = adapter.patchConfigContent(currentContent, parsedBackup);
-            await adapter.writeConfig(patchedContent);
-        } else {
-            // Fallback
-            await adapter.writeConfig(backup.configContent);
-        }
+        const currentContent = await adapter.readConfig();
+        const patchedContent = adapter.patchConfigContent(currentContent, fields);
+        await adapter.writeConfig(patchedContent);
     }
 
     const { fs } = await loadNodeApis();
@@ -400,7 +403,7 @@ async function applyConfig(params: ApplyClientConfigParams): Promise<ClientConfi
         throw new Error("Backup not found");
     }
 
-    const parsedBackup = adapter.parseConfigContent(backup.configContent);
+    const parsedBackup = extractFieldsFromBackup(backup.configContent, adapter);
     if (!parsedBackup) {
         throw new Error("无法解析保存的配置内容");
     }
