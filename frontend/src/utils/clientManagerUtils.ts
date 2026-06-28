@@ -31,8 +31,8 @@ export function getUserTypeColor(type?: UserType): string {
 
 export function getConnectionModeLabel(mode?: ClientConnectionMode): string {
     if (mode === ClientConnectionMode.GATEWAY) return '代理模式';
-    if (mode === ClientConnectionMode.VENDOR) return '直连模式';
-    if (mode === ClientConnectionMode.OFFICIAL) return '直连官方';
+    if (mode === ClientConnectionMode.VENDOR) return '供应商模式';
+    if (mode === ClientConnectionMode.OFFICIAL) return '官方模式';
     return '未配置';
 }
 

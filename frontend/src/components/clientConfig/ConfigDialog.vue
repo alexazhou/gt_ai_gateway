@@ -18,7 +18,7 @@
                 <a-tab-pane :key="ClientConnectionMode.GATEWAY">
                     <template #tab>
                         <span>
-                            通过 GT AI Gateway
+                            代理模式
                             <a-tooltip>
                                 <template #title>
                                     <div>代理模式：客户端通过 GtAIGateway 连接上游。</div>
@@ -117,8 +117,8 @@
                 <a-tab-pane :key="ClientConnectionMode.VENDOR">
                     <template #tab>
                         <span>
-                            直连上游供应商
-                            <a-tooltip title="直连模式：客户端直接连接上游供应商，不经过 GtAIGateway 代理。">
+                            供应商模式
+                            <a-tooltip title="供应商模式：客户端直接连接上游供应商，不经过 GtAIGateway 代理。">
                                 <InfoCircleOutlined class="label-help-icon" style="margin-left: 4px;" />
                             </a-tooltip>
                         </span>
@@ -202,24 +202,24 @@
                 <a-tab-pane :key="ClientConnectionMode.OFFICIAL">
                     <template #tab>
                         <span>
-                            直连官方
-                            <a-tooltip title="直连官方：客户端直接连接官方服务">
+                            官方模式
+                            <a-tooltip title="官方模式：客户端直接连接官方服务">
                                 <InfoCircleOutlined class="label-help-icon" style="margin-left: 4px;" />
                             </a-tooltip>
                         </span>
                     </template>
                     <a-alert
                         v-if="isDetail"
-                        message="只读配置"
-                        description="直连官方的配置不可在网关侧进行编辑，如需更新配置请在客户端本地重新登录，然后使用「从本地配置导入」功能进行更新。"
+                        message="官方配置请在客户端修改"
+                        description="在此处创建配置后，请到客户端进行登录/登出等操作。完成后本页面会出现同步按钮，点击即可同步配置。"
                         type="warning"
                         show-icon
                         style="margin-bottom: 24px;"
                     />
                     <a-alert
                         v-else
-                        message="只读配置"
-                        description="创建后请通过客户端登录。"
+                        message="官方配置请在客户端修改"
+                        description="在此处创建配置后，请到客户端进行登录/登出等操作。完成后本页面会出现同步按钮，点击即可同步配置。"
                         type="info"
                         show-icon
                         style="margin-bottom: 24px;"

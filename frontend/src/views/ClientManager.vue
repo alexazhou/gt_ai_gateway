@@ -134,10 +134,10 @@
                                                                 支持高级功能，如抓取请求流量进行分析、自动协议转换、提升缓存命中率等。
                                                             </div>
                                                             <div v-else-if="backup.config.connectionMode === ClientConnectionMode.OFFICIAL">
-                                                                直连官方：客户端直接连接官方服务
+                                                                官方模式：客户端直接连接官方服务
                                                             </div>
                                                             <div v-else>
-                                                                直连模式：客户端直接连接上游供应商，不经过 GtAIGateway 代理。
+                                                                供应商模式：客户端直接连接上游供应商，不经过 GtAIGateway 代理。
                                                             </div>
                                                         </template>
                                                         <a-tag :color="getConnectionModeColor(backup.config.connectionMode)" class="merged-mode-tag" style="cursor: help;">
