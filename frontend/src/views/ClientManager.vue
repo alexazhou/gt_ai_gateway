@@ -406,6 +406,37 @@ async function handleConfigSave(request: any): Promise<void> {
     const backup = configDialogBackup.value;
 
     if (backup) {
+        if (backup.enabled) {
+            const clientName = client.displayName || '客户端';
+            Modal.confirm({
+                title: `保存并应用 ${clientName} 配置？`,
+                content: createVNode('div', null, [
+                    createVNode('div', null, `将这一份配置写入 ${clientName} 在本机的配置文件中`),
+                    createVNode('div', { 
+                        style: 'margin-top: 12px; padding: 8px 12px; background-color: #fffbe6; border: 1px solid #ffe58f; border-radius: 6px; color: #d46b08; font-size: 13px;' 
+                    }, `注意：切换后，请退出 ${clientName} 再重新打开，客户端将会使用新配置了`),
+                ]),
+                okText: '保存并写入',
+                okType: 'primary',
+                cancelText: '取消',
+                async onOk() {
+                    const status = await updateClientConfigBackup({
+                        client: request.client,
+                        backupId: backup.id,
+                        ...request,
+                    });
+                    updateClientStatus(status);
+                    
+                    const applyStatus = await applyClientConfig({ client: request.client as ClientName, backupId: backup.id });
+                    updateClientStatus(applyStatus);
+                    
+                    message.success('配置已保存并生效');
+                    configDialogVisible.value = false;
+                }
+            });
+            return;
+        }
+
         const status = await updateClientConfigBackup({
             client: request.client,
             backupId: backup.id,

@@ -3,6 +3,7 @@
         v-model:open="visible"
         :title="dialogTitle"
         :confirm-loading="saving"
+        :ok-button-props="{ disabled: !isModified && mode !== 'create' }"
         ok-text="保存"
         cancel-text="取消"
         :footer="dialogFooter"
@@ -246,7 +247,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, watch } from 'vue';
+import { ref, computed, reactive, watch, nextTick } from 'vue';
 import { InfoCircleOutlined } from '@ant-design/icons-vue';
 import { ClientName, ClientConnectionMode } from '@/types/clientConfig';
 import { ApiFormat } from '@/types/gateway';
@@ -344,8 +345,16 @@ const form = reactive({
     apiKey: undefined as string | undefined,
 });
 
-watch(() => props.open, (isOpen) => {
-    if (!isOpen) return;
+const initialRequestStr = ref('');
+const isModified = computed(() => {
+    return JSON.stringify(buildRequest()) !== initialRequestStr.value;
+});
+
+watch(() => props.open, async (isOpen) => {
+    if (!isOpen) {
+        initialRequestStr.value = '';
+        return;
+    }
     if (props.localConfig) {
         initFromBackup(props.localConfig);
     } else if (props.mode === 'create') {
@@ -353,6 +362,8 @@ watch(() => props.open, (isOpen) => {
     } else if (props.backup?.config) {
         initFromBackup(props.backup.config);
     }
+    await nextTick();
+    initialRequestStr.value = JSON.stringify(buildRequest());
 });
 
 function initCreateForm(): void {
