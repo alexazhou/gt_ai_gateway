@@ -454,31 +454,30 @@ async function onVendorChange(): Promise<void> {
 function buildRequest(): any {
     if (!form.client) return null;
 
+    const request: any = {
+        client: form.client,
+        connectionMode: form.connectionMode,
+        effortLevel: form.effortLevel,
+    };
+
     if (form.connectionMode === ClientConnectionMode.GATEWAY) {
-        return {
-            client: form.client,
-            connectionMode: form.connectionMode,
-            gatewayUrl: form.gatewayUrl,
-            userId: form.userId,
-            model: form.model,
-        };
+        request.gatewayUrl = form.gatewayUrl;
+        request.userId = form.userId;
+        request.model = form.model;
     } else if (form.connectionMode === ClientConnectionMode.VENDOR) {
-        return {
-            client: form.client,
-            connectionMode: form.connectionMode,
-            gatewayUrl: form.upstreamUrl,
-            vendorId: form.vendorId,
-            model: form.upstreamModel,
-        };
+        request.gatewayUrl = isVendorRecognized.value ? form.upstreamUrl : unrecognizedVendorUrl.value;
+        request.vendorId = form.vendorId;
+        request.model = form.upstreamModel;
+        if (!isVendorRecognized.value) {
+            request.apiKey = unrecognizedVendorApiKey.value;
+        }
     } else {
-        return {
-            client: form.client,
-            connectionMode: form.connectionMode,
-            gatewayUrl: '',
-            apiKey: '',
-            model: '',
-        };
+        request.gatewayUrl = '';
+        request.apiKey = '';
+        request.model = '';
     }
+
+    return request;
 }
 
 async function handleSubmit(): Promise<void> {
