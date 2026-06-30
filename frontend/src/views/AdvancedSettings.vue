@@ -11,7 +11,7 @@
                     <div class="setting-item">
                         <div class="setting-info">
                             <div class="setting-title">屏蔽 Claude Code 跟踪</div>
-                            <div class="setting-desc">启用后，系统会自动清洗 Claude Code 发送的隐藏时间戳标记，避免污染用户真实数据与缓存特征</div>
+                            <div class="setting-desc">启用后，系统会自动清洗 Claude Code 发送的隐藏的地区/时区/公司跟踪标记，避免污染用户真实数据与缓存特征</div>
                         </div>
                         <div class="setting-action">
                             <a-switch
