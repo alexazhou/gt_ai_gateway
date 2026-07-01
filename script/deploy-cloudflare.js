@@ -265,10 +265,10 @@ function setupRootToken() {
         });
 
         console.log("\n==========================================");
-        console.log("    NEW ROOT_TOKEN GENERATED");
+        console.log("    🔑 NEW ROOT_TOKEN GENERATED 🔑");
         console.log("==========================================");
-        console.log(`Your new ROOT_TOKEN is: ${newToken}`);
-        console.log("Please save this securely. You will need it to log in.");
+        console.log(`🚀 Your new ROOT_TOKEN is: ${newToken}`);
+        console.log("⚠️  Please save this securely. You will need it to log in.");
         console.log("==========================================\n");
     } catch (err) {
         console.error("Error checking/setting secrets. Continuing deployment...", err.message);
