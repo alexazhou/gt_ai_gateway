@@ -112,6 +112,7 @@ docker run -d \
   - [Docker 部署文档](doc/deploy/DockerDeployment.md)
   - [源码部署文档](doc/deploy/SourceCodeDeployment.md)
   - [系统配置与使用指南](doc/usage/ConfigurationGuide.md)
+  - [客户端接入配置指南](doc/usage/ClientConfiguration.md)
   - [LLM API 使用指南](doc/usage/LlmApiUsage.md)
   - [自动协议转换说明](doc/usage/ProtocolConversion.md)
 
@@ -138,6 +139,12 @@ docker run -d \
 
 具体的方法与 PR 流程请参考文档：
 👉 **[如何参与贡献与提交 PR（附：如何添加供应商预设）](doc/dev/Contributing.md)**
+
+## 💬 交流群 (Community)
+
+欢迎加入微信交流群一起讨论：
+
+<img src="./images/wechat_group.jpg" alt="微信交流群" width="50%" />
 
 ## 许可证
 
