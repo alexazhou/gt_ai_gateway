@@ -6,7 +6,7 @@ import vendorDefaultUrls from "../service/vendorDefaultUrls";
 import ormService from "../service/ormService";
 import senderService from "../service/senderService";
 import customError from "../util/customError";
-import { ApiFormat } from "../constants";
+import { ApiFormat, VendorAuthMode } from "../constants";
 import { createListResponse, parsePaginationQuery } from "../util/pagination";
 
 
@@ -20,6 +20,7 @@ function formatVendor(vendor: SgVendor, modelCount = 0) {
         name: vendor.name,
         token: vendor.token,
         urls: vendor.getUrls(),
+        auth_mode: vendor.getAuthMode(),
         model_count: modelCount,
         created_at: vendor.created_at,
         updated_at: vendor.updated_at,
@@ -100,18 +101,23 @@ async function getVendorsByIds(c: Context) {
 
 async function createVendor(c: Context) {
     const body = await c.req.json();
-    const { type, name, token, urls } = body;
+    const { type, name, token, urls, auth_mode } = body;
 
     // Validation - 不验证 urls，允许为空
     if (!type || !name || !token) {
         throw new customError.AppError("Missing required fields");
     }
 
+    const finalAuthMode = auth_mode === VendorAuthMode.BEARER_TOKEN
+        ? VendorAuthMode.BEARER_TOKEN
+        : VendorAuthMode.API_KEY;
+
     const instance = await SgVendor.query().create({
         type,
         name,
         token,
         urls: urls ? JSON.stringify(urls) : "{}",
+        auth_mode: finalAuthMode,
     });
 
     return c.json(formatVendor(instance));
@@ -127,13 +133,14 @@ async function updateVendor(c: Context) {
     }
 
     const body = await c.req.json();
-    const { type, name, token, urls } = body;
+    const { type, name, token, urls, auth_mode } = body;
 
     const updatedVendor = await vendorService.updateVendor(vendorId, {
         type,
         name,
         token,
         urls,
+        auth_mode,
     });
 
     if (!updatedVendor) {
@@ -203,8 +210,12 @@ async function testVendor(c: Context) {
     let upstreamBody = "";
 
     if (requestFormat === ApiFormat.ANTHROPIC) {
-        headers.set("x-api-key", vendor.token);
-        headers.set("anthropic-version", "2023-06-01");
+        if (vendor.isBearerTokenAuth()) {
+            headers.set("Authorization", vendor.token.startsWith("Bearer ") ? vendor.token : `Bearer ${vendor.token}`);
+        } else {
+            headers.set("x-api-key", vendor.token);
+            headers.set("anthropic-version", "2023-06-01");
+        }
         headers.set("Content-Type", "application/json");
         upstreamBody = JSON.stringify({
             model: model,

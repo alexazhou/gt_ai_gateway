@@ -1,6 +1,6 @@
 import { Model } from "sutando";
 import { inspect, InspectOptions } from "util";
-import { VendorType, ApiFormat } from "../constants";
+import { VendorType, ApiFormat, VendorAuthMode } from "../constants";
 import vendorDefaultUrls from "../service/vendorDefaultUrls";
 import customError from "../util/customError";
 import urlUtil from "../util/urlUtil";
@@ -13,6 +13,7 @@ class SgVendor extends Model {
     name!: string;
     token!: string;
     urls!: string;  // JSON string
+    auth_mode!: VendorAuthMode;
 
     created_at!: Date;
     updated_at!: Date;
@@ -98,6 +99,24 @@ class SgVendor extends Model {
 
         return formats;
     }
+
+    /**
+     * 获取当前 vendor 的认证模式，默认为 api_key
+     */
+    getAuthMode(): VendorAuthMode {
+        return this.auth_mode === VendorAuthMode.BEARER_TOKEN
+            ? VendorAuthMode.BEARER_TOKEN
+            : VendorAuthMode.API_KEY;
+    }
+
+
+    /**
+     * 判断是否使用 Bearer Token 认证方式
+     */
+    isBearerTokenAuth(): boolean {
+        return this.getAuthMode() === VendorAuthMode.BEARER_TOKEN;
+    }
+
 
     [inspect.custom](depth: number, options: InspectOptions) {
         return JSON.stringify(this.toData(), null, 2);

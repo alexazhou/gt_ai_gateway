@@ -16,6 +16,11 @@
                 <a-descriptions-item label="Token">
                     <TokenDisplay :token="vendor.token" />
                 </a-descriptions-item>
+                <a-descriptions-item v-if="vendor.type === 'anthropic'" label="认证方式">
+                    <a-tag :color="vendor.auth_mode === 'bearer_token' ? 'blue' : 'green'">
+                        {{ vendor.auth_mode === 'bearer_token' ? 'Bearer Token (Authorization)' : 'API Key (x-api-key)' }}
+                    </a-tag>
+                </a-descriptions-item>
                 <a-descriptions-item label="URLs">
                     <div v-for="item in getMergedUrls(vendor)" :key="item.key" class="url-item">
                         <strong>{{ item.key }}:</strong> {{ item.url }}

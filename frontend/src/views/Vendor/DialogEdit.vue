@@ -31,6 +31,12 @@
                     placeholder="请输入 API Token"
                 />
             </a-form-item>
+            <a-form-item v-if="isAnthropicType" label="认证方式" name="auth_mode">
+                <a-radio-group v-model:value="formState.auth_mode">
+                    <a-radio value="api_key">API Key <span class="auth-hint">(x-api-key)</span></a-radio>
+                    <a-radio value="bearer_token">Bearer Token <span class="auth-hint">(Authorization)</span></a-radio>
+                </a-radio-group>
+            </a-form-item>
             <a-form-item label="URLs 配置">
                 <!-- 查看模式：合并展示 preset + 用户自定义 -->
                 <template v-if="urlsMode === 'view'">
@@ -93,7 +99,7 @@ import { ref, reactive, computed, watch } from 'vue';
 import type { FormInstance } from 'ant-design-vue/es';
 import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons-vue';
 import { updateVendor } from '@/api/vendor';
-import type { UpdateVendorRequest, Vendor, VendorType, VendorUrls } from '@/types/vendor';
+import type { UpdateVendorRequest, Vendor, VendorType, VendorUrls, VendorAuthMode } from '@/types/vendor';
 import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 import { useVendorPresets } from '@/composables/useVendorPresets';
 
@@ -119,6 +125,7 @@ const formState = reactive({
     type: 'openai' as VendorType,
     name: '',
     token: '',
+    auth_mode: 'api_key' as VendorAuthMode,
 });
 
 const urlsMode = ref<'view' | 'edit'>('view');
@@ -145,9 +152,15 @@ const mergedUrls = computed(() => {
         }));
 });
 
+const isAnthropicType = computed(() => formState.type === 'anthropic');
+
 // 切换类型时只更新模式，保留用户已填写的自定义 URLs
 watch(() => formState.type, (newType) => {
     urlsMode.value = PRESET_URLS.value[newType] ? 'view' : 'edit';
+    // 非 anthropic 类型重置为默认 api_key
+    if (newType !== 'anthropic') {
+        formState.auth_mode = 'api_key';
+    }
 });
 
 const rules = {
@@ -161,6 +174,7 @@ function open(vendor: Vendor) {
     formState.type = vendor.type;
     formState.name = vendor.name;
     formState.token = vendor.token;
+    formState.auth_mode = vendor.auth_mode || 'api_key';
 
     // 加载已保存的自定义 URLs
     urlsForm.splice(0, urlsForm.length);
@@ -200,6 +214,10 @@ async function handleOk() {
             token: formState.token,
             urls,
         };
+
+        if (isAnthropicType.value) {
+            updateData.auth_mode = formState.auth_mode;
+        }
 
         loading.value = true;
         const vendor = await updateVendor(currentId.value, updateData);
@@ -262,5 +280,10 @@ defineExpose({ open });
     padding: 0;
     margin-top: 6px;
     height: auto;
+}
+
+.auth-hint {
+    color: #8c8c8c;
+    font-size: 12px;
 }
 </style>

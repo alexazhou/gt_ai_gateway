@@ -1,0 +1,1 @@
+ALTER TABLE vendor ADD COLUMN auth_mode TEXT DEFAULT 'api_key' NOT NULL;

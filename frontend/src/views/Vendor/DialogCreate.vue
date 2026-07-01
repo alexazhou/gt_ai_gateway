@@ -31,6 +31,12 @@
                     placeholder="请输入 API Token"
                 />
             </a-form-item>
+            <a-form-item v-if="isAnthropicType" label="认证方式" name="auth_mode">
+                <a-radio-group v-model:value="formState.auth_mode">
+                    <a-radio value="api_key">API Key <span class="auth-hint">(x-api-key)</span></a-radio>
+                    <a-radio value="bearer_token">Bearer Token <span class="auth-hint">(Authorization)</span></a-radio>
+                </a-radio-group>
+            </a-form-item>
             <a-form-item label="URLs 配置（可选）">
                 <!-- 查看模式：合并展示 preset + 用户自定义 -->
                 <template v-if="urlsMode === 'view'">
@@ -93,7 +99,7 @@ import { ref, reactive, computed, watch } from 'vue';
 import type { FormInstance } from 'ant-design-vue/es';
 import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons-vue';
 import { createVendor } from '@/api/vendor';
-import type { CreateVendorRequest, Vendor, VendorType, VendorUrls } from '@/types/vendor';
+import type { CreateVendorRequest, Vendor, VendorType, VendorUrls, VendorAuthMode } from '@/types/vendor';
 import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 import { useVendorPresets } from '@/composables/useVendorPresets';
 
@@ -117,6 +123,7 @@ const formState = reactive({
     type: 'openai' as VendorType,
     name: '',
     token: '',
+    auth_mode: 'api_key' as VendorAuthMode,
 });
 
 const urlsMode = ref<'view' | 'edit'>('view');
@@ -143,9 +150,15 @@ const mergedUrls = computed(() => {
         }));
 });
 
+const isAnthropicType = computed(() => formState.type === 'anthropic');
+
 watch(() => formState.type, (newType) => {
     urlsForm.splice(0, urlsForm.length);
     urlsMode.value = PRESET_URLS.value[newType] ? 'view' : 'edit';
+    // 非 anthropic 类型重置为默认 api_key
+    if (newType !== 'anthropic') {
+        formState.auth_mode = 'api_key';
+    }
 });
 
 const rules = {
@@ -159,6 +172,7 @@ function open() {
     formState.type = 'openai';
     formState.name = '';
     formState.token = '';
+    formState.auth_mode = 'api_key';
     urlsForm.splice(0, urlsForm.length);
     urlsMode.value = 'view';
     visible.value = true;
@@ -189,6 +203,10 @@ async function handleOk() {
             name: formState.name,
             token: formState.token,
         };
+
+        if (isAnthropicType.value) {
+            createData.auth_mode = formState.auth_mode;
+        }
 
         // 只提交用户自定义的 URLs，后端对未定义的 key 回退到 preset
         const customUrls = urlsForm.filter(item => item.url);
@@ -259,5 +277,10 @@ defineExpose({ open });
     padding: 0;
     margin-top: 6px;
     height: auto;
+}
+
+.auth-hint {
+    color: #8c8c8c;
+    font-size: 12px;
 }
 </style>
