@@ -5,16 +5,10 @@
             <p class="page-desc">以下是当前服务的 API 接入端点，根据您的客户端类型选择对应协议。</p>
         </div>
 
-        <a-row :gutter="[0, 24]">
-            <!-- OpenAI 协议 -->
-            <a-col :span="24">
-                <a-card class="endpoint-card">
-                    <template #title>
-                        <div class="card-title">
-                            <span class="protocol-badge openai">OpenAI</span>
-                            <span>OpenAI 兼容端点</span>
-                        </div>
-                    </template>
+        <a-card class="endpoint-card" :bodyStyle="{ padding: '16px 24px 24px' }">
+            <a-tabs v-model:activeKey="activeTab">
+                <!-- OpenAI 协议 -->
+                <a-tab-pane key="openai" tab="OpenAI">
                     <a-descriptions :column="1" bordered size="middle">
                         <a-descriptions-item label="接入地址">
                             <div class="url-row">
@@ -27,6 +21,36 @@
                         <a-descriptions-item label="请求方式">POST</a-descriptions-item>
                         <a-descriptions-item label="认证方式">
                             <a-typography-text code>Authorization: Bearer YOUR_USER_TOKEN</a-typography-text>
+                        </a-descriptions-item>
+                        <a-descriptions-item label="请求模型">
+                            <a-select
+                                v-model:value="selectedModelName"
+                                style="width: 240px"
+                                placeholder="请选择模型"
+                                :options="modelList.map(m => ({ label: m.name, value: m.name }))"
+                            >
+                                <template #notFoundContent>
+                                    <div style="text-align: center; padding: 8px 0;">
+                                        <a-typography-text type="secondary">暂无可用模型，</a-typography-text>
+                                        <router-link to="/model">去添加</router-link>
+                                    </div>
+                                </template>
+                            </a-select>
+                        </a-descriptions-item>
+                        <a-descriptions-item label="请求用户">
+                            <a-select
+                                v-model:value="selectedUserToken"
+                                style="width: 240px"
+                                placeholder="请选择用户"
+                                :options="userList.map(u => ({ label: u.name, value: u.token }))"
+                            >
+                                <template #notFoundContent>
+                                    <div style="text-align: center; padding: 8px 0;">
+                                        <a-typography-text type="secondary">暂无可用用户，</a-typography-text>
+                                        <router-link to="/user">去添加</router-link>
+                                    </div>
+                                </template>
+                            </a-select>
                         </a-descriptions-item>
                         <a-descriptions-item label="使用示例">
                             <div class="code-block-wrapper">
@@ -42,18 +66,10 @@
                             </div>
                         </a-descriptions-item>
                     </a-descriptions>
-                </a-card>
-            </a-col>
+                </a-tab-pane>
 
-            <!-- Anthropic 协议 -->
-            <a-col :span="24">
-                <a-card class="endpoint-card">
-                    <template #title>
-                        <div class="card-title">
-                            <span class="protocol-badge anthropic">Anthropic</span>
-                            <span>Anthropic 兼容端点</span>
-                        </div>
-                    </template>
+                <!-- Anthropic 协议 -->
+                <a-tab-pane key="anthropic" tab="Anthropic">
                     <a-descriptions :column="1" bordered size="middle">
                         <a-descriptions-item label="接入地址">
                             <div class="url-row">
@@ -74,6 +90,36 @@
                                 </div>
                             </a-space>
                         </a-descriptions-item>
+                        <a-descriptions-item label="请求模型">
+                            <a-select
+                                v-model:value="selectedModelName"
+                                style="width: 240px"
+                                placeholder="请选择模型"
+                                :options="modelList.map(m => ({ label: m.name, value: m.name }))"
+                            >
+                                <template #notFoundContent>
+                                    <div style="text-align: center; padding: 8px 0;">
+                                        <a-typography-text type="secondary">暂无可用模型，</a-typography-text>
+                                        <router-link to="/model">去添加</router-link>
+                                    </div>
+                                </template>
+                            </a-select>
+                        </a-descriptions-item>
+                        <a-descriptions-item label="请求用户">
+                            <a-select
+                                v-model:value="selectedUserToken"
+                                style="width: 240px"
+                                placeholder="请选择用户"
+                                :options="userList.map(u => ({ label: u.name, value: u.token }))"
+                            >
+                                <template #notFoundContent>
+                                    <div style="text-align: center; padding: 8px 0;">
+                                        <a-typography-text type="secondary">暂无可用用户，</a-typography-text>
+                                        <router-link to="/user">去添加</router-link>
+                                    </div>
+                                </template>
+                            </a-select>
+                        </a-descriptions-item>
                         <a-descriptions-item label="使用示例">
                             <div class="code-block-wrapper">
                                 <a-button
@@ -88,64 +134,165 @@
                             </div>
                         </a-descriptions-item>
                     </a-descriptions>
-                </a-card>
-            </a-col>
+                </a-tab-pane>
 
-            <!-- 使用说明 -->
-            <a-col :span="24">
-                <a-card title="使用说明" class="notes-card">
-                    <a-alert
-                        type="info"
-                        show-icon
-                        message="模型名称"
-                        description="请求体中的 model 字段需填写在网关后台配置的模型名称，而非上游供应商的原始模型名称。"
-                        style="margin-bottom: 12px;"
-                    />
-                    <a-alert
-                        type="info"
-                        show-icon
-                        message="Token 获取"
-                        description="用户 Token 可在「用户管理」页面查看或创建。"
-                    />
-                </a-card>
-            </a-col>
-        </a-row>
+                <!-- Responses 协议 -->
+                <a-tab-pane key="responses" tab="Responses">
+                    <a-descriptions :column="1" bordered size="middle">
+                        <a-descriptions-item label="接入地址">
+                            <div class="url-row">
+                                <a-typography-text code class="url-text">{{ responsesUrl }}</a-typography-text>
+                                <a-button type="link" size="small" @click="copyText(responsesUrl, 'Responses 接入地址')">
+                                    <CopyOutlined /> 复制
+                                </a-button>
+                            </div>
+                        </a-descriptions-item>
+                        <a-descriptions-item label="请求方式">POST</a-descriptions-item>
+                        <a-descriptions-item label="认证方式">
+                            <a-typography-text code>Authorization: Bearer YOUR_USER_TOKEN</a-typography-text>
+                        </a-descriptions-item>
+                        <a-descriptions-item label="请求模型">
+                            <a-select
+                                v-model:value="selectedModelName"
+                                style="width: 240px"
+                                placeholder="请选择模型"
+                                :options="modelList.map(m => ({ label: m.name, value: m.name }))"
+                            >
+                                <template #notFoundContent>
+                                    <div style="text-align: center; padding: 8px 0;">
+                                        <a-typography-text type="secondary">暂无可用模型，</a-typography-text>
+                                        <router-link to="/model">去添加</router-link>
+                                    </div>
+                                </template>
+                            </a-select>
+                        </a-descriptions-item>
+                        <a-descriptions-item label="请求用户">
+                            <a-select
+                                v-model:value="selectedUserToken"
+                                style="width: 240px"
+                                placeholder="请选择用户"
+                                :options="userList.map(u => ({ label: u.name, value: u.token }))"
+                            >
+                                <template #notFoundContent>
+                                    <div style="text-align: center; padding: 8px 0;">
+                                        <a-typography-text type="secondary">暂无可用用户，</a-typography-text>
+                                        <router-link to="/user">去添加</router-link>
+                                    </div>
+                                </template>
+                            </a-select>
+                        </a-descriptions-item>
+                        <a-descriptions-item label="使用示例">
+                            <div class="code-block-wrapper">
+                                <a-button
+                                    type="link"
+                                    size="small"
+                                    class="copy-code-btn"
+                                    @click="copyText(responsesCurlExample, 'Responses 示例')"
+                                >
+                                    <CopyOutlined /> 复制
+                                </a-button>
+                                <pre class="code-block">{{ responsesCurlExample }}</pre>
+                            </div>
+                        </a-descriptions-item>
+                    </a-descriptions>
+                </a-tab-pane>
+            </a-tabs>
+        </a-card>
     </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { message } from 'ant-design-vue/es';
 import { CopyOutlined } from '@ant-design/icons-vue';
 import { getBaseURL } from '@/utils/request';
+import { listUsers } from '@/api/user';
+import { listModels } from '@/api/model';
+import type { User } from '@/types/user';
+import type { Model } from '@/types/model';
 
-const baseUrl = computed(() => getBaseURL());
+const activeTab = ref('openai');
+
+const userList = ref<User[]>([]);
+const modelList = ref<Model[]>([]);
+const selectedUserToken = ref<string>('');
+const selectedModelName = ref<string>('');
+
+onMounted(async () => {
+    try {
+        const [usersRes, modelsRes] = await Promise.all([
+            listUsers({ page: 1, pageSize: 100 }),
+            listModels({ page: 1, pageSize: 100 })
+        ]);
+        
+        userList.value = Array.isArray(usersRes) ? usersRes : (usersRes.list || []);
+        modelList.value = Array.isArray(modelsRes) ? modelsRes : (modelsRes.list || []);
+
+        if (userList.value.length > 0) {
+            selectedUserToken.value = userList.value[0]!.token;
+        }
+        if (modelList.value.length > 0) {
+            selectedModelName.value = modelList.value[0]!.name;
+        }
+    } catch (e) {
+        console.error('Failed to load users and models', e);
+    }
+});
+
+const baseUrl = computed(() => {
+    let url = getBaseURL();
+    if (url === '/api' && import.meta.env.DEV) {
+        return 'http://127.0.0.1:8720';
+    }
+    if (!url.startsWith('http')) {
+        url = window.location.origin + (url.startsWith('/') ? url : `/${url}`);
+    }
+    return url.replace(/\/$/, '');
+});
 
 const openaiUrl = computed(() => `${baseUrl.value}/llm/v1/chat/completions`);
 const anthropicUrl = computed(() => `${baseUrl.value}/llm/v1/messages`);
+const responsesUrl = computed(() => `${baseUrl.value}/llm/v1/responses`);
 
-const openaiCurlExample = computed(() =>
-    `curl ${openaiUrl.value} \\
+const openaiCurlExample = computed(() => {
+    const token = selectedUserToken.value || 'YOUR_USER_TOKEN';
+    const model = selectedModelName.value || 'your-model-name';
+    return `curl ${openaiUrl.value} \\
   -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_USER_TOKEN" \\
+  -H "Authorization: Bearer ${token}" \\
   -d '{
-    "model": "your-model-name",
+    "model": "${model}",
     "messages": [{"role": "user", "content": "Hello!"}],
     "stream": true
-  }'`
-);
+  }'`;
+});
 
-const anthropicCurlExample = computed(() =>
-    `curl ${anthropicUrl.value} \\
+const anthropicCurlExample = computed(() => {
+    const token = selectedUserToken.value || 'YOUR_USER_TOKEN';
+    const model = selectedModelName.value || 'your-model-name';
+    return `curl ${anthropicUrl.value} \\
   -H "Content-Type: application/json" \\
-  -H "x-api-key: YOUR_USER_TOKEN" \\
+  -H "x-api-key: ${token}" \\
   -H "anthropic-version: 2023-06-01" \\
   -d '{
-    "model": "your-model-name",
+    "model": "${model}",
     "max_tokens": 1024,
     "messages": [{"role": "user", "content": "Hello!"}]
-  }'`
-);
+  }'`;
+});
+
+const responsesCurlExample = computed(() => {
+    const token = selectedUserToken.value || 'YOUR_USER_TOKEN';
+    const model = selectedModelName.value || 'your-model-name';
+    return `curl ${responsesUrl.value} \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer ${token}" \\
+  -d '{
+    "model": "${model}",
+    "input": "Hello!",
+    "stream": true
+  }'`;
+});
 
 async function copyText(text: string, label: string) {
     try {
@@ -192,27 +339,6 @@ async function copyText(text: string, label: string) {
     gap: 10px;
     font-size: 16px;
     font-weight: 600;
-}
-
-.protocol-badge {
-    display: inline-block;
-    padding: 2px 10px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-}
-
-.protocol-badge.openai {
-    background: var(--accent-primary-soft);
-    color: var(--accent-primary);
-    border: 1px solid var(--accent-primary-border);
-}
-
-.protocol-badge.anthropic {
-    background: var(--accent-warning-soft);
-    color: var(--accent-warning);
-    border: 1px solid var(--accent-warning-border);
 }
 
 .url-row {
