@@ -1,1 +1,1 @@
-ALTER TABLE vendor ADD COLUMN auth_mode TEXT DEFAULT 'api_key' NOT NULL;
+ALTER TABLE vendor ADD COLUMN auth_mode TEXT DEFAULT 'bearer_token' NOT NULL;
