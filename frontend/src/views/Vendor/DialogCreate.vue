@@ -176,7 +176,7 @@ function open() {
     formState.type = 'openai';
     formState.name = '';
     formState.token = '';
-    formState.auth_mode = 'api_key';
+    formState.auth_mode = 'bearer_token';
     advancedActiveKey.value = [];
     urlsForm.splice(0, urlsForm.length);
     urlsMode.value = 'view';

@@ -135,7 +135,7 @@ const formState = reactive({
     type: 'openai' as VendorType,
     name: '',
     token: '',
-    auth_mode: 'api_key' as VendorAuthMode,
+    auth_mode: 'bearer_token' as VendorAuthMode,
 });
 
 const urlsMode = ref<'view' | 'edit'>('view');
@@ -178,7 +178,7 @@ function open(vendor: Vendor) {
     formState.type = vendor.type;
     formState.name = vendor.name;
     formState.token = vendor.token;
-    formState.auth_mode = vendor.auth_mode || 'api_key';
+    formState.auth_mode = vendor.auth_mode || 'bearer_token';
 
     // 加载已保存的自定义 URLs
     urlsForm.splice(0, urlsForm.length);
