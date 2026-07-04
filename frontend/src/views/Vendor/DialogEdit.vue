@@ -90,12 +90,13 @@
             <!-- 高级设置 -->
             <a-collapse v-model:activeKey="advancedActiveKey" :bordered="false" class="advanced-collapse">
                 <a-collapse-panel key="advanced" header="高级设置">
-                    <a-form-item label="认证方式" name="auth_mode">
-                        <a-select v-model:value="formState.auth_mode" style="width: 100%">
+                    <div class="advanced-row">
+                        <label class="advanced-label">认证方式</label>
+                        <a-select v-model:value="formState.auth_mode" style="flex: 1">
                             <a-select-option value="api_key">API Key (x-api-key)</a-select-option>
                             <a-select-option value="bearer_token">Bearer Token (Authorization)</a-select-option>
                         </a-select>
-                    </a-form-item>
+                    </div>
                 </a-collapse-panel>
             </a-collapse>
         </a-form>
@@ -321,5 +322,17 @@ defineExpose({ open });
 
 :deep(.advanced-collapse .ant-collapse-content-box) {
     padding: 0 16px 12px;
+}
+
+.advanced-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.advanced-label {
+    flex-shrink: 0;
+    font-size: 14px;
+    color: rgba(0, 0, 0, 0.88);
 }
 </style>
