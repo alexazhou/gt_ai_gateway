@@ -91,10 +91,10 @@
             <a-collapse v-model:activeKey="advancedActiveKey" :bordered="false" class="advanced-collapse">
                 <a-collapse-panel key="advanced" header="高级设置">
                     <a-form-item label="认证方式" name="auth_mode">
-                        <a-radio-group v-model:value="formState.auth_mode">
-                            <a-radio value="api_key">API Key <span class="auth-hint">(x-api-key)</span></a-radio>
-                            <a-radio value="bearer_token">Bearer Token <span class="auth-hint">(Authorization)</span></a-radio>
-                        </a-radio-group>
+                        <a-select v-model:value="formState.auth_mode" style="width: 100%">
+                            <a-select-option value="api_key">API Key (x-api-key)</a-select-option>
+                            <a-select-option value="bearer_token">Bearer Token (Authorization)</a-select-option>
+                        </a-select>
                     </a-form-item>
                 </a-collapse-panel>
             </a-collapse>
