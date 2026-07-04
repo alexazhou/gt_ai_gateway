@@ -1,0 +1,1 @@
+ALTER TABLE vendor ADD COLUMN config TEXT DEFAULT '{}' NOT NULL;

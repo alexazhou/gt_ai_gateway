@@ -1,5 +1,5 @@
 import { SgVendor } from "../model/sgVendor";
-import { ApiFormat } from "../constants";
+import { ApiFormat, VendorAuthMode } from "../constants";
 
 
 async function getVendorByName(name: string): Promise<SgVendor | null> {
@@ -13,7 +13,7 @@ async function getVendorByName(name: string): Promise<SgVendor | null> {
 
 async function updateVendor(
     vendorId: number,
-    data: { type?: string; name?: string; token?: string; urls?: Record<string, string> },
+    data: { type?: string; name?: string; token?: string; urls?: Record<string, string>; config?: Record<string, any> },
 ): Promise<SgVendor | null> {
     const vendor = await SgVendor.query().find(vendorId);
 
@@ -30,6 +30,11 @@ async function updateVendor(
     // Handle urls - if provided, serialize as JSON string
     if (data.urls !== undefined) {
         updateData.urls = JSON.stringify(data.urls);
+    }
+
+    // Handle config - if provided, serialize as JSON string
+    if (data.config !== undefined) {
+        updateData.config = JSON.stringify(data.config);
     }
 
     await SgVendor.query()

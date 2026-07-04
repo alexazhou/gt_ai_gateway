@@ -836,8 +836,12 @@ async function sendRequest(
     }
 
     if (upstreamFormat === ApiFormat.ANTHROPIC) {
-        finalHeaders.set("x-api-key", vendor.token);
-        finalHeaders.set("anthropic-version", "2023-06-01");
+        if (vendor.isBearerTokenAuth()) {
+            finalHeaders.set("Authorization", vendor.token.startsWith("Bearer ") ? vendor.token : `Bearer ${vendor.token}`);
+        } else {
+            finalHeaders.set("x-api-key", vendor.token);
+            finalHeaders.set("anthropic-version", "2023-06-01");
+        }
     } else {
         finalHeaders.set("Authorization", vendor.token.startsWith("Bearer ") ? vendor.token : `Bearer ${vendor.token}`);
     }

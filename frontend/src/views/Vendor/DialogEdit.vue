@@ -31,7 +31,13 @@
                     placeholder="请输入 API Token"
                 />
             </a-form-item>
-            <a-form-item label="URLs 配置">
+            <div class="urls-header">
+                <label class="ant-form-item-label">URLs 配置</label>
+                <a-button v-if="urlsMode === 'view'" type="link" size="small" class="toggle-btn" @click="urlsMode = 'edit'">
+                    <EditOutlined /> 编辑
+                </a-button>
+            </div>
+            <a-form-item>
                 <!-- 查看模式：合并展示 preset + 用户自定义 -->
                 <template v-if="urlsMode === 'view'">
                     <div class="urls-view">
@@ -41,9 +47,6 @@
                             <a-tag v-if="item.isCustom" color="blue" class="custom-tag">自定义</a-tag>
                         </div>
                     </div>
-                    <a-button type="link" size="small" class="toggle-btn" @click="urlsMode = 'edit'">
-                        <EditOutlined /> 编辑
-                    </a-button>
                 </template>
                 <!-- 编辑模式：仅用户自定义条目 -->
                 <template v-else>
@@ -84,6 +87,18 @@
                     </a-button>
                 </template>
             </a-form-item>
+            <!-- 高级设置 -->
+            <a-collapse v-model:activeKey="advancedActiveKey" :bordered="false" class="advanced-collapse">
+                <a-collapse-panel key="advanced" header="高级设置">
+                    <div class="advanced-row">
+                        <label class="advanced-label">认证方式</label>
+                        <a-select v-model:value="formState.auth_mode" style="flex: 1">
+                            <a-select-option value="api_key">API Key (x-api-key)</a-select-option>
+                            <a-select-option value="bearer_token">Bearer Token (Authorization)</a-select-option>
+                        </a-select>
+                    </div>
+                </a-collapse-panel>
+            </a-collapse>
         </a-form>
     </a-modal>
 </template>
@@ -93,7 +108,7 @@ import { ref, reactive, computed, watch } from 'vue';
 import type { FormInstance } from 'ant-design-vue/es';
 import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons-vue';
 import { updateVendor } from '@/api/vendor';
-import type { UpdateVendorRequest, Vendor, VendorType, VendorUrls } from '@/types/vendor';
+import type { UpdateVendorRequest, Vendor, VendorType, VendorUrls, VendorAuthMode } from '@/types/vendor';
 import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 import { useVendorPresets } from '@/composables/useVendorPresets';
 
@@ -104,6 +119,7 @@ const emit = defineEmits<{
 const visible = ref(false);
 const loading = ref(false);
 const formRef = ref<FormInstance>();
+const advancedActiveKey = ref<string[]>([]);
 
 const URL_TYPES = [
     { label: 'OpenAI', value: 'openai' },
@@ -119,6 +135,7 @@ const formState = reactive({
     type: 'openai' as VendorType,
     name: '',
     token: '',
+    auth_mode: 'bearer_token' as VendorAuthMode,
 });
 
 const urlsMode = ref<'view' | 'edit'>('view');
@@ -161,6 +178,7 @@ function open(vendor: Vendor) {
     formState.type = vendor.type;
     formState.name = vendor.name;
     formState.token = vendor.token;
+    formState.auth_mode = vendor.config?.auth_mode || 'bearer_token';
 
     // 加载已保存的自定义 URLs
     urlsForm.splice(0, urlsForm.length);
@@ -170,6 +188,7 @@ function open(vendor: Vendor) {
 
     void loadPresets();
     urlsMode.value = PRESET_URLS.value[vendor.type] ? 'view' : 'edit';
+    advancedActiveKey.value = [];
     visible.value = true;
 }
 
@@ -199,6 +218,7 @@ async function handleOk() {
             name: formState.name,
             token: formState.token,
             urls,
+            config: { auth_mode: formState.auth_mode },
         };
 
         loading.value = true;
@@ -262,5 +282,57 @@ defineExpose({ open });
     padding: 0;
     margin-top: 6px;
     height: auto;
+}
+
+.urls-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.urls-header .ant-form-item-label {
+    margin-bottom: 0;
+}
+
+.urls-header .toggle-btn {
+    margin-top: 0;
+}
+
+.auth-hint {
+    color: #8c8c8c;
+    font-size: 12px;
+}
+
+.advanced-collapse {
+    background: transparent;
+    border: none;
+    margin-top: 8px;
+}
+
+:deep(.advanced-collapse .ant-collapse-item) {
+    border: 1px solid var(--border-color, #d9d9d9);
+    border-radius: 6px;
+}
+
+:deep(.advanced-collapse .ant-collapse-header) {
+    padding: 8px 16px;
+    font-size: 13px;
+}
+
+:deep(.advanced-collapse .ant-collapse-content-box) {
+    padding: 0 16px 12px;
+}
+
+.advanced-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.advanced-label {
+    flex-shrink: 0;
+    font-size: 14px;
+    color: rgba(0, 0, 0, 0.88);
 }
 </style>

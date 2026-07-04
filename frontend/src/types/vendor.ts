@@ -2,8 +2,15 @@ import type { BaseEntity, TableQuery } from './index';
 
 export type VendorType = 'openai' | 'anthropic' | 'google' | 'aliyun' | 'aliyun_coding' | 'volcengine_coding' | 'deepseek' | 'mimo' | 'mimo_token_plan' | 'opencode_go' | 'other';
 
+export type VendorAuthMode = 'api_key' | 'bearer_token';
+
 export interface VendorUrls {
     [key: string]: string;
+}
+
+export interface VendorConfig {
+    auth_mode?: VendorAuthMode;
+    [key: string]: any;
 }
 
 export interface Vendor extends BaseEntity {
@@ -11,6 +18,7 @@ export interface Vendor extends BaseEntity {
     name: string;
     token: string;
     urls: VendorUrls;
+    config: VendorConfig;
     model_count: number;
 }
 
@@ -19,6 +27,7 @@ export interface CreateVendorRequest {
     name: string;
     token: string;
     urls?: VendorUrls;
+    config?: VendorConfig;
 }
 
 export interface UpdateVendorRequest {
@@ -26,6 +35,7 @@ export interface UpdateVendorRequest {
     name?: string;
     token?: string;
     urls?: VendorUrls;
+    config?: VendorConfig;
 }
 
 export interface VendorQuery extends TableQuery {

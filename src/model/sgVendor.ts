@@ -1,6 +1,6 @@
 import { Model } from "sutando";
 import { inspect, InspectOptions } from "util";
-import { VendorType, ApiFormat } from "../constants";
+import { VendorType, ApiFormat, VendorAuthMode } from "../constants";
 import vendorDefaultUrls from "../service/vendorDefaultUrls";
 import customError from "../util/customError";
 import urlUtil from "../util/urlUtil";
@@ -13,6 +13,7 @@ class SgVendor extends Model {
     name!: string;
     token!: string;
     urls!: string;  // JSON string
+    config!: string;  // JSON string
 
     created_at!: Date;
     updated_at!: Date;
@@ -23,6 +24,17 @@ class SgVendor extends Model {
     getUrls(): Record<string, string> {
         try {
             return this.urls ? JSON.parse(this.urls) : {};
+        } catch {
+            return {};
+        }
+    }
+
+    /**
+     * Parse config JSON string to object
+     */
+    getConfig(): Record<string, any> {
+        try {
+            return this.config ? JSON.parse(this.config) : {};
         } catch {
             return {};
         }
@@ -98,6 +110,25 @@ class SgVendor extends Model {
 
         return formats;
     }
+
+    /**
+     * 获取当前 vendor 的认证模式，默认为 bearer_token
+     */
+    getAuthMode(): VendorAuthMode {
+        const config = this.getConfig();
+        return config.auth_mode === VendorAuthMode.API_KEY
+            ? VendorAuthMode.API_KEY
+            : VendorAuthMode.BEARER_TOKEN;
+    }
+
+
+    /**
+     * 判断是否使用 Bearer Token 认证方式
+     */
+    isBearerTokenAuth(): boolean {
+        return this.getAuthMode() === VendorAuthMode.BEARER_TOKEN;
+    }
+
 
     [inspect.custom](depth: number, options: InspectOptions) {
         return JSON.stringify(this.toData(), null, 2);
