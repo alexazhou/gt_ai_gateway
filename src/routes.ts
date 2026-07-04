@@ -1,6 +1,9 @@
 import { Hono, MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { ApiFormat } from "./constants";
+import { ApiFormat, UserType } from "./constants";
+import { SgUser } from "./model/sgUser";
+import { SgModel } from "./model/sgModel";
+import { SgVendor } from "./model/sgVendor";
 
 import gatewayController from "./controller/gatewayController";
 import modelController from "./controller/modelController";
@@ -16,6 +19,7 @@ import clientConfigController from "./controller/clientConfigController";
 import configService from "./service/configService";
 import ormService from "./service/ormService";
 import authMiddleware from "./middleware/authMiddleware";
+import llmApiMiddleware from "./middleware/llmApiMiddleware";
 import corsMiddleware from "./middleware/corsMiddleware";
 import customError from "./util/customError";
 
@@ -26,8 +30,12 @@ interface Env {
 }
 
 type Variables = {
-    user_type: string;
+    user_type: UserType;
     api_format?: ApiFormat;
+    user?: SgUser;
+    modelConfig?: SgModel;
+    vendor?: SgVendor;
+    requestBody?: string;
 };
 
 const dbMiddleware: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
@@ -149,10 +157,10 @@ app.get("/record/:id", authMiddleware.requireAdmin, recordController.getRecord);
 app.get("/stats/dashboard.json", authMiddleware.requireAdmin, statsController.dashboardStats);
 app.get("/stats/recent.json", authMiddleware.requireAdmin, statsController.recentRecords);
 
-// AI endpoints (no auth middleware)
-app.post("/llm/v1/chat/completions", gatewayController.chatCompletions);
-app.post("/llm/v1/messages", gatewayController.anthropicMessages);
-app.post("/llm/v1/responses", gatewayController.responsesApi);
+// AI endpoints (no auth middleware, using custom llmApiAuth)
+app.post("/llm/v1/chat/completions", llmApiMiddleware.requireLlmAuth(ApiFormat.OPENAI), gatewayController.chatCompletions);
+app.post("/llm/v1/messages", llmApiMiddleware.requireLlmAuth(ApiFormat.ANTHROPIC), gatewayController.anthropicMessages);
+app.post("/llm/v1/responses", llmApiMiddleware.requireLlmAuth(ApiFormat.RESPONSES), gatewayController.responsesApi);
 
 // Test endpoints
 app.delete("/test/cache/clear", async (c) => {

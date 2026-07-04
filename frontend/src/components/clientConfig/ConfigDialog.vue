@@ -1,5 +1,5 @@
 <template>
-    <a-modal
+    <a-drawer
         v-model:open="visible"
         :title="dialogTitle"
         :confirm-loading="saving"
@@ -243,7 +243,7 @@
                 </a-select>
             </a-form-item>
         </a-form>
-    </a-modal>
+    </a-drawer>
 </template>
 
 <script setup lang="ts">
