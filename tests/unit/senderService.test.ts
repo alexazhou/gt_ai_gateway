@@ -7,6 +7,8 @@
 
 import { describe, it, expect } from "vitest";
 import senderService from "../../src/service/senderService";
+import usageUtils from "../../src/util/usageUtils";
+import protocolUtils from "../../src/util/protocolUtils";
 import { ConverterFactory } from "../../src/util/protocolConverter/ConverterFactory";
 import { ApiFormat } from "../../src/constants";
 import customError from "../../src/util/customError";
@@ -26,7 +28,7 @@ function convertRequestBody(body: string, clientFormat: ApiFormat, upstreamForma
 
 describe("resolveUpstreamFormat", () => {
     it("uses Responses for Anthropic client when only Responses is supported", () => {
-        const upstreamFormat = senderService.resolveUpstreamFormat(
+        const upstreamFormat = protocolUtils.resolveUpstreamFormat(
             ApiFormat.ANTHROPIC,
             [ApiFormat.RESPONSES],
         );
@@ -35,7 +37,7 @@ describe("resolveUpstreamFormat", () => {
     });
 
     it("falls back to client format when no supported conversion path", () => {
-        const upstreamFormat = senderService.resolveUpstreamFormat(
+        const upstreamFormat = protocolUtils.resolveUpstreamFormat(
             ApiFormat.OPENAI,
             [ApiFormat.RESPONSES],
         );
@@ -44,7 +46,7 @@ describe("resolveUpstreamFormat", () => {
     });
 
     it("returns client format directly when vendor supports it", () => {
-        const upstreamFormat = senderService.resolveUpstreamFormat(
+        const upstreamFormat = protocolUtils.resolveUpstreamFormat(
             ApiFormat.OPENAI,
             [ApiFormat.OPENAI, ApiFormat.ANTHROPIC],
         );
@@ -53,7 +55,7 @@ describe("resolveUpstreamFormat", () => {
     });
 
     it("converts Responses to ANTHROPIC when vendor supports ANTHROPIC", () => {
-        const upstreamFormat = senderService.resolveUpstreamFormat(
+        const upstreamFormat = protocolUtils.resolveUpstreamFormat(
             ApiFormat.RESPONSES,
             [ApiFormat.ANTHROPIC],
         );
@@ -62,7 +64,7 @@ describe("resolveUpstreamFormat", () => {
     });
 
     it("converts ANTHROPIC to OPENAI when vendor only supports OPENAI", () => {
-        const upstreamFormat = senderService.resolveUpstreamFormat(
+        const upstreamFormat = protocolUtils.resolveUpstreamFormat(
             ApiFormat.ANTHROPIC,
             [ApiFormat.OPENAI],
         );
@@ -74,7 +76,7 @@ describe("resolveUpstreamFormat", () => {
 
 describe("normalizeUsage", () => {
     it("reads cached tokens from OpenAI-compatible usage details on Responses format", () => {
-        const normalized = senderService.normalizeUsage(ApiFormat.RESPONSES, {
+        const normalized = usageUtils.normalizeUsage(ApiFormat.RESPONSES, {
             prompt_tokens: 100,
             prompt_tokens_details: { cached_tokens: 40 },
             completion_tokens: 12,
@@ -94,7 +96,7 @@ describe("normalizeUsage", () => {
 
 describe("buildStreamUsageAccounting", () => {
     it("stores OpenAI-compatible streamed cache reads as separate record input tokens", () => {
-        const accounting = senderService.buildStreamUsageAccounting(
+        const accounting = usageUtils.buildStreamUsageAccounting(
             ApiFormat.OPENAI,
             {
                 prompt_tokens: 53067,
@@ -126,16 +128,16 @@ describe("buildStreamUsageAccounting", () => {
 
 describe("isResponsesOutputStartedEvent", () => {
     it("treats function call and reasoning deltas as output start events", () => {
-        expect(senderService.isResponsesOutputStartedEvent("response.output_text.delta")).toBe(true);
-        expect(senderService.isResponsesOutputStartedEvent("response.function_call_arguments.delta")).toBe(true);
-        expect(senderService.isResponsesOutputStartedEvent("response.reasoning_summary_text.delta")).toBe(true);
-        expect(senderService.isResponsesOutputStartedEvent("response.output_item.added")).toBe(true);
+        expect(protocolUtils.isResponsesOutputStartedEvent("response.output_text.delta")).toBe(true);
+        expect(protocolUtils.isResponsesOutputStartedEvent("response.function_call_arguments.delta")).toBe(true);
+        expect(protocolUtils.isResponsesOutputStartedEvent("response.reasoning_summary_text.delta")).toBe(true);
+        expect(protocolUtils.isResponsesOutputStartedEvent("response.output_item.added")).toBe(true);
     });
 
     it("does not treat lifecycle events as output start events", () => {
-        expect(senderService.isResponsesOutputStartedEvent("response.created")).toBe(false);
-        expect(senderService.isResponsesOutputStartedEvent("response.in_progress")).toBe(false);
-        expect(senderService.isResponsesOutputStartedEvent("response.completed")).toBe(false);
+        expect(protocolUtils.isResponsesOutputStartedEvent("response.created")).toBe(false);
+        expect(protocolUtils.isResponsesOutputStartedEvent("response.in_progress")).toBe(false);
+        expect(protocolUtils.isResponsesOutputStartedEvent("response.completed")).toBe(false);
     });
 });
 

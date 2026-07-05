@@ -1,6 +1,7 @@
 import { Context } from "hono";
 import { SgVendor } from "../model/sgVendor";
 import { SgModel } from "../model/sgModel";
+import { resolveUpstreamFormat } from "../util/protocolUtils";
 import vendorService from "../service/vendorService";
 import vendorDefaultUrls from "../service/vendorDefaultUrls";
 import ormService from "../service/ormService";
@@ -195,7 +196,7 @@ async function testVendor(c: Context) {
     let convertedTo: string | undefined;
 
     if (auto_convert) {
-        const upstreamFormat = senderService.resolveUpstreamFormat(format, vendor.getSupportedFormats());
+        const upstreamFormat = resolveUpstreamFormat(format, vendor.getSupportedFormats());
         if (upstreamFormat !== format) {
             convertedFrom = format;
             convertedTo = upstreamFormat;
