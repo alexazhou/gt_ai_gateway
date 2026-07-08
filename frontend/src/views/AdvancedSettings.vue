@@ -53,6 +53,19 @@
             <div class="settings-section">
                 <h3 class="section-title">调试与日志</h3>
                 <div class="settings-list">
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-title">记录请求/响应内容</div>
+                            <div class="setting-desc">启用后，每次请求的 request/response 原始内容会写入对象存储（Node 模式存数据库表，Worker 模式存 R2），可在请求记录详情中查看。关闭可节省存储空间，但新记录的详情将不再包含请求/响应内容（已保存的历史记录不受影响）。</div>
+                        </div>
+                        <div class="setting-action">
+                            <a-switch
+                                :checked="form.record_payload_enabled"
+                                @change="form.record_payload_enabled = $event as boolean"
+                                :disabled="saving"
+                            />
+                        </div>
+                    </div>
                     <div class="setting-item" v-if="!isWorkerMode">
                         <div class="setting-info">
                             <div class="setting-title">流式日志记录</div>
@@ -157,6 +170,7 @@ const originalConfig = reactive({
     responses_prompt_cache_key_enabled: false,
     claude_code_tracking_rewrite_enabled: true,
     stream_log_enabled: false,
+    record_payload_enabled: true,
     auto_update_enabled: true,
     telemetry_disabled: false,
 });
@@ -166,6 +180,7 @@ const form = reactive({
     responses_prompt_cache_key_enabled: false,
     claude_code_tracking_rewrite_enabled: true,
     stream_log_enabled: false,
+    record_payload_enabled: true,
     auto_update_enabled: true,
     telemetry_disabled: false,
 });
@@ -175,6 +190,7 @@ const isDirty = computed(() => {
            form.responses_prompt_cache_key_enabled !== originalConfig.responses_prompt_cache_key_enabled ||
            form.claude_code_tracking_rewrite_enabled !== originalConfig.claude_code_tracking_rewrite_enabled ||
            form.stream_log_enabled !== originalConfig.stream_log_enabled ||
+           form.record_payload_enabled !== originalConfig.record_payload_enabled ||
            form.auto_update_enabled !== originalConfig.auto_update_enabled ||
            form.telemetry_disabled !== originalConfig.telemetry_disabled;
 });
@@ -199,6 +215,9 @@ async function loadConfig(): Promise<void> {
         form.stream_log_enabled = config.stream_log_enabled === "true";
         originalConfig.stream_log_enabled = config.stream_log_enabled === "true";
 
+        form.record_payload_enabled = config.record_payload_enabled !== "false";
+        originalConfig.record_payload_enabled = config.record_payload_enabled !== "false";
+
         form.auto_update_enabled = config.auto_update_enabled !== "false";
         originalConfig.auto_update_enabled = config.auto_update_enabled !== "false";
 
@@ -216,6 +235,7 @@ function cancelChanges() {
     form.responses_prompt_cache_key_enabled = originalConfig.responses_prompt_cache_key_enabled;
     form.claude_code_tracking_rewrite_enabled = originalConfig.claude_code_tracking_rewrite_enabled;
     form.stream_log_enabled = originalConfig.stream_log_enabled;
+    form.record_payload_enabled = originalConfig.record_payload_enabled;
     form.auto_update_enabled = originalConfig.auto_update_enabled;
     form.telemetry_disabled = originalConfig.telemetry_disabled;
 }
@@ -260,6 +280,7 @@ async function saveConfig() {
             responses_prompt_cache_key_enabled: form.responses_prompt_cache_key_enabled ? "true" : "false",
             claude_code_tracking_rewrite_enabled: form.claude_code_tracking_rewrite_enabled ? "true" : "false",
             stream_log_enabled: form.stream_log_enabled ? "true" : "false",
+            record_payload_enabled: form.record_payload_enabled ? "true" : "false",
             auto_update_enabled: form.auto_update_enabled ? "true" : "false",
             telemetry_disabled: form.telemetry_disabled ? "true" : "false",
         });
@@ -268,6 +289,7 @@ async function saveConfig() {
         originalConfig.responses_prompt_cache_key_enabled = form.responses_prompt_cache_key_enabled;
         originalConfig.claude_code_tracking_rewrite_enabled = form.claude_code_tracking_rewrite_enabled;
         originalConfig.stream_log_enabled = form.stream_log_enabled;
+        originalConfig.record_payload_enabled = form.record_payload_enabled;
         originalConfig.auto_update_enabled = form.auto_update_enabled;
         originalConfig.telemetry_disabled = form.telemetry_disabled;
         

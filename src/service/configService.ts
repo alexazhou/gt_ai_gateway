@@ -8,6 +8,7 @@ export enum ConfigKey {
     STREAM_LOG_ENABLED = "stream_log_enabled",
     AUTO_UPDATE_ENABLED = "auto_update_enabled",
     TELEMETRY_DISABLED = "telemetry_disabled",
+    RECORD_PAYLOAD_ENABLED = "record_payload_enabled",
 }
 
 // 各配置项的默认值集中在此维护，调用方无需再传默认值。
@@ -20,6 +21,7 @@ const CONFIG_DEFAULTS: Record<string, string> = {
     [ConfigKey.STREAM_LOG_ENABLED]: "false",
     [ConfigKey.AUTO_UPDATE_ENABLED]: "true",
     [ConfigKey.TELEMETRY_DISABLED]: "false",
+    [ConfigKey.RECORD_PAYLOAD_ENABLED]: "true",
 };
 
 function getDefault(name: string): string {

@@ -1,6 +1,7 @@
 import { SgRecord, RECORD_SUMMARY_COLUMNS } from "../model/sgRecord";
 import { SgRecordStatus, ApiFormat } from "../constants";
 import objectStorageService from "./objectStorageService";
+import configService, { ConfigKey } from "./configService";
 
 interface RecordPayload {
     request: string | null;
@@ -9,6 +10,10 @@ interface RecordPayload {
 
 function isLogEnabled(): boolean {
     return process.env.RECORD_LOG_ENABLED === "true";
+}
+
+async function isPayloadRecordingEnabled(): Promise<boolean> {
+    return (await configService.getConfig(ConfigKey.RECORD_PAYLOAD_ENABLED)).getBoolean();
 }
 
 function storageKey(recordId: number): string {
@@ -73,10 +78,12 @@ async function create(
         cost: 0,
     });
 
-    await writePayload(Number(record.id), {
-        request: requestData ?? null,
-        response: null,
-    });
+    if (await isPayloadRecordingEnabled()) {
+        await writePayload(Number(record.id), {
+            request: requestData ?? null,
+            response: null,
+        });
+    }
 
     return record;
 }
@@ -87,10 +94,14 @@ async function update(recordId: number, data: Partial<SgRecord>) {
     }
 
     if (Object.prototype.hasOwnProperty.call(data, "response_data")) {
-        const payload = await readPayload(recordId);
-        payload.response = (data as any).response_data ?? null;
-        await writePayload(recordId, payload);
+        if (await isPayloadRecordingEnabled()) {
+            const payload = await readPayload(recordId);
+            payload.response = (data as any).response_data ?? null;
+            await writePayload(recordId, payload);
+        }
 
+        // response_data is never a record-table column (it lives in object storage),
+        // so it must always be stripped before updating the table.
         const { response_data: _omit, ...tableData } = data as any;
         return SgRecord.query().where("id", recordId).update(tableData);
     }

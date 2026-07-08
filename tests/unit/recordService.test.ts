@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import recordService from "../../src/service/recordService";
 import { SgRecord } from "../../src/model/sgRecord";
+import { ConfigKey } from "../../src/service/configService";
 
 
 const objectStorageMocks = vi.hoisted(() => ({
@@ -14,6 +15,25 @@ vi.mock("../../src/service/objectStorageService", () => ({
         getText: objectStorageMocks.getText,
     },
 }));
+
+let recordPayloadEnabled = true;
+
+const configMocks = vi.hoisted(() => ({
+    getConfig: vi.fn(),
+}));
+
+vi.mock("../../src/service/configService", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("../../src/service/configService")>();
+    return {
+        ...actual,
+        default: {
+            getConfig: configMocks.getConfig,
+            setValue: vi.fn(),
+            getAll: vi.fn(),
+            clearCache: vi.fn(),
+        },
+    };
+});
 
 
 describe("recordService", () => {
@@ -29,6 +49,14 @@ describe("recordService", () => {
         objectStorageMocks.getText.mockReset();
         objectStorageMocks.putText.mockResolvedValue(undefined);
         objectStorageMocks.getText.mockResolvedValue(null);
+
+        // Default: payload recording enabled (existing behaviour)
+        configMocks.getConfig.mockImplementation((key: string) => {
+            if (key === ConfigKey.RECORD_PAYLOAD_ENABLED) {
+                return Promise.resolve({ getBoolean: () => true });
+            }
+            return Promise.resolve({ getBoolean: () => false, getString: () => "" });
+        });
 
         vi.spyOn(SgRecord, "query").mockReturnValue({
             create: vi.fn((data) => Promise.resolve({ id: 1, ...data })),
@@ -124,5 +152,39 @@ describe("recordService", () => {
 
         expect(objectStorageMocks.putText).not.toHaveBeenCalled();
         expect(updateMock).toHaveBeenCalledWith({ status: "failed" });
+    });
+
+    it("skips storage write on create when payload recording is disabled", async () => {
+        configMocks.getConfig.mockImplementation((key: string) => {
+            if (key === ConfigKey.RECORD_PAYLOAD_ENABLED) {
+                return Promise.resolve({ getBoolean: () => false });
+            }
+            return Promise.resolve({ getBoolean: () => false, getString: () => "" });
+        });
+
+        await recordService.create(1, 1, "test request");
+
+        expect(objectStorageMocks.putText).not.toHaveBeenCalled();
+    });
+
+    it("skips storage write on update with response_data when payload recording is disabled", async () => {
+        configMocks.getConfig.mockImplementation((key: string) => {
+            if (key === ConfigKey.RECORD_PAYLOAD_ENABLED) {
+                return Promise.resolve({ getBoolean: () => false });
+            }
+            return Promise.resolve({ getBoolean: () => false, getString: () => "" });
+        });
+
+        await recordService.update(1, {
+            response_data: "resp body",
+            status: "success" as any,
+        });
+
+        // No storage write
+        expect(objectStorageMocks.putText).not.toHaveBeenCalled();
+        // response_data still stripped from record table update
+        expect(updateMock).toHaveBeenCalledWith(
+            expect.not.objectContaining({ response_data: expect.anything() }),
+        );
     });
 });
