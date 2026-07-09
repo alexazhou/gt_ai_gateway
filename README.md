@@ -103,6 +103,10 @@ docker run -d \
 
 👉 **[配置与使用指南：从零到一](doc/usage/ConfigurationGuide.md)**
 
+## 本地客户端接入
+
+部署完成后，您可以将本项目作为本地 AI 代理服务器，供各种客户端工具直接调用。支持接入 Claude Code、OpenAI SDK、Cursor、Cherry Studio 等主流 AI 客户端，只需将 API 地址指向网关即可，无需修改客户端代码。详见：[客户端接入配置指南](doc/usage/ClientConfiguration.md)。
+
 ## 文档索引
 
 如果您希望参与到项目中，或者深入了解系统的运作原理，请参考以下详细文档：
