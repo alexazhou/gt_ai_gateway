@@ -14,6 +14,7 @@
 
 import type { ProtocolStreamEvent } from "../protocolConverter/protocolTypes";
 import type { ResponsesStreamEvent } from "../protocolConverter/responsesTypes";
+import { AccumulatorBase } from "./accumulatorBase";
 
 interface ResponsesContentPart {
     type?: string;
@@ -52,7 +53,7 @@ interface ResponsesAccumulatedResponse {
     completed_at?: number;
 }
 
-class ResponsesAccumulator {
+export class ResponsesAccumulator extends AccumulatorBase {
     // 标记“模型已开始产出内容”的事件类型。
     // 这些事件出现即表示首个输出 token 已到达（区别于 response.created/in_progress 等前置控制事件）。
     private static OUTPUT_STARTED_EVENTS = new Set([
@@ -67,10 +68,6 @@ class ResponsesAccumulator {
     private response: ResponsesAccumulatedResponse = {
         output: [],
     };
-    private completed = false;
-    private errored = false;
-    private error: unknown | null = null;
-    private outputStarted = false;
 
 
     /**
@@ -88,12 +85,11 @@ class ResponsesAccumulator {
         const type: string = event.type ?? "";
 
         if (ResponsesAccumulator.OUTPUT_STARTED_EVENTS.has(type)) {
-            this.outputStarted = true;
+            this.markOutputStarted();
         }
 
         if (this.isErrorEvent(event, eventName)) {
-            this.errored = true;
-            this.error = event;
+            this.markError(event);
             return;
         }
 
@@ -128,7 +124,7 @@ class ResponsesAccumulator {
         }
 
         if (type === "response.completed") {
-            this.completed = true;
+            this.markCompleted();
             this.handleResponseCompleted(event.response);
             return;
         }
@@ -260,39 +256,6 @@ class ResponsesAccumulator {
 
 
     /**
-     * 是否收到 Responses 完成事件
-     */
-    isCompleted(): boolean {
-        return this.completed;
-    }
-
-
-    /**
-     * 是否收到 Responses 错误事件
-     */
-    isErrored(): boolean {
-        return this.errored;
-    }
-
-
-    /**
-     * 模型是否已开始产出内容（收到首个输出事件）
-     * 用于测量首 token 时间（TTFT）
-     */
-    isOutputStarted(): boolean {
-        return this.outputStarted;
-    }
-
-
-    /**
-     * 获取流式错误 payload
-     */
-    getError(): unknown | null {
-        return this.error;
-    }
-
-
-    /**
      * 获取最终 usage
      */
     getUsage(): ResponsesUsage | null {
@@ -318,10 +281,7 @@ class ResponsesAccumulator {
      */
     reset(): void {
         this.response = { output: [] };
-        this.completed = false;
-        this.errored = false;
-        this.error = null;
-        this.outputStarted = false;
+        this.resetState();
     }
 }
 

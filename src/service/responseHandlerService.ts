@@ -11,7 +11,8 @@ import recordService from "./recordService";
 import userService from "./userService";
 import streamLogService from "./streamLogService";
 import usageUtils, { type Dict } from "../util/usageUtils";
-import chatAccumulator from "../util/accumulator/chatAccumulator";
+import openaiChatAccumulator from "../util/accumulator/openaiChatAccumulator";
+import anthropicMessagesAccumulator from "../util/accumulator/anthropicMessagesAccumulator";
 import responsesAccumulator from "../util/accumulator/responsesAccumulator";
 import sseEvent from "../util/sseEvent";
 import { runInBackground } from "../util/runInBackground";
@@ -28,9 +29,9 @@ export async function handleChatStreamResponse(
     converter: BaseConverter | null = null,
 ): Promise<Response> {
     const needsConversion = format !== upstreamFormat;
-    const accumulator = new chatAccumulator.OpenAIChatAccumulator(
-        format === ApiFormat.ANTHROPIC ? "anthropic" : "openai",
-    );
+    const accumulator = format === ApiFormat.ANTHROPIC
+        ? new anthropicMessagesAccumulator.AnthropicMessagesAccumulator()
+        : new openaiChatAccumulator.OpenAIChatAccumulator();
 
     let firstTokenTime: number | null = null;
 
