@@ -499,7 +499,7 @@ defineExpose({ open });
 }
 
 .result-convert {
-    margin-top: 8px;
+    margin-top: 4px;
     font-size: 12px;
     background: #f0f2f5;
     padding: 4px 8px;
@@ -518,7 +518,7 @@ defineExpose({ open });
 }
 
 .result-url {
-    margin-top: 8px;
+    margin-top: 4px;
     font-size: 12px;
     word-break: break-all;
     background: #f0f2f5;
@@ -538,7 +538,7 @@ defineExpose({ open });
 }
 
 .result-proxy {
-    margin-top: 8px;
+    margin-top: 4px;
     font-size: 12px;
     word-break: break-all;
     background: #f0f2f5;

@@ -104,13 +104,13 @@
                     </div>
                     <div class="advanced-row">
                         <label class="advanced-label">代理配置</label>
-                        <a-select v-model:value="formState.proxy_type" style="flex: 1">
-                            <a-select-option value="none">不使用代理</a-select-option>
-                            <a-select-option value="http">HTTP 代理</a-select-option>
-                            <a-select-option value="socks5">SOCKS5 代理</a-select-option>
+                        <a-select v-model:value="formState.proxy_type" style="flex: 1" allow-clear>
+                            <a-select-option :value="null">不使用</a-select-option>
+                            <a-select-option value="http">HTTP</a-select-option>
+                            <a-select-option value="socks5">SOCKS5</a-select-option>
                         </a-select>
                     </div>
-                    <div class="advanced-row" v-if="formState.proxy_type !== 'none'">
+                    <div class="advanced-row" v-if="formState.proxy_type">
                         <label class="advanced-label">代理地址</label>
                         <a-input v-model:value="formState.proxy_url" placeholder="http://host:port 或 socks5://user:pass@host:port" />
                     </div>
@@ -154,7 +154,7 @@ const formState = reactive({
     token: '',
     auth_mode: 'bearer_token' as VendorAuthMode,
     skip_tls_verify: false,
-    proxy_type: 'none' as VendorProxyType,
+    proxy_type: null as VendorProxyType | null,
     proxy_url: '',
 });
 
@@ -200,7 +200,7 @@ async function open(vendor: Vendor) {
     formState.token = vendor.token;
     formState.auth_mode = vendor.config?.auth_mode || 'bearer_token';
     formState.skip_tls_verify = vendor.config?.skip_tls_verify ?? false;
-    formState.proxy_type = vendor.config?.proxy?.type ?? 'none';
+    formState.proxy_type = vendor.config?.proxy?.type ?? null;
     formState.proxy_url = vendor.config?.proxy?.url ?? '';
 
     // 加载已保存的自定义 URLs
@@ -244,9 +244,9 @@ async function handleOk() {
             config: {
                 auth_mode: formState.auth_mode,
                 skip_tls_verify: formState.skip_tls_verify,
-                proxy: formState.proxy_type !== 'none'
+                proxy: formState.proxy_type
                     ? { type: formState.proxy_type, url: formState.proxy_url }
-                    : undefined,
+                    : null,
             },
         };
 

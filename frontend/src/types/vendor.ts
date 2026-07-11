@@ -4,11 +4,11 @@ export type VendorType = 'openai' | 'anthropic' | 'google' | 'aliyun' | 'aliyun_
 
 export type VendorAuthMode = 'api_key' | 'bearer_token';
 
-export type VendorProxyType = 'none' | 'http' | 'socks5';
+export type VendorProxyType = 'http' | 'socks5';
 
 export interface VendorProxyConfig {
     type: VendorProxyType;
-    url?: string;
+    url: string;
 }
 
 export interface VendorUrls {

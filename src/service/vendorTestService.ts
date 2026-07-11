@@ -116,9 +116,9 @@ export async function testVendorConnectivity(
     const url = vendor.getUrlByFormat(requestFormat);
     const { headers, body } = buildRequest(vendor, requestFormat, model);
 
-    // 代理信息
+    // 代理信息：原样返回存储的配置
     const proxyConfig = vendor.config.proxy;
-    const proxyInfo = proxyConfig && proxyConfig.type !== "none" && proxyConfig.url
+    const proxyInfo = proxyConfig
         ? { type: proxyConfig.type, url: proxyConfig.url }
         : undefined;
 

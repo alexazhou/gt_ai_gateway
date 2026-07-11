@@ -5,6 +5,7 @@ import config from "./config";
 import dbHelper from "./helpers/dbHelper";
 import mockServer from "./helpers/mockServer";
 import mockProxy from "./helpers/mockProxyServer";
+import mockSocks from "./helpers/mockSocksServer";
 import requestHelper from "./helpers/requestHelper";
 
 // Worker mode configuration
@@ -13,6 +14,7 @@ const TEST_WRANGLER_CONFIG = "wrangler.test.toml";
 let testServerProcess: ChildProcess | null = null;
 let mockServerProcess: any | null = null;
 let mockProxyProcess: any | null = null;
+let mockSocksProcess: any | null = null;
 let appLogStream: ReturnType<typeof createWriteStream> | null = null;
 let mockLogStream: ReturnType<typeof createWriteStream> | null = null;
 
@@ -29,6 +31,9 @@ function globalCleanup(): void {
     }
     if (mockProxyProcess) {
         mockProxy.stopMockProxy(mockProxyProcess);
+    }
+    if (mockSocksProcess) {
+        mockSocks.stopMockSocks(mockSocksProcess);
     }
 }
 
@@ -106,6 +111,11 @@ export async function setup(): Promise<void> {
         const proxyPort = parseInt(process.env.TEST_PROXY_PORT || "9997", 10);
         mockProxyProcess = await mockProxy.startMockProxy(proxyPort);
         console.log("[GLOBAL_SETUP] Mock HTTP proxy started");
+
+        // 启动 mock SOCKS5 代理服务器（供 SOCKS5 代理相关测试使用）
+        const socksPort = parseInt(process.env.TEST_SOCKS_PORT || "9996", 10);
+        mockSocksProcess = await mockSocks.startMockSocks(socksPort);
+        console.log("[GLOBAL_SETUP] Mock SOCKS5 server started");
     }
 
     await startTestServer();
@@ -138,6 +148,12 @@ export async function teardown(): Promise<void> {
         await mockProxy.stopMockProxy(mockProxyProcess);
         mockProxyProcess = null;
         console.log("[GLOBAL_TEARDOWN] Mock HTTP proxy stopped");
+    }
+
+    if (mockSocksProcess) {
+        await mockSocks.stopMockSocks(mockSocksProcess);
+        mockSocksProcess = null;
+        console.log("[GLOBAL_TEARDOWN] Mock SOCKS5 server stopped");
     }
 
     // Close log streams

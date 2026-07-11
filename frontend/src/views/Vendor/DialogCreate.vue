@@ -99,13 +99,13 @@
                     </div>
                     <div class="advanced-row">
                         <label class="advanced-label">代理配置</label>
-                        <a-select v-model:value="formState.proxy_type" style="flex: 1">
-                            <a-select-option value="none">不使用代理</a-select-option>
-                            <a-select-option value="http">HTTP 代理</a-select-option>
-                            <a-select-option value="socks5">SOCKS5 代理</a-select-option>
+                        <a-select v-model:value="formState.proxy_type" style="flex: 1" allow-clear>
+                            <a-select-option :value="null">不使用</a-select-option>
+                            <a-select-option value="http">HTTP</a-select-option>
+                            <a-select-option value="socks5">SOCKS5</a-select-option>
                         </a-select>
                     </div>
-                    <div class="advanced-row" v-if="formState.proxy_type !== 'none'">
+                    <div class="advanced-row" v-if="formState.proxy_type">
                         <label class="advanced-label">代理地址</label>
                         <a-input v-model:value="formState.proxy_url" placeholder="http://host:port 或 socks5://user:pass@host:port" />
                     </div>
@@ -146,7 +146,7 @@ const formState = reactive({
     name: '',
     token: '',
     auth_mode: 'api_key' as VendorAuthMode,
-    proxy_type: 'none' as VendorProxyType,
+    proxy_type: null as VendorProxyType | null,
     proxy_url: '',
 });
 
@@ -191,7 +191,7 @@ function open() {
     formState.name = '';
     formState.token = '';
     formState.auth_mode = 'bearer_token';
-    formState.proxy_type = 'none';
+    formState.proxy_type = null;
     formState.proxy_url = '';
     advancedActiveKey.value = [];
     urlsForm.splice(0, urlsForm.length);
@@ -225,9 +225,9 @@ async function handleOk() {
             token: formState.token,
             config: {
                 auth_mode: formState.auth_mode,
-                proxy: formState.proxy_type !== 'none'
+                proxy: formState.proxy_type
                     ? { type: formState.proxy_type, url: formState.proxy_url }
-                    : undefined,
+                    : null,
             },
         };
 

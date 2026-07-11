@@ -3,6 +3,25 @@ import { ApiFormat } from "../constants";
 import customError from "../util/customError";
 
 
+/**
+ * 校验代理配置：代理类型与 URL scheme 必须匹配
+ */
+function validateProxyConfig(config?: Record<string, any>): void {
+    const proxy = config?.proxy;
+    if (!proxy || !proxy.url) return;
+
+    const url = proxy.url as string;
+    const isSocks = url.startsWith("socks");
+
+    if (proxy.type === "http" && isSocks) {
+        throw new customError.AppError("代理类型为 HTTP，但 URL 使用了 SOCKS 协议");
+    }
+    if (proxy.type === "socks5" && !isSocks) {
+        throw new customError.AppError("代理类型为 SOCKS5，但 URL 不是 SOCKS 协议");
+    }
+}
+
+
 async function getVendorByName(name: string): Promise<SgVendor | null> {
     if (name == null) {
         return null;
@@ -16,6 +35,8 @@ async function updateVendor(
     vendorId: number,
     data: { type?: string; name?: string; token?: string; urls?: Record<string, string>; config?: Record<string, any> },
 ): Promise<SgVendor | null> {
+    validateProxyConfig(data.config);
+
     const vendor = await SgVendor.query().find(vendorId);
 
     if (!vendor) {
@@ -144,4 +165,5 @@ export default {
     updateVendor,
     findVendorByUrl,
     fetchUpstreamModels,
+    validateProxyConfig,
 };

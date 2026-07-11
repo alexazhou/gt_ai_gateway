@@ -20,7 +20,7 @@ class SgVendorConfig extends CastsAttributes {
     skip_tls_verify: boolean = false;
 
     /** 代理配置 */
-    proxy?: { type: "none" | "http" | "socks5"; url?: string };
+    proxy?: { type: "http" | "socks5"; url: string } | null;
 
     constructor(data?: Partial<SgVendorConfig>) {
         super();
@@ -37,7 +37,7 @@ class SgVendorConfig extends CastsAttributes {
             auth_mode: this.auth_mode,
             skip_tls_verify: this.skip_tls_verify,
         };
-        if (this.proxy) result.proxy = this.proxy;
+        if (this.proxy != null) result.proxy = this.proxy;
         return result;
     }
 

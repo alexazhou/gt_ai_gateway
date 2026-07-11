@@ -16,9 +16,9 @@ import type { Dispatcher } from "undici";
 export interface DispatcherConfig {
     skip_tls_verify?: boolean;
     proxy?: {
-        type: "none" | "http" | "socks5";
-        url?: string;
-    };
+        type: "http" | "socks5";
+        url: string;
+    } | null;
 }
 
 
@@ -55,7 +55,7 @@ export async function getDispatcher(config?: DispatcherConfig): Promise<Dispatch
     const { Agent, ProxyAgent } = await import("undici");
 
     const skipTls = config?.skip_tls_verify ?? false;
-    const proxyType = config?.proxy?.type ?? "none";
+    const proxyType = config?.proxy?.type ?? "";
     const proxyUrl = config?.proxy?.url ?? "";
 
     // 有 HTTP 代理 → ProxyAgent（同时处理 TLS）
@@ -77,10 +77,12 @@ export async function getDispatcher(config?: DispatcherConfig): Promise<Dispatch
         cachedDispatcher = new Agent({
             connect: async (opts: any, callback: any) => {
                 try {
+                    const isHttps = opts.protocol === "https:";
+                    const defaultPort = isHttps ? 443 : 80;
                     const { socket } = await SocksClient.createConnection({
                         proxy: {
                             host: parsed.hostname,
-                            port: parseInt(parsed.port, 10),
+                            port: parseInt(parsed.port, 10) || 1080,
                             type: 5,
                             userId: decodedUsername(parsed),
                             password: decodedPassword(parsed),
@@ -88,21 +90,21 @@ export async function getDispatcher(config?: DispatcherConfig): Promise<Dispatch
                         command: "connect",
                         destination: {
                             host: opts.hostname ?? opts.host,
-                            port: Number(opts.port),
+                            port: Number(opts.port) || defaultPort,
                         },
                     });
 
-                    if (skipTls) {
-                        // SOCKS5 + 跳过 TLS：直接返回明文 socket
-                        callback(null, socket);
-                    } else {
-                        // SOCKS5 + TLS：在 socket 上做 TLS 握手
+                    if (isHttps) {
+                        // HTTPS 目标：在 SOCKS5 隧道上做 TLS 握手
                         const tlsSocket = nodeTls.connect({
                             socket,
                             servername: opts.hostname ?? opts.host,
-                            rejectUnauthorized: true,
+                            rejectUnauthorized: !skipTls,
                         });
                         callback(null, tlsSocket);
+                    } else {
+                        // HTTP 目标：直接返回明文 socket
+                        callback(null, socket);
                     }
                 } catch (err: any) {
                     callback(err);

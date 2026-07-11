@@ -110,6 +110,7 @@ async function createVendor(c: Context) {
     }
 
     const finalConfig = config || {};
+    vendorService.validateProxyConfig(finalConfig);
 
     const instance = await SgVendor.query().create({
         type,
