@@ -44,9 +44,14 @@ database_id = "这里填入你刚刚生成的 database_id"
 
 ---
 
-## 3. 配置 Cloudflare R2 对象存储桶
+## 3. 配置 Cloudflare R2 对象存储桶 (推荐)
 
-请求/响应的原始载荷（request body / response body）存放在 R2 中，与 D1 分离。`wrangler.toml` 默认已声明如下绑定：
+**关于对象存储**：
+- 在 Cloudflare 环境中，使用 R2 存储可以显著提升性能，推荐开启
+- 如果您的 Cloudflare 账户中没有开启 R2，系统会自动切换到使用数据库存储
+- 部署完成后，可在管理后台的"设置"页面中配置对象存储方式（`auto`/`r2`/`database`）
+
+`wrangler.toml` 默认已声明如下绑定：
 
 ```toml
 [[r2_buckets]]
