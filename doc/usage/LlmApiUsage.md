@@ -14,6 +14,13 @@
 Authorization: Bearer YOUR_USER_TOKEN
 ```
 
+模型列表端点同时支持 Bearer Token 和 `x-api-key`：
+
+```http
+GET /llm/v1/models
+Authorization: Bearer YOUR_USER_TOKEN
+```
+
 ### 2. Anthropic 兼容协议 (x-api-key 或 Bearer Token)
 支持两种方式：
 - 使用 `x-api-key` (推荐):

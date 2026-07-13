@@ -80,4 +80,31 @@ export const requireLlmAuth = (format: ApiFormat): MiddlewareHandler => {
     };
 };
 
-export default { requireLlmAuth };
+export const requireLlmModelsAuth: MiddlewareHandler = async (c: Context, next) => {
+    c.set("api_format", ApiFormat.OPENAI);
+
+    let token = c.req.header("x-api-key");
+    if (!token) {
+        const authHeader = c.req.header("Authorization");
+        if (!authHeader) {
+            throw new customError.AppError("x-api-key or Authorization header is missing", 401, "authentication_error");
+        }
+        if (!authHeader.startsWith("Bearer ")) {
+            throw new customError.AppError("Invalid token format", 401, "authentication_error");
+        }
+        token = authHeader.split(" ")[1];
+    }
+
+    const user = await userService.getUserByToken(token, c.env.ROOT_TOKEN);
+    if (user == null) {
+        throw new customError.AppError("Invalid token (user not found)", 401, "authentication_error");
+    }
+    if (user.status === UserStatus.DISABLED) {
+        throw new customError.AppError("User disabled", 403, "authentication_error");
+    }
+
+    c.set("user", user);
+    await next();
+};
+
+export default { requireLlmAuth, requireLlmModelsAuth };

@@ -18,6 +18,34 @@ async function getModel(modelName: string, enable?: boolean): Promise<SgModel | 
 }
 
 
+async function listEnabledModels() {
+    const models = await SgModel.query()
+        .where("enable", 1)
+        .orderBy("id", "asc")
+        .get();
+    const modelList = models.toArray();
+    const vendorIds = [...new Set(modelList.map(model => model.vendor_id as number))];
+    const vendorList = vendorIds.length > 0
+        ? (await SgVendor.query().whereIn("id", vendorIds).get()).toArray()
+        : [];
+    const vendorMap = new Map(vendorList.map(vendor => [vendor.id, vendor]));
+
+    return modelList.map(model => {
+        const vendor = vendorMap.get(model.vendor_id!);
+        if (!vendor) {
+            throw new customError.AppError(`Vendor not found for model ${model.name}`, 500);
+        }
+
+        return {
+            id: model.name,
+            object: "model",
+            created: Math.floor(new Date(model.created_at).getTime() / 1000),
+            owned_by: vendor.name,
+        };
+    });
+}
+
+
 async function checkDuplicateEnabledModel(
     name: string,
     excludeId?: number,
@@ -86,5 +114,6 @@ async function updateModel(
 
 export default {
     getModel,
+    listEnabledModels,
     updateModel,
 };

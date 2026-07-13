@@ -167,6 +167,7 @@ app.get("/stats/dashboard.json", authMiddleware.requireAdmin, statsController.da
 app.get("/stats/recent.json", authMiddleware.requireAdmin, statsController.recentRecords);
 
 // AI endpoints (no auth middleware, using custom llmApiAuth)
+app.get("/llm/v1/models", llmApiMiddleware.requireLlmModelsAuth, modelController.listLlmModels);
 app.post("/llm/v1/chat/completions", llmApiMiddleware.requireLlmAuth(ApiFormat.OPENAI), gatewayController.chatCompletions);
 app.post("/llm/v1/messages", llmApiMiddleware.requireLlmAuth(ApiFormat.ANTHROPIC), gatewayController.anthropicMessages);
 app.post("/llm/v1/responses", llmApiMiddleware.requireLlmAuth(ApiFormat.RESPONSES), gatewayController.responsesApi);

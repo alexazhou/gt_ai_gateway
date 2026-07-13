@@ -81,6 +81,15 @@ async function listModels(c: Context) {
 }
 
 
+async function listLlmModels(c: Context) {
+    const models = await modelService.listEnabledModels();
+    return c.json({
+        object: "list",
+        data: models,
+    });
+}
+
+
 async function getModel(c: Context) {
     const id = c.req.param("id");
     const modelId = parseInt(id, 10);
@@ -154,6 +163,7 @@ async function updateModel(c: Context) {
 export default {
     createModel,
     listModels,
+    listLlmModels,
     getModel,
     getModelsByIds,
     updateModel,
