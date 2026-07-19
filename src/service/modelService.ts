@@ -1,7 +1,6 @@
 import type { Builder } from "sutando";
 import { SgModel } from "../model/sgModel";
 
-import { SgVendor } from "../model/sgVendor";
 import customError from "../util/customError";
 import modelRoutingService from "./modelRoutingService";
 
@@ -65,33 +64,13 @@ async function listEnabledModels() {
         .where("enable", 1)
         .orderBy("id", "asc")
         .get();
-    const modelList = models.toArray<SgModel>();
-    const vendorIds = [...new Set(modelList.flatMap(model => (
-        model.getRoutingConfig().upstreams
-            .filter(upstream => upstream.enabled)
-            .map(upstream => upstream.vendor_id)
-    )))];
-    const vendorList = vendorIds.length > 0
-        ? (await SgVendor.query().whereIn("id", vendorIds).get()).toArray<SgVendor>()
-        : [];
-    const vendorMap = new Map(vendorList.map(vendor => [vendor.id, vendor]));
 
-    return modelList.map(model => {
-        const vendorNames = [...new Set(model.getRoutingConfig().upstreams
-            .filter(upstream => upstream.enabled)
-            .map(upstream => vendorMap.get(upstream.vendor_id)?.name)
-            .filter((name): name is string => Boolean(name)))];
-        if (vendorNames.length === 0) {
-            throw new customError.AppError(`Vendor not found for model ${model.name}`, 500);
-        }
-
-        return {
-            id: model.name,
-            object: "model",
-            created: Math.floor(new Date(model.created_at).getTime() / 1000),
-            owned_by: vendorNames.join(", "),
-        };
-    });
+    return models.toArray<SgModel>().map(model => ({
+        id: model.name,
+        object: "model",
+        created: Math.floor(new Date(model.created_at).getTime() / 1000),
+        owned_by: "gateway",
+    }));
 }
 
 

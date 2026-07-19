@@ -70,13 +70,13 @@ describe("GET /llm/v1/models", () => {
                 id: "gpt-4o",
                 object: "model",
                 created: expect.any(Number),
-                owned_by: "openai",
+                owned_by: "gateway",
             },
             {
                 id: "claude-sonnet-4-5",
                 object: "model",
                 created: expect.any(Number),
-                owned_by: "anthropic",
+                owned_by: "gateway",
             },
         ]);
         expect(response.body.data.every((model: { created: number }) => (
