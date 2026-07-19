@@ -9,6 +9,8 @@ import { setupAdminUser } from "../../globalSetup";
  * Model Endpoint Negative Tests
  */
 
+let existingModelId: number;
+let existingModelName: string;
 let existingVendorId: number;
 let updateModelId: number;
 let adminToken: string;
@@ -27,11 +29,13 @@ describe("Model API (Negative)", () => {
         existingVendorId = vendor.body.id;
 
         // Create an existing model
-        await requestHelper.post(
+        const model = await requestHelper.post(
             "/model/create.json",
             modelFixtures.createRandomModel(existingVendorId, "duplicate-model"),
             adminToken,
         );
+        existingModelId = model.body.id;
+        existingModelName = "duplicate-model";
 
         // Create a model for update tests
         const updateModel = await requestHelper.post(

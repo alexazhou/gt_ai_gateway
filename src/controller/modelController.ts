@@ -5,8 +5,22 @@ import customError from "../util/customError";
 import { createListResponse, parsePaginationQuery } from "../util/pagination";
 
 
+function createModelFromRequest(body: unknown): SgModel {
+    if (
+        !body
+        || typeof body !== "object"
+        || !("routing_mode" in body)
+        || !("routing_config" in body)
+    ) {
+        throw new customError.AppError("routing_mode and routing_config are required");
+    }
+
+    return new SgModel(body as Record<string, unknown>);
+}
+
+
 async function createModel(c: Context) {
-    const model = new SgModel(await c.req.json());
+    const model = createModelFromRequest(await c.req.json());
     console.log("[modelController] Creating model:", model);
 
     const instance = await modelService.createModel(model);
@@ -82,7 +96,7 @@ async function updateModel(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const model = new SgModel(await c.req.json());
+    const model = createModelFromRequest(await c.req.json());
     model.id = modelId;
     console.log("[modelController] Updating model:", model);
 
