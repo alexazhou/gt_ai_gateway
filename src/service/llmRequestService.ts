@@ -1,4 +1,4 @@
-import { ApiFormat } from "../constants";
+import { ApiFormat, ModelRoutingMode } from "../constants";
 import { SgModel } from "../model/sgModel";
 import { SgVendor } from "../model/sgVendor";
 import customError from "../util/customError";
@@ -8,7 +8,6 @@ import recordService from "./recordService";
 
 interface LlmRequestContext {
     modelConfig: SgModel;
-    vendor: SgVendor;
 }
 
 
@@ -22,6 +21,10 @@ async function resolveContext(
     if (modelConfig == null) {
         await recordService.recordFailedRequest(userId, modelName, body, format, "model_not_found");
         throw new customError.NotFoundError("model not found");
+    }
+
+    if (modelConfig.routing_mode !== ModelRoutingMode.SINGLE) {
+        return { modelConfig };
     }
 
     const vendor = await SgVendor.query().find(modelConfig.vendor_id!);
@@ -38,7 +41,7 @@ async function resolveContext(
         throw new customError.NotFoundError("vendor not found");
     }
 
-    return { modelConfig, vendor };
+    return { modelConfig };
 }
 
 export default { resolveContext };

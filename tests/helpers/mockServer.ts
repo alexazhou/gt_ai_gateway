@@ -233,6 +233,8 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleOpenAIStreamSlow(req, res);
     } else if (url.includes("/chat/completions/error")) {
         handleOpenAIChatError(req, res);
+    } else if (url.includes("/chat/completions/unavailable")) {
+        handleOpenAIChatUnavailable(req, res);
     } else if (url.includes("/chat/completions")) {
         handleOpenAIChat(req, res);
     } else if (url.includes("/responses/incomplete")) {
@@ -294,6 +296,13 @@ function handleOpenAIChat(req: IncomingMessage, res: ServerResponse): void {
             handleBadRequest(res, "Invalid request body");
         }
     });
+}
+
+
+function handleOpenAIChatUnavailable(req: IncomingMessage, res: ServerResponse): void {
+    req.resume();
+    res.writeHead(503, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: { message: "Mock upstream unavailable" } }));
 }
 
 

@@ -3,7 +3,6 @@ import { HTTPException } from "hono/http-exception";
 import { ApiFormat, UserType } from "./constants";
 import { SgUser } from "./model/sgUser";
 import { SgModel } from "./model/sgModel";
-import { SgVendor } from "./model/sgVendor";
 
 import gatewayController from "./controller/gatewayController";
 import modelController from "./controller/modelController";
@@ -36,7 +35,6 @@ type Variables = {
     api_format?: ApiFormat;
     user?: SgUser;
     modelConfig?: SgModel;
-    vendor?: SgVendor;
     requestBody?: string;
 };
 
