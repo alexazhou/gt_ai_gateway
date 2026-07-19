@@ -16,19 +16,13 @@
                         {{ Boolean(model.enable) ? '启用' : '禁用' }}
                     </a-tag>
                 </a-descriptions-item>
-                <a-descriptions-item label="上游模型">
-                    <a-space direction="vertical">
-                        <span
-                            v-for="(upstream, index) in model.routing_config.upstreams"
-                            :key="`${upstream.vendor_id}-${upstream.vendor_model_id ?? 'auto'}-${index}`"
-                        >
-                            <a-tag :color="upstream.enabled ? 'blue' : 'default'">
-                                {{ getVendorName(upstream.vendor_id) }}
-                            </a-tag>
-                            {{ getUpstreamModelName(upstream.vendor_model_id) }}
-                            <a-tag v-if="!upstream.enabled">禁用</a-tag>
-                        </span>
-                    </a-space>
+                <a-descriptions-item label="上游配置">
+                    <UpstreamConfig
+                        mode="view"
+                        :routing-mode="model.routing_mode"
+                        :model-name="model.name"
+                        :upstreams="model.routing_config.upstreams"
+                    />
                 </a-descriptions-item>
                 <a-descriptions-item label="价格">
                     输入: ¥{{ (model.prices?.input || 0).toFixed(6) }} / 千tokens<br/>
@@ -50,18 +44,15 @@
 import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { getModel } from '@/api/model';
-import { fetchVendorModelsByIds, fetchVendorsByIds } from '@/api/vendor';
 import { formatDate } from '@/utils/format';
 import type { Model, ModelRoutingMode } from '@/types/model';
-import type { Vendor, VendorModel } from '@/types/vendor';
+import UpstreamConfig from './UpstreamConfig.vue';
 
 const route = useRoute();
 const router = useRouter();
 
 const loading = ref(false);
 const model = ref<Model | null>(null);
-const vendorMap = ref<Map<number, Vendor>>(new Map());
-const vendorModelMap = ref<Map<number, VendorModel>>(new Map());
 
 onMounted(async () => {
     const id = Number(route.params.id);
@@ -73,18 +64,7 @@ onMounted(async () => {
 async function loadModel(id: number) {
     loading.value = true;
     try {
-        const m = await getModel(id);
-        model.value = m;
-        const vendorIds = [...new Set(m.routing_config.upstreams.map(upstream => upstream.vendor_id))];
-        const vendorModelIds = [...new Set(m.routing_config.upstreams
-            .map(upstream => upstream.vendor_model_id)
-            .filter((vendorModelId): vendorModelId is number => vendorModelId != null))];
-        const [vendors, vendorModels] = await Promise.all([
-            fetchVendorsByIds(vendorIds),
-            vendorModelIds.length > 0 ? fetchVendorModelsByIds(vendorModelIds) : [],
-        ]);
-        vendorMap.value = new Map(vendors.map(vendor => [vendor.id, vendor]));
-        vendorModelMap.value = new Map(vendorModels.map(vendorModel => [vendorModel.id, vendorModel]));
+        model.value = await getModel(id);
     } catch (error) {
         console.error('加载模型失败:', error);
     } finally {
@@ -98,17 +78,6 @@ function getRoutingModeName(mode: ModelRoutingMode): string {
         load_balance: '负载均衡',
         failover: '故障转移',
     }[mode];
-}
-
-function getVendorName(vendorId: number): string {
-    return vendorMap.value.get(vendorId)?.name ?? `ID: ${vendorId}`;
-}
-
-function getUpstreamModelName(vendorModelId?: number): string {
-    if (!vendorModelId) {
-        return `自动（${model.value?.name ?? ''}）`;
-    }
-    return vendorModelMap.value.get(vendorModelId)?.model_id ?? `#${vendorModelId}`;
 }
 
 function handleBack() {
