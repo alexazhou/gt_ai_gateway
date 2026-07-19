@@ -25,9 +25,7 @@
                     />
                 </a-descriptions-item>
                 <a-descriptions-item label="价格">
-                    输入: ¥{{ (model.prices?.input || 0).toFixed(6) }} / 千tokens<br/>
-                    输出: ¥{{ (model.prices?.output || 0).toFixed(6) }} / 千tokens<br/>
-                    缓存读取: ¥{{ (model.prices?.cache_read || 0).toFixed(6) }} / 千tokens
+                    <PriceConfig mode="view" :prices="model.prices ?? {}" />
                 </a-descriptions-item>
                 <a-descriptions-item label="创建时间">
                     {{ formatDate(model.created_at) }}
@@ -46,6 +44,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { getModel } from '@/api/model';
 import { formatDate } from '@/utils/format';
 import type { Model, ModelRoutingMode } from '@/types/model';
+import PriceConfig from './PriceConfig.vue';
 import UpstreamConfig from './UpstreamConfig.vue';
 
 const route = useRoute();
@@ -74,7 +73,7 @@ async function loadModel(id: number) {
 
 function getRoutingModeName(mode: ModelRoutingMode): string {
     return {
-        single: '单上游',
+        single: '固定上游',
         load_balance: '负载均衡',
         failover: '故障转移',
     }[mode];
