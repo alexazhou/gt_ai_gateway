@@ -19,22 +19,14 @@ async function createModel(c: Context) {
 async function listModels(c: Context) {
     const query = c.req.query();
     const { pageSize, offset } = parsePaginationQuery(query);
-    const dbQuery = SgModel.query().orderBy("id", "desc");
-
-    if (query.vendor_id) {
-        const vendorId = parseInt(query.vendor_id, 10);
-        if (!isNaN(vendorId)) {
-            dbQuery.where("vendor_id", vendorId);
-        }
-    }
-
-    if (query.keyword) {
-        dbQuery.where("name", "like", `%${query.keyword}%`);
-    }
-
-    const total = Number(await dbQuery.clone().count() || 0);
-    const modelConfigs = await dbQuery.limit(pageSize).offset(offset).get();
-    return c.json(createListResponse(modelConfigs.toArray(), total));
+    const vendorId = query.vendor_id ? parseInt(query.vendor_id, 10) : undefined;
+    const result = await modelService.listModels({
+        vendorId: vendorId && !isNaN(vendorId) ? vendorId : undefined,
+        keyword: query.keyword,
+        pageSize,
+        offset,
+    });
+    return c.json(createListResponse(result.list, result.total));
 }
 
 

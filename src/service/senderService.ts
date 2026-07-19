@@ -35,16 +35,6 @@ async function sendRequestToUpstream(
             vendorModelName = vendorModel.model_id;
             supportedFormats = vendorModel.getSupportedFormats();
         }
-    } else {
-        // 自动模式：根据模型名称自动匹配 vendor_model
-        vendorModelName = modelConfig.name;
-        const matchedVendorModel = await SgVendorModel.query()
-            .where("vendor_id", modelConfig.vendor_id)
-            .where("model_id", modelConfig.name)
-            .first();
-        if (matchedVendorModel) {
-            supportedFormats = matchedVendorModel.getSupportedFormats();
-        }
     }
 
     // 如果 vendorModel 未配置限制格式，使用 vendor 支持的格式

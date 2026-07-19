@@ -305,6 +305,33 @@ describe("Vendor API (Positive)", () => {
     });
 
     describe("DELETE /vendor/:id", () => {
+        it("should reject deleting a vendor used by a model upstream", async () => {
+            const vendorResponse = await requestHelper.post(
+                "/vendor/create.json",
+                vendorFixtures.createRandomVendor({ name: "Referenced Vendor" }),
+                adminToken,
+            );
+            const vendorId = vendorResponse.body.id;
+            await requestHelper.post(
+                "/model/create.json",
+                {
+                    name: `referenced-vendor-model-${Date.now()}`,
+                    enable: true,
+                    prices: {},
+                    routing_mode: "single",
+                    routing_config: {
+                        upstreams: [{ vendor_id: vendorId, enabled: true }],
+                    },
+                },
+                adminToken,
+            );
+
+            const response = await requestHelper.del(`/vendor/${vendorId}`, adminToken);
+
+            expect(response.status).toBe(400);
+            expect(response.body.error).toContain("associated models");
+        });
+
         it("should only delete the specified vendor, not others", async () => {
             // 创建两个供应商
             const vendorAData = vendorFixtures.createRandomVendor({ name: "Vendor A" });

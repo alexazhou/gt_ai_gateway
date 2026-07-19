@@ -67,8 +67,6 @@ class SgModel extends Model {
     id!: number;
 
     name!: string | null;
-    vendor_id!: number | null;
-    vendor_model_id!: number | null;
     enable!: boolean;
     prices!: { input?: number, output?: number, cache_read?: number } | null;
     routing_mode!: ModelRoutingMode;

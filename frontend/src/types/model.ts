@@ -14,8 +14,6 @@ export interface ModelRoutingConfig {
 
 export interface Model extends BaseEntity {
     name: string;
-    vendor_id: number;
-    vendor_model_id: number | null;
     routing_mode: ModelRoutingMode;
     routing_config: ModelRoutingConfig;
     enable: boolean;
