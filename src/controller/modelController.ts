@@ -23,19 +23,21 @@ async function checkDuplicateEnabledModel(
 
 async function createModel(c: Context) {
     const body = await c.req.json();
-    const { name, vendor_id, enable = true, prices = {}, vendor_model_id = null } = body;
+    const { name, vendor_id, enable = true, prices = {}, vendor_model_id = null, routing_mode, routing_config } = body;
 
     console.log("[modelController] Creating model:", { name, vendor_id, enable, prices, vendor_model_id });
 
     // Validate required fields
-    if (!name || !vendor_id) {
+    if (!name || (!vendor_id && !routing_config)) {
         throw new customError.AppError("Missing required fields");
     }
 
     // Validate vendor_id exists
-    const vendor = await SgVendor.query().find(vendor_id);
-    if (!vendor) {
-        throw new customError.NotFoundError("Vendor not found");
+    if (vendor_id) {
+        const vendor = await SgVendor.query().find(vendor_id);
+        if (!vendor) {
+            throw new customError.NotFoundError("Vendor not found");
+        }
     }
 
     // Check for duplicate enabled model
@@ -46,12 +48,20 @@ async function createModel(c: Context) {
         }
     }
 
+    const routing = await modelService.resolveRoutingWriteData(name, {
+        vendor_id,
+        vendor_model_id,
+        routing_mode,
+        routing_config,
+    });
     const instance = await SgModel.query().create({
         name,
-        vendor_id,
+        vendor_id: routing.vendor_id,
         enable,
         prices,
-        vendor_model_id,
+        vendor_model_id: routing.vendor_model_id,
+        routing_mode: routing.routing_mode,
+        routing_config: routing.routing_config,
     });
 
     console.log("[modelController] Model created successfully:", instance);
@@ -133,7 +143,7 @@ async function updateModel(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const { name, vendor_id, enable, prices, vendor_model_id } = await c.req.json();
+    const { name, vendor_id, enable, prices, vendor_model_id, routing_mode, routing_config } = await c.req.json();
 
     console.log("[modelController] Updating model:", {
         modelId,
@@ -142,6 +152,8 @@ async function updateModel(c: Context) {
         enable,
         prices,
         vendor_model_id,
+        routing_mode,
+        routing_config,
     });
 
     const updatedModel = await modelService.updateModel(modelId, {
@@ -150,6 +162,8 @@ async function updateModel(c: Context) {
         enable,
         prices,
         vendor_model_id,
+        routing_mode,
+        routing_config,
     });
 
     if (!updatedModel) {

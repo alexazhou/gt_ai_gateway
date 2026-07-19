@@ -1,7 +1,26 @@
-import { SgModel } from "../model/sgModel";
+import { ModelRoutingConfig, SgModel } from "../model/sgModel";
 
 import { SgVendor } from "../model/sgVendor";
+import { ModelRoutingMode } from "../constants";
 import customError from "../util/customError";
+import modelRoutingService from "./modelRoutingService";
+
+interface ModelRoutingInput {
+    vendor_id?: number;
+    vendor_model_id?: number | null;
+    routing_mode?: ModelRoutingMode;
+    routing_config?: unknown;
+}
+
+interface ModelUpdateInput {
+    name?: string;
+    vendor_id?: number;
+    vendor_model_id?: number | null;
+    enable?: boolean;
+    prices?: unknown;
+    routing_mode?: ModelRoutingMode;
+    routing_config?: unknown;
+}
 
 
 async function getModel(modelName: string, enable?: boolean): Promise<SgModel | null> {
@@ -61,9 +80,56 @@ async function checkDuplicateEnabledModel(
 }
 
 
+async function resolveRoutingWriteData(
+    modelName: string,
+    data: ModelRoutingInput,
+    currentModel?: SgModel,
+): Promise<{
+    routing_mode: ModelRoutingMode;
+    routing_config: ModelRoutingConfig;
+    vendor_id: number;
+    vendor_model_id: number | null;
+}> {
+    const hasRoutingInput = data.routing_mode !== undefined || data.routing_config !== undefined;
+    const hasLegacyRoutingInput = data.vendor_id !== undefined || data.vendor_model_id !== undefined;
+
+    let mode = data.routing_mode ?? currentModel?.routing_mode ?? ModelRoutingMode.SINGLE;
+    let config = data.routing_config ?? currentModel?.getRoutingConfig();
+    if (!hasRoutingInput && (hasLegacyRoutingInput || !currentModel)) {
+        const vendorId = data.vendor_id ?? currentModel?.vendor_id;
+        if (!vendorId) {
+            throw new customError.AppError("Missing required fields");
+        }
+        mode = ModelRoutingMode.SINGLE;
+        const vendorModelId = data.vendor_model_id !== undefined
+            ? data.vendor_model_id
+            : currentModel?.vendor_model_id;
+        config = new ModelRoutingConfig({
+            upstreams: [{
+                vendor_id: vendorId,
+                ...(vendorModelId ? { vendor_model_id: vendorModelId } : {}),
+                enabled: true,
+            }],
+        });
+    }
+    if (!config) {
+        throw new customError.AppError("Missing required fields");
+    }
+
+    const validated = await modelRoutingService.validateConfig(modelName, mode, config);
+    const firstEnabled = validated.config.upstreams.find(upstream => upstream.enabled)!;
+    return {
+        routing_mode: validated.mode,
+        routing_config: validated.config,
+        vendor_id: firstEnabled.vendor_id,
+        vendor_model_id: firstEnabled.vendor_model_id ?? null,
+    };
+}
+
+
 async function updateModel(
     modelId: number,
-    data: { name?: string; vendor_id?: number; enable?: boolean; prices?: any; vendor_model_id?: number | null },
+    data: ModelUpdateInput,
 ): Promise<SgModel | null> {
     const model = await SgModel.query().find(modelId);
 
@@ -105,6 +171,18 @@ async function updateModel(
         updateData.vendor_model_id = data.vendor_model_id ?? null;
     }
 
+    const hasRoutingUpdate = data.vendor_id !== undefined
+        || data.vendor_model_id !== undefined
+        || data.routing_mode !== undefined
+        || data.routing_config !== undefined;
+    if (hasRoutingUpdate) {
+        const routing = await resolveRoutingWriteData(newName, data, model);
+        updateData.vendor_id = routing.vendor_id;
+        updateData.vendor_model_id = routing.vendor_model_id;
+        updateData.routing_mode = routing.routing_mode;
+        updateData.routing_config = JSON.stringify(routing.routing_config);
+    }
+
     await SgModel.query()
         .where("id", modelId)
         .update(updateData);
@@ -127,6 +205,7 @@ async function deleteModel(modelId: number): Promise<boolean> {
 export default {
     getModel,
     listEnabledModels,
+    resolveRoutingWriteData,
     updateModel,
     deleteModel,
 };

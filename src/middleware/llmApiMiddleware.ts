@@ -71,7 +71,7 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
 
         const body = await c.req.text();
         const modelName = parseLlmRequestBody(body);
-        const { modelConfig, vendor } = await llmRequestService.resolveContext(
+        const { modelConfig } = await llmRequestService.resolveContext(
             user.id,
             modelName,
             body,
@@ -81,7 +81,6 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
         c.set("user", user);
         c.set("requestBody", body);
         c.set("modelConfig", modelConfig);
-        c.set("vendor", vendor);
 
         await next();
     };

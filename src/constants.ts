@@ -23,6 +23,25 @@ export enum ApiFormat {
     RESPONSES = "responses",
 }
 
+export enum ModelRoutingMode {
+    SINGLE = "single",
+    LOAD_BALANCE = "load_balance",
+    FAILOVER = "failover",
+}
+
+export const UPSTREAM_FAILURE_COOLDOWN_MS = 30_000;
+
+export const RETRYABLE_UPSTREAM_STATUS_CODES = [
+    401,
+    403,
+    408,
+    429,
+    500,
+    502,
+    503,
+    504,
+];
+
 export enum ClientName {
     CLAUDE_CODE = "claude-code",
     CODEX = "codex",

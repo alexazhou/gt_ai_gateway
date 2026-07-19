@@ -14,20 +14,23 @@ import protocolUtils from "../util/protocolUtils";
 import streamLogService from "./streamLogService";
 import responseHandlerService from "./responseHandlerService";
 import fetchUtil from "../util/fetchUtil";
+import modelRoutingService, { type ModelRoutingResult } from "./modelRoutingService";
 
-async function sendRequest(
+
+async function sendRequestToUpstream(
     c: Context,
     user: SgUser,
     modelConfig: SgModel,
     vendor: SgVendor,
     format: ApiFormat,
     body: string,
+    vendorModelId: number,
 ): Promise<Response> {
     let vendorModelName: string | null = null;
     let supportedFormats: ApiFormat[] | null = null;
 
-    if (modelConfig.vendor_model_id) {
-        const vendorModel = await SgVendorModel.query().find(modelConfig.vendor_model_id);
+    if (vendorModelId) {
+        const vendorModel = await SgVendorModel.query().find(vendorModelId);
         if (vendorModel) {
             vendorModelName = vendorModel.model_id;
             supportedFormats = vendorModel.getSupportedFormats();
@@ -72,7 +75,7 @@ async function sendRequest(
         body,
         format,
         upstreamFormat,
-        modelConfig.vendor_id,
+        vendor.id,
         vendorModelName
     );
     await recordService.update(record.id, {
@@ -127,10 +130,10 @@ async function sendRequest(
     // 强制设置 content-type
     finalHeaders.set("Content-Type", "application/json");
 
-    // 3. 替换上游模型名：若 model 配置了 vendor_model_id，用对应的 vendor_model.model_id 替换请求体中的 model 字段
+    // 3. 替换上游模型名
     let upstreamBody = body;
-    if (modelConfig.vendor_model_id) {
-        const vendorModel = await SgVendorModel.query().find(modelConfig.vendor_model_id);
+    if (vendorModelId) {
+        const vendorModel = await SgVendorModel.query().find(vendorModelId);
         if (vendorModel) {
             try {
                 const bodyJson = JSON.parse(upstreamBody);
@@ -227,6 +230,71 @@ async function sendRequest(
         return responseHandlerService.handleChatStreamResponse(c, upstreamRes, record, modelConfig, user, format, upstreamFormat, converter);
     } else {
         return responseHandlerService.handleChatNonStreamResponse(c, upstreamRes, record, modelConfig, user, format, upstreamFormat, converter);
+    }
+}
+
+
+async function sendRequest(
+    c: Context,
+    user: SgUser,
+    modelConfig: SgModel,
+    format: ApiFormat,
+    body: string,
+): Promise<Response> {
+    while (true) {
+        const routingResult: ModelRoutingResult | null = await modelRoutingService.selectUpstream(
+            modelConfig,
+            format,
+        );
+        if (!routingResult) {
+            throw new customError.AppError("No available upstream", 503);
+        }
+
+        const vendorModel = await SgVendorModel.query().find(routingResult.vendorModelId);
+        if (!vendorModel) {
+            throw new customError.AppError("Vendor model not found", 503);
+        }
+
+        const vendor = await SgVendor.query().find(vendorModel.vendor_id);
+        if (!vendor) {
+            throw new customError.AppError("Vendor not found", 503);
+        }
+
+        const supportedFormats = vendorModel.getSupportedFormats() ?? vendor.getSupportedFormats();
+        const upstreamFormat = protocolUtils.resolveUpstreamFormat(format, supportedFormats);
+
+        try {
+            const response = await sendRequestToUpstream(
+                c,
+                user,
+                modelConfig,
+                vendor,
+                format,
+                body,
+                routingResult.vendorModelId,
+            );
+
+            if (!response.ok && modelRoutingService.isRetryableStatus(response.status)) {
+                const failureRecorded = await modelRoutingService.markFailure(routingResult, upstreamFormat);
+                if (failureRecorded) {
+                    c.status(200);
+                    continue;
+                }
+            }
+
+            return response;
+        } catch (e: any) {
+            if (c.req.raw.signal.aborted || e instanceof customError.AppError) {
+                throw e;
+            }
+
+            const failureRecorded = await modelRoutingService.markFailure(routingResult, upstreamFormat);
+            if (failureRecorded) {
+                continue;
+            }
+
+            throw e;
+        }
     }
 }
 
