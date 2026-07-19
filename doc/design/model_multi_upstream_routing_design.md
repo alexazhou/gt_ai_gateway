@@ -100,20 +100,15 @@ health 保留协议对象层级，便于以后增加其他状态字段。
 策略接口：
 
 ```typescript
-interface RoutingCandidate {
-    vendorModel: SgVendorModel;
-    upstreamFormat: ApiFormat;
-}
-
 abstract class BaseRoutingStrategy {
     abstract selectUpstream(
         model: SgModel,
-        candidates: RoutingCandidate[],
-    ): RoutingCandidate | null;
+        vendorModels: SgVendorModel[],
+    ): SgVendorModel | null;
 }
 ```
 
-策略只选择候选，不读取数据库、不发送请求、不写健康状态。
+路由服务先按每个上游的协议健康状态过滤模型。策略只选择模型，不读取数据库、不发送请求、不写健康状态。
 
 ## 5. 请求与失败切换
 

@@ -9,7 +9,7 @@ import { SgVendor } from "../model/sgVendor";
 import { SgVendorModel } from "../model/sgVendorModel";
 import customError from "../util/customError";
 import protocolUtils from "../util/protocolUtils";
-import BaseRoutingStrategy, { type RoutingCandidate } from "./routingStrategy/baseRoutingStrategy";
+import BaseRoutingStrategy from "./routingStrategy/baseRoutingStrategy";
 import FailoverRoutingStrategy from "./routingStrategy/failoverRoutingStrategy";
 import LoadBalanceRoutingStrategy from "./routingStrategy/loadBalanceRoutingStrategy";
 import SingleRoutingStrategy from "./routingStrategy/singleRoutingStrategy";
@@ -126,16 +126,17 @@ async function validateConfig(
 }
 
 
-async function resolveCandidates(
+async function resolveAvailableVendorModels(
     model: SgModel,
     clientFormat: ApiFormat,
-): Promise<RoutingCandidate[]> {
+    now: number,
+): Promise<SgVendorModel[]> {
     const upstreams = model.getRoutingConfig().upstreams.filter(upstream => upstream.enabled);
     if (upstreams.length === 0) {
         throw new customError.AppError(`No enabled upstream for model ${model.name}`, 503);
     }
 
-    const candidates: RoutingCandidate[] = [];
+    const vendorModels: SgVendorModel[] = [];
     for (const upstream of upstreams) {
         const vendor = await SgVendor.query().find(upstream.vendor_id);
         if (!vendor) {
@@ -174,20 +175,21 @@ async function resolveCandidates(
             continue;
         }
 
-        candidates.push({
-            vendorModel,
-            upstreamFormat,
-        });
+        if (!isCoolingDown(vendorModel, upstreamFormat, now)) {
+            vendorModels.push(vendorModel);
+        }
     }
 
-    return candidates;
+    return vendorModels;
 }
 
 
-function isCoolingDown(candidate: RoutingCandidate, now: number): boolean {
-    const lastFailureAt = candidate.vendorModel
-        ?.getHealth()
-        .getLastFailureAt(candidate.upstreamFormat);
+function isCoolingDown(
+    vendorModel: SgVendorModel,
+    upstreamFormat: ApiFormat,
+    now: number,
+): boolean {
+    const lastFailureAt = vendorModel.getHealth().getLastFailureAt(upstreamFormat);
     if (!lastFailureAt) {
         return false;
     }
@@ -205,10 +207,9 @@ async function selectUpstream(
     const mode = Object.values(ModelRoutingMode).includes(model.routing_mode)
         ? model.routing_mode
         : ModelRoutingMode.SINGLE;
-    const candidates = await resolveCandidates(model, clientFormat);
-    const availableCandidates = candidates.filter(candidate => !isCoolingDown(candidate, now));
-    const selected = strategies[mode].selectUpstream(model, availableCandidates);
-    return selected ? new ModelRoutingResult(selected.vendorModel.id) : null;
+    const vendorModels = await resolveAvailableVendorModels(model, clientFormat, now);
+    const selected = strategies[mode].selectUpstream(model, vendorModels);
+    return selected ? new ModelRoutingResult(selected.id) : null;
 }
 
 
