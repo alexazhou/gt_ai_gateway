@@ -32,7 +32,15 @@
             :wrapper-col="{ style: { flex: 1 } }"
             ref="formRef"
         >
-            <a-form-item label="模型名称" name="name">
+            <a-form-item name="name">
+                <template #label>
+                    <span class="upstream-label">
+                        模型名称
+                        <a-tooltip title="客户端请求时使用的模型名称">
+                            <InfoCircleOutlined class="field-help-icon" />
+                        </a-tooltip>
+                    </span>
+                </template>
                 <a-input v-model:value="formState.name" placeholder="请输入模型名称" :disabled="isView" />
             </a-form-item>
             <a-form-item name="routing_mode">
