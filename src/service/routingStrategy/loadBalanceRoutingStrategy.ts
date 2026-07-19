@@ -1,16 +1,17 @@
 import type { SgModel } from "../../model/sgModel";
-import BaseRoutingStrategy, { type RoutingCandidate } from "./baseRoutingStrategy";
+import type { SgVendorModel } from "../../model/sgVendorModel";
+import BaseRoutingStrategy from "./baseRoutingStrategy";
 
 class LoadBalanceRoutingStrategy extends BaseRoutingStrategy {
     selectUpstream(
         _model: SgModel,
-        candidates: RoutingCandidate[],
-    ): RoutingCandidate | null {
-        if (candidates.length === 0) {
+        vendorModels: SgVendorModel[],
+    ): SgVendorModel | null {
+        if (vendorModels.length === 0) {
             return null;
         }
 
-        return candidates[Math.floor(Math.random() * candidates.length)];
+        return vendorModels[Math.floor(Math.random() * vendorModels.length)];
     }
 }
 

@@ -1,16 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiFormat, ModelRoutingMode } from "../../../src/constants";
+import { ModelRoutingMode } from "../../../src/constants";
 import { SgModel } from "../../../src/model/sgModel";
-import { RoutingCandidate } from "../../../src/service/routingStrategy/baseRoutingStrategy";
+import { SgVendorModel } from "../../../src/model/sgVendorModel";
 import FailoverRoutingStrategy from "../../../src/service/routingStrategy/failoverRoutingStrategy";
 import LoadBalanceRoutingStrategy from "../../../src/service/routingStrategy/loadBalanceRoutingStrategy";
 import SingleRoutingStrategy from "../../../src/service/routingStrategy/singleRoutingStrategy";
 
-function candidate(id: number): RoutingCandidate {
-    return {
-        vendorModel: { id } as any,
-        upstreamFormat: ApiFormat.OPENAI,
-    };
+function vendorModel(id: number): SgVendorModel {
+    return { id } as SgVendorModel;
 }
 
 
@@ -26,7 +23,7 @@ afterEach(() => {
 
 describe("routing strategies", () => {
     it("single selects its only upstream", () => {
-        const upstream = candidate(1);
+        const upstream = vendorModel(1);
         const strategy = new SingleRoutingStrategy();
 
         expect(strategy.selectUpstream(
@@ -36,8 +33,8 @@ describe("routing strategies", () => {
     });
 
     it("load balance selects each upstream with equal index probability", () => {
-        const first = candidate(1);
-        const second = candidate(2);
+        const first = vendorModel(1);
+        const second = vendorModel(2);
         const strategy = new LoadBalanceRoutingStrategy();
         vi.spyOn(Math, "random").mockReturnValue(0.75);
 
@@ -48,8 +45,8 @@ describe("routing strategies", () => {
     });
 
     it("failover selects the first healthy upstream in configuration order", () => {
-        const first = candidate(1);
-        const second = candidate(2);
+        const first = vendorModel(1);
+        const second = vendorModel(2);
         const strategy = new FailoverRoutingStrategy();
 
         expect(strategy.selectUpstream(
