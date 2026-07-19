@@ -20,6 +20,7 @@ export enum VendorType {
     MIMO = "mimo",
     MIMO_TOKEN_PLAN = "mimo_token_plan",
     OPENCODE_GO = "opencode_go",
+    OPENROUTER = "openrouter",
     OTHER = "other",
 }
 
