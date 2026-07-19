@@ -18,16 +18,18 @@ export interface ModelRoutingConfig {
     upstreams: ModelUpstreamConfig[];
 }
 
+export interface ModelPrices {
+    input?: number;
+    output?: number;
+    cache_read?: number;
+}
+
 export interface Model extends BaseEntity {
     name: string;
     routing_mode: ModelRoutingMode;
     routing_config: ModelRoutingConfig;
     enable: boolean;
-    prices?: {
-        input?: number;
-        output?: number;
-        cache_read?: number;
-    } | null;
+    prices?: ModelPrices | null;
 }
 
 export type CreateModelRequest = Pick<

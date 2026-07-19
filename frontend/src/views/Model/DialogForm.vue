@@ -35,7 +35,15 @@
             <a-form-item label="模型名称" name="name">
                 <a-input v-model:value="formState.name" placeholder="请输入模型名称" />
             </a-form-item>
-            <a-form-item label="路由模式" name="routing_mode">
+            <a-form-item name="routing_mode">
+                <template #label>
+                    <span class="upstream-label">
+                        路由模式
+                        <a-tooltip title="决定模型请求在多个上游之间的调度方式">
+                            <InfoCircleOutlined class="field-help-icon" />
+                        </a-tooltip>
+                    </span>
+                </template>
                 <a-radio-group
                     v-model:value="formState.routing_mode"
                     class="routing-mode-selector"
@@ -43,7 +51,7 @@
                     @change="handleRoutingModeChange"
                 >
                     <a-radio-button value="single">
-                        单上游
+                        固定上游
                         <a-tooltip title="使用唯一启用的上游">
                             <InfoCircleOutlined class="routing-help-icon" />
                         </a-tooltip>
@@ -79,58 +87,7 @@
                 />
             </a-form-item>
             <a-form-item v-if="moduleBillingEnabled" label="价格设置">
-                <SettingsCollapse
-                    v-model:active-key="billingExpanded"
-                    class="price-settings"
-                    panel-key="billing"
-                    header="价格明细"
-                >
-                    <div class="settings-row">
-                        <label class="settings-label">
-                            输入价格
-                            <a-tooltip title="输入 token 的计费价格（元/千 tokens）">
-                                <InfoCircleOutlined class="field-help-icon" />
-                            </a-tooltip>
-                        </label>
-                        <a-input-number
-                            v-model:value="formState.prices.input"
-                            placeholder="请输入输入价格"
-                            :min="0"
-                            :precision="6"
-                            style="width: 100%"
-                        />
-                    </div>
-                    <div class="settings-row">
-                        <label class="settings-label">
-                            输出价格
-                            <a-tooltip title="输出 token 的计费价格（元/千 tokens）">
-                                <InfoCircleOutlined class="field-help-icon" />
-                            </a-tooltip>
-                        </label>
-                        <a-input-number
-                            v-model:value="formState.prices.output"
-                            placeholder="请输入输出价格"
-                            :min="0"
-                            :precision="6"
-                            style="width: 100%"
-                        />
-                    </div>
-                    <div class="settings-row">
-                        <label class="settings-label">
-                            缓存读取价格
-                            <a-tooltip title="缓存命中时读取 token 的计费价格（元/千 tokens）">
-                                <InfoCircleOutlined class="field-help-icon" />
-                            </a-tooltip>
-                        </label>
-                        <a-input-number
-                            v-model:value="formState.prices.cache_read"
-                            placeholder="请输入缓存读取价格"
-                            :min="0"
-                            :precision="6"
-                            style="width: 100%"
-                        />
-                    </div>
-                </SettingsCollapse>
+                <PriceConfig v-model:prices="formState.prices" mode="edit" />
             </a-form-item>
         </a-form>
     </a-modal>
@@ -142,7 +99,6 @@ import type { FormInstance } from 'ant-design-vue/es';
 import { InfoCircleOutlined } from '@ant-design/icons-vue';
 import { createModel, updateModel } from '@/api/model';
 import { getConfig } from '@/api/config';
-import SettingsCollapse from '@/components/common/SettingsCollapse.vue';
 import type {
     CreateModelRequest,
     Model,
@@ -151,6 +107,7 @@ import type {
     ModelUpstreamFormValue,
 } from '@/types/model';
 import { notifyError, notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
+import PriceConfig from './PriceConfig.vue';
 import UpstreamConfig from './UpstreamConfig.vue';
 
 const emit = defineEmits<{
@@ -160,7 +117,6 @@ const emit = defineEmits<{
 const visible = ref(false);
 const loading = ref(false);
 const formRef = ref<FormInstance>();
-const billingExpanded = ref<string[]>([]);
 
 const isEdit = ref(false);
 const currentId = ref<number>(0);
@@ -207,7 +163,6 @@ function openCreate() {
     resetForm();
     isEdit.value = false;
     currentId.value = 0;
-    billingExpanded.value = [];
     getConfig().then(config => {
         moduleBillingEnabled.value = config.module_billing_enabled === 'true';
     });
@@ -218,7 +173,6 @@ function openEdit(model: Model) {
     resetForm();
     isEdit.value = true;
     currentId.value = model.id;
-    billingExpanded.value = [];
     formState.name = model.name;
     formState.routing_mode = model.routing_mode;
     const upstreams = model.routing_config.upstreams;
@@ -253,7 +207,7 @@ async function handleOk() {
             return;
         }
         if (formState.routing_mode === 'single' && enabledCount !== 1) {
-            notifyError('单上游模式只能启用一个上游');
+            notifyError('固定上游模式只能启用一个上游');
             return;
         }
 
@@ -369,7 +323,4 @@ defineExpose({ openCreate, openEdit });
     font-size: 13px;
 }
 
-.price-settings {
-    margin-top: 0;
-}
 </style>

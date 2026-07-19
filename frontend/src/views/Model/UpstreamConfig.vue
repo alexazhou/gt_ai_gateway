@@ -347,7 +347,7 @@ function getUpstreamModelName(vendorId?: number, vendorModelId?: number): string
 }
 
 .upstream-table-header {
-    padding: 8px 12px;
+    padding: 8px 12px 4px;
     border-bottom: 1px solid var(--border-color);
     background: var(--bg-info-item);
     color: var(--text-secondary);
@@ -355,7 +355,7 @@ function getUpstreamModelName(vendorId?: number, vendorModelId?: number): string
 }
 
 .upstream-row {
-    padding: 10px 12px;
+    padding: 6px 12px 10px;
     border-bottom: 1px solid var(--border-color);
 }
 
