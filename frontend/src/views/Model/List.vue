@@ -122,7 +122,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import type { TableColumnsType } from 'ant-design-vue';
-import { useRouter } from 'vue-router';
 import { Modal } from 'ant-design-vue/es';
 import { InfoCircleOutlined } from '@ant-design/icons-vue';
 import { deleteModel, listModels } from '@/api/model';
@@ -136,8 +135,6 @@ import DialogTest from '@/views/Vendor/DialogTest.vue';
 import type { Model, ModelQuery } from '@/types/model';
 import type { Vendor as VendorType, VendorModel } from '@/types/vendor';
 import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
-
-const router = useRouter();
 
 const { loading, data, pagination, searchForm, loadData, handleSearch, handleReset, handleTableChange } = useResourceTable<Model, ModelQuery>({
     initialSearchForm: {
@@ -208,7 +205,7 @@ function handleSuccess() {
 }
 
 function handleView(record: Model) {
-    router.push(`/model/${record.id}`);
+    dialogFormRef.value?.openView(record);
 }
 
 function handleTest(record: Model) {

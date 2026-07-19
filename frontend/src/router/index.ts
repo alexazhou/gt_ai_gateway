@@ -14,7 +14,6 @@ import VendorDetail from '@/views/Vendor/Detail.vue';
 import VendorModels from '@/views/Vendor/VendorModels.vue';
 import ModelIndex from '@/views/Model/Index.vue';
 import ModelList from '@/views/Model/List.vue';
-import ModelDetail from '@/views/Model/Detail.vue';
 import RecordIndex from '@/views/Record/Index.vue';
 import RecordList from '@/views/Record/List.vue';
 import RecordDetail from '@/views/Record/Detail.vue';
@@ -96,11 +95,6 @@ const routes: RouteRecordRaw[] = [
                         path: '',
                         name: 'ModelList',
                         component: ModelList,
-                    },
-                    {
-                        path: ':id',
-                        name: 'ModelDetail',
-                        component: ModelDetail,
                     },
                 ],
             },

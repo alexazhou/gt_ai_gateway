@@ -1,5 +1,5 @@
 <template>
-    <div v-if="mode === 'edit'" class="upstream-editor">
+    <div class="upstream-editor">
         <div class="upstream-list">
             <div class="upstream-table">
                 <div
@@ -22,6 +22,7 @@
                             :value="upstream.vendor_id"
                             placeholder="请选择供应商"
                             :loading="vendorsLoading"
+                            :disabled="mode === 'view'"
                             @change="handleVendorChange(index, $event)"
                         >
                             <a-select-option
@@ -39,7 +40,7 @@
                             placeholder="自动（使用模型名称）"
                             :loading="isVendorModelsLoading(upstream.vendor_id)"
                             allow-clear
-                            :disabled="!upstream.vendor_id"
+                            :disabled="mode === 'view' || !upstream.vendor_id"
                             @change="updateVendorModel(index, $event)"
                         >
                             <a-select-option
@@ -55,6 +56,7 @@
                         <a-switch
                             :checked="upstream.enabled"
                             size="small"
+                            :disabled="mode === 'view'"
                             @change="updateEnabled(index, $event)"
                         />
                     </div>
@@ -63,7 +65,7 @@
                             <a-button
                                 type="text"
                                 size="small"
-                                :disabled="index === 0"
+                                :disabled="mode === 'view' || index === 0"
                                 aria-label="上移"
                                 @click="moveUpstream(index, -1)"
                             >
@@ -74,7 +76,7 @@
                             <a-button
                                 type="text"
                                 size="small"
-                                :disabled="index === upstreams.length - 1"
+                                :disabled="mode === 'view' || index === upstreams.length - 1"
                                 aria-label="下移"
                                 @click="moveUpstream(index, 1)"
                             >
@@ -85,7 +87,7 @@
                             <a-button
                                 type="text"
                                 size="small"
-                                :disabled="!upstream.vendor_id"
+                                :disabled="mode === 'view' || !upstream.vendor_id"
                                 aria-label="测试"
                                 @click="handleTest(upstream)"
                             >
@@ -100,6 +102,7 @@
                                 type="text"
                                 danger
                                 size="small"
+                                :disabled="mode === 'view'"
                                 aria-label="删除"
                                 @click="removeUpstream(index)"
                             >
@@ -113,6 +116,7 @@
                 v-if="routingMode !== 'single'"
                 block
                 type="dashed"
+                :disabled="mode === 'view'"
                 @click="addUpstream"
             >
                 <PlusOutlined />
@@ -120,19 +124,6 @@
             </a-button>
         </div>
     </div>
-
-    <a-space v-else direction="vertical">
-        <span
-            v-for="(upstream, index) in upstreams"
-            :key="`${upstream.vendor_id}-${upstream.vendor_model_id ?? 'auto'}-${index}`"
-        >
-            <a-tag :color="upstream.enabled ? 'blue' : 'default'">
-                {{ getVendorName(upstream.vendor_id) }}
-            </a-tag>
-            {{ getUpstreamModelName(upstream.vendor_id, upstream.vendor_model_id) }}
-            <a-tag v-if="!upstream.enabled">禁用</a-tag>
-        </span>
-    </a-space>
 
     <DialogTest v-if="mode === 'edit'" ref="testDialogRef" />
 </template>
@@ -303,20 +294,6 @@ function handleTest(upstream: ModelUpstreamFormValue) {
 }
 
 
-function getVendorName(vendorId?: number): string {
-    if (!vendorId) {
-        return '未选择供应商';
-    }
-    return vendors.value.find(vendor => vendor.id === vendorId)?.name ?? `ID: ${vendorId}`;
-}
-
-
-function getUpstreamModelName(vendorId?: number, vendorModelId?: number): string {
-    if (!vendorModelId) {
-        return `自动（${props.modelName}）`;
-    }
-    return getVendorModels(vendorId).find(model => model.id === vendorModelId)?.model_id ?? `#${vendorModelId}`;
-}
 </script>
 
 <style scoped>

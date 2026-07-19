@@ -7,24 +7,24 @@
     >
         <template #title>
             <div class="modal-title">
-                <span>{{ isEdit ? '编辑模型' : '新建模型' }}</span>
+                <span>{{ dialogTitle }}</span>
                 <div class="model-status">
                     <span>启用</span>
-                    <a-switch v-model:checked="formState.enable" size="small" />
+                    <a-switch v-model:checked="formState.enable" size="small" :disabled="isView" />
                 </div>
             </div>
         </template>
         <template #footer>
             <div class="modal-footer">
-                <a-button @click="handleCancel">取消</a-button>
-                <a-button type="primary" :loading="loading" @click="handleOk">
+                <a-button @click="handleCancel">{{ isView ? '关闭' : '取消' }}</a-button>
+                <a-button v-if="!isView" type="primary" :loading="loading" @click="handleOk">
                     {{ isEdit ? '保存' : '创建' }}
                 </a-button>
             </div>
         </template>
         <a-form
             :model="formState"
-            :rules="rules"
+            :rules="isView ? {} : rules"
             class="model-form"
             layout="horizontal"
             :colon="false"
@@ -33,7 +33,7 @@
             ref="formRef"
         >
             <a-form-item label="模型名称" name="name">
-                <a-input v-model:value="formState.name" placeholder="请输入模型名称" />
+                <a-input v-model:value="formState.name" placeholder="请输入模型名称" :disabled="isView" />
             </a-form-item>
             <a-form-item name="routing_mode">
                 <template #label>
@@ -48,6 +48,7 @@
                     v-model:value="formState.routing_mode"
                     class="routing-mode-selector"
                     button-style="solid"
+                    :disabled="isView"
                     @change="handleRoutingModeChange"
                 >
                     <a-radio-button value="single">
@@ -70,7 +71,7 @@
                     </a-radio-button>
                 </a-radio-group>
             </a-form-item>
-            <a-form-item required>
+            <a-form-item :required="!isView">
                 <template #label>
                     <span class="upstream-label">
                         上游配置
@@ -80,21 +81,26 @@
                     </span>
                 </template>
                 <UpstreamConfig
-                    v-model:upstreams="formState.upstreams"
-                    mode="edit"
+                    :upstreams="formState.upstreams"
+                    :mode="isView ? 'view' : 'edit'"
                     :routing-mode="formState.routing_mode"
                     :model-name="formState.name"
+                    @update:upstreams="formState.upstreams = $event"
                 />
             </a-form-item>
             <a-form-item v-if="moduleBillingEnabled" label="价格设置">
-                <PriceConfig v-model:prices="formState.prices" mode="edit" />
+                <PriceConfig
+                    :prices="formState.prices"
+                    :mode="isView ? 'view' : 'edit'"
+                    @update:prices="formState.prices = $event"
+                />
             </a-form-item>
         </a-form>
     </a-modal>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue';
+import { computed, ref, reactive } from 'vue';
 import type { FormInstance } from 'ant-design-vue/es';
 import { InfoCircleOutlined } from '@ant-design/icons-vue';
 import { createModel, updateModel } from '@/api/model';
@@ -102,6 +108,7 @@ import { getConfig } from '@/api/config';
 import type {
     CreateModelRequest,
     Model,
+    ModelPrices,
     ModelRoutingMode,
     ModelRoutingConfig,
     ModelUpstreamFormValue,
@@ -118,8 +125,16 @@ const visible = ref(false);
 const loading = ref(false);
 const formRef = ref<FormInstance>();
 
-const isEdit = ref(false);
+const dialogMode = ref<'create' | 'edit' | 'view'>('create');
 const currentId = ref<number>(0);
+
+const isEdit = computed(() => dialogMode.value === 'edit');
+const isView = computed(() => dialogMode.value === 'view');
+const dialogTitle = computed(() => ({
+    create: '新建模型',
+    edit: '编辑模型',
+    view: '查看模型',
+}[dialogMode.value]));
 
 function createUpstream(data?: Partial<ModelUpstreamFormValue>): ModelUpstreamFormValue {
     return {
@@ -138,7 +153,7 @@ const formState = reactive({
         input: undefined as number | undefined,
         output: undefined as number | undefined,
         cache_read: undefined as number | undefined,
-    },
+    } as ModelPrices,
 });
 
 const rules = {
@@ -161,7 +176,7 @@ function handleRoutingModeChange() {
 
 function openCreate() {
     resetForm();
-    isEdit.value = false;
+    dialogMode.value = 'create';
     currentId.value = 0;
     getConfig().then(config => {
         moduleBillingEnabled.value = config.module_billing_enabled === 'true';
@@ -170,8 +185,18 @@ function openCreate() {
 }
 
 function openEdit(model: Model) {
+    openModel(model, 'edit');
+}
+
+
+function openView(model: Model) {
+    openModel(model, 'view');
+}
+
+
+function openModel(model: Model, mode: 'edit' | 'view') {
     resetForm();
-    isEdit.value = true;
+    dialogMode.value = mode;
     currentId.value = model.id;
     formState.name = model.name;
     formState.routing_mode = model.routing_mode;
@@ -262,12 +287,12 @@ function resetForm() {
 
 function handleCancel() {
     visible.value = false;
-    isEdit.value = false;
+    dialogMode.value = 'create';
     currentId.value = 0;
     resetForm();
 }
 
-defineExpose({ openCreate, openEdit });
+defineExpose({ openCreate, openEdit, openView });
 </script>
 
 <style scoped>
