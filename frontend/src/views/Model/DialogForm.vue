@@ -1,21 +1,35 @@
 <template>
     <a-modal
         v-model:open="visible"
-        :title="isEdit ? '编辑模型' : '新建模型'"
         @cancel="handleCancel"
         :confirm-loading="loading"
         :width="760"
     >
+        <template #title>
+            <div class="modal-title">
+                <span>{{ isEdit ? '编辑模型' : '新建模型' }}</span>
+                <div class="model-status">
+                    <span>启用</span>
+                    <a-switch v-model:checked="formState.enable" size="small" />
+                </div>
+            </div>
+        </template>
         <template #footer>
             <div class="modal-footer">
-                <a-button @click="handleCancel">Cancel</a-button>
-                <a-button type="primary" :loading="loading" @click="handleOk">OK</a-button>
+                <a-button @click="handleCancel">取消</a-button>
+                <a-button type="primary" :loading="loading" @click="handleOk">
+                    {{ isEdit ? '保存' : '创建' }}
+                </a-button>
             </div>
         </template>
         <a-form
             :model="formState"
             :rules="rules"
-            layout="vertical"
+            class="model-form"
+            layout="horizontal"
+            :colon="false"
+            :label-col="{ style: { width: '128px' } }"
+            :wrapper-col="{ style: { flex: 1 } }"
             ref="formRef"
         >
             <a-form-item label="模型名称" name="name">
@@ -24,130 +38,60 @@
             <a-form-item label="路由模式" name="routing_mode">
                 <a-radio-group
                     v-model:value="formState.routing_mode"
+                    class="routing-mode-selector"
                     button-style="solid"
                     @change="handleRoutingModeChange"
                 >
-                    <a-radio-button value="single">单上游</a-radio-button>
-                    <a-radio-button value="load_balance">负载均衡</a-radio-button>
-                    <a-radio-button value="failover">故障转移</a-radio-button>
-                </a-radio-group>
-                <div class="routing-hint">{{ routingModeDescription }}</div>
-            </a-form-item>
-            <a-form-item label="上游配置" required>
-                <div class="upstream-list">
-                    <div
-                        v-for="(upstream, index) in formState.upstreams"
-                        :key="upstream.key"
-                        class="upstream-card"
-                    >
-                        <div class="upstream-header">
-                            <span>上游 {{ index + 1 }}</span>
-                            <a-space size="small">
-                                <a-button
-                                    v-if="formState.routing_mode === 'failover'"
-                                    type="link"
-                                    size="small"
-                                    :disabled="index === 0"
-                                    @click="moveUpstream(index, -1)"
-                                >
-                                    上移
-                                </a-button>
-                                <a-button
-                                    v-if="formState.routing_mode === 'failover'"
-                                    type="link"
-                                    size="small"
-                                    :disabled="index === formState.upstreams.length - 1"
-                                    @click="moveUpstream(index, 1)"
-                                >
-                                    下移
-                                </a-button>
-                                <a-button
-                                    type="link"
-                                    size="small"
-                                    :disabled="!upstream.vendor_id"
-                                    @click="handleTest(upstream)"
-                                >
-                                    测试
-                                </a-button>
-                                <a-button
-                                    v-if="formState.routing_mode !== 'single'"
-                                    type="link"
-                                    danger
-                                    size="small"
-                                    :disabled="formState.upstreams.length === 1"
-                                    @click="removeUpstream(index)"
-                                >
-                                    删除
-                                </a-button>
-                            </a-space>
-                        </div>
-                        <div class="upstream-fields">
-                            <div class="upstream-field">
-                                <label>供应商</label>
-                                <a-select
-                                    v-model:value="upstream.vendor_id"
-                                    placeholder="请选择供应商"
-                                    :loading="vendorsLoading"
-                                    @change="handleVendorChange(upstream)"
-                                >
-                                    <a-select-option
-                                        v-for="vendor in vendors"
-                                        :key="vendor.id"
-                                        :value="vendor.id"
-                                    >
-                                        {{ vendor.name }}
-                                    </a-select-option>
-                                </a-select>
-                            </div>
-                            <div class="upstream-field upstream-model-field">
-                                <label>上游模型</label>
-                                <a-select
-                                    v-model:value="upstream.vendor_model_id"
-                                    placeholder="自动（使用模型名称）"
-                                    :loading="isVendorModelsLoading(upstream.vendor_id)"
-                                    allow-clear
-                                    :disabled="!upstream.vendor_id"
-                                >
-                                    <a-select-option
-                                        v-for="vm in getVendorModels(upstream.vendor_id)"
-                                        :key="vm.id"
-                                        :value="vm.id"
-                                    >
-                                        {{ vm.model_id }}
-                                    </a-select-option>
-                                </a-select>
-                            </div>
-                            <div class="upstream-enabled">
-                                <label>启用</label>
-                                <a-switch
-                                    v-model:checked="upstream.enabled"
-                                    :disabled="formState.routing_mode === 'single'"
-                                />
-                            </div>
-                        </div>
-                    </div>
-                    <a-button
-                        v-if="formState.routing_mode !== 'single'"
-                        block
-                        type="dashed"
-                        @click="addUpstream"
-                    >
-                        添加上游
-                    </a-button>
-                </div>
-            </a-form-item>
-            <a-form-item label="状态" name="enable">
-                <a-switch v-model:checked="formState.enable" />
-            </a-form-item>
-            <SettingsCollapse v-if="moduleBillingEnabled" v-model:activeKey="billingExpanded" panel-key="billing" header="价格设置">
-                <div class="settings-row">
-                    <label class="settings-label">
-                        输入价格
-                        <a-tooltip title="输入token的计费价格 (元/千tokens)">
-                            <InfoCircleOutlined style="font-size: 12px; color: #999; margin-left: 4px;" />
+                    <a-radio-button value="single">
+                        单上游
+                        <a-tooltip title="使用唯一启用的上游">
+                            <InfoCircleOutlined class="routing-help-icon" />
                         </a-tooltip>
-                    </label>
-                    <div style="flex: 1">
+                    </a-radio-button>
+                    <a-radio-button value="load_balance">
+                        负载均衡
+                        <a-tooltip title="从所有可用上游中等概率选择">
+                            <InfoCircleOutlined class="routing-help-icon" />
+                        </a-tooltip>
+                    </a-radio-button>
+                    <a-radio-button value="failover">
+                        故障转移
+                        <a-tooltip title="按列表顺序选择，第一个不可用时自动切换到下一个">
+                            <InfoCircleOutlined class="routing-help-icon" />
+                        </a-tooltip>
+                    </a-radio-button>
+                </a-radio-group>
+            </a-form-item>
+            <a-form-item required>
+                <template #label>
+                    <span class="upstream-label">
+                        上游配置
+                        <a-tooltip title="配置模型请求实际使用的供应商和上游模型">
+                            <InfoCircleOutlined class="field-help-icon" />
+                        </a-tooltip>
+                    </span>
+                </template>
+                <UpstreamConfig
+                    v-model:upstreams="formState.upstreams"
+                    mode="edit"
+                    :routing-mode="formState.routing_mode"
+                    :model-name="formState.name"
+                />
+            </a-form-item>
+            <a-form-item v-if="moduleBillingEnabled" label="价格设置">
+                <SettingsCollapse
+                    v-model:active-key="billingExpanded"
+                    class="price-settings"
+                    panel-key="billing"
+                    header="价格明细"
+                >
+                    <div class="settings-row">
+                        <label class="settings-label">
+                            输入价格
+                            <a-tooltip title="输入 token 的计费价格（元/千 tokens）">
+                                <InfoCircleOutlined class="field-help-icon" />
+                            </a-tooltip>
+                        </label>
                         <a-input-number
                             v-model:value="formState.prices.input"
                             placeholder="请输入输入价格"
@@ -156,15 +100,13 @@
                             style="width: 100%"
                         />
                     </div>
-                </div>
-                <div class="settings-row">
-                    <label class="settings-label">
-                        输出价格
-                        <a-tooltip title="输出token的计费价格 (元/千tokens)">
-                            <InfoCircleOutlined style="font-size: 12px; color: #999; margin-left: 4px;" />
-                        </a-tooltip>
-                    </label>
-                    <div style="flex: 1">
+                    <div class="settings-row">
+                        <label class="settings-label">
+                            输出价格
+                            <a-tooltip title="输出 token 的计费价格（元/千 tokens）">
+                                <InfoCircleOutlined class="field-help-icon" />
+                            </a-tooltip>
+                        </label>
                         <a-input-number
                             v-model:value="formState.prices.output"
                             placeholder="请输入输出价格"
@@ -173,15 +115,13 @@
                             style="width: 100%"
                         />
                     </div>
-                </div>
-                <div class="settings-row">
-                    <label class="settings-label">
-                        缓存读取价格
-                        <a-tooltip title="缓存命中时读取token的计费价格 (元/千tokens)">
-                            <InfoCircleOutlined style="font-size: 12px; color: #999; margin-left: 4px;" />
-                        </a-tooltip>
-                    </label>
-                    <div style="flex: 1">
+                    <div class="settings-row">
+                        <label class="settings-label">
+                            缓存读取价格
+                            <a-tooltip title="缓存命中时读取 token 的计费价格（元/千 tokens）">
+                                <InfoCircleOutlined class="field-help-icon" />
+                            </a-tooltip>
+                        </label>
                         <a-input-number
                             v-model:value="formState.prices.cache_read"
                             placeholder="请输入缓存读取价格"
@@ -190,27 +130,28 @@
                             style="width: 100%"
                         />
                     </div>
-                </div>
-            </SettingsCollapse>
+                </SettingsCollapse>
+            </a-form-item>
         </a-form>
     </a-modal>
-
-    <DialogTest ref="testDialogRef" />
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive } from 'vue';
 import type { FormInstance } from 'ant-design-vue/es';
 import { InfoCircleOutlined } from '@ant-design/icons-vue';
 import { createModel, updateModel } from '@/api/model';
-import { listVendors, listVendorModels } from '@/api/vendor';
 import { getConfig } from '@/api/config';
 import SettingsCollapse from '@/components/common/SettingsCollapse.vue';
-import type { CreateModelRequest, Model, ModelRoutingMode, ModelRoutingConfig } from '@/types/model';
-import type { Vendor as VendorType, VendorModel } from '@/types/vendor';
-import { normalizeListResponse } from '@/utils/listResponse';
+import type {
+    CreateModelRequest,
+    Model,
+    ModelRoutingMode,
+    ModelRoutingConfig,
+    ModelUpstreamFormValue,
+} from '@/types/model';
 import { notifyError, notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
-import DialogTest from '@/views/Vendor/DialogTest.vue';
+import UpstreamConfig from './UpstreamConfig.vue';
 
 const emit = defineEmits<{
     success: [model: Model];
@@ -220,22 +161,12 @@ const visible = ref(false);
 const loading = ref(false);
 const formRef = ref<FormInstance>();
 const billingExpanded = ref<string[]>([]);
-const testDialogRef = ref<InstanceType<typeof DialogTest>>();
 
 const isEdit = ref(false);
 const currentId = ref<number>(0);
-let upstreamKey = 0;
 
-interface UpstreamFormState {
-    key: number;
-    vendor_id?: number;
-    vendor_model_id?: number;
-    enabled: boolean;
-}
-
-function createUpstream(data?: Partial<UpstreamFormState>): UpstreamFormState {
+function createUpstream(data?: Partial<ModelUpstreamFormValue>): ModelUpstreamFormValue {
     return {
-        key: upstreamKey++,
         vendor_id: data?.vendor_id,
         vendor_model_id: data?.vendor_model_id,
         enabled: data?.enabled ?? true,
@@ -245,7 +176,7 @@ function createUpstream(data?: Partial<UpstreamFormState>): UpstreamFormState {
 const formState = reactive({
     name: '',
     routing_mode: 'single' as ModelRoutingMode,
-    upstreams: [createUpstream()] as UpstreamFormState[],
+    upstreams: [createUpstream()] as ModelUpstreamFormValue[],
     enable: true,
     prices: {
         input: undefined as number | undefined,
@@ -258,69 +189,7 @@ const rules = {
     name: [{ required: true, message: '请输入模型名称' }],
 };
 
-const vendors = ref<VendorType[]>([]);
-const vendorsLoading = ref(false);
 const moduleBillingEnabled = ref(false);
-const vendorModelsByVendor = ref<Map<number, VendorModel[]>>(new Map());
-const loadingVendorIds = ref<Set<number>>(new Set());
-
-const routingModeDescription = computed(() => ({
-    single: '使用唯一启用的上游。',
-    load_balance: '从所有可用上游中等概率选择。',
-    failover: '按列表顺序选择，第一个不可用时自动切换到下一个。',
-})[formState.routing_mode]);
-
-async function loadVendors() {
-    vendorsLoading.value = true;
-    try {
-        vendors.value = normalizeListResponse(await listVendors({ page: 1, pageSize: 1000 })).list;
-    } catch (error) {
-        notifyRequestError(error, '加载供应商列表失败');
-    } finally {
-        vendorsLoading.value = false;
-    }
-}
-
-async function loadVendorModels(vendorId: number) {
-    if (vendorModelsByVendor.value.has(vendorId) || loadingVendorIds.value.has(vendorId)) {
-        return;
-    }
-
-    loadingVendorIds.value = new Set([...loadingVendorIds.value, vendorId]);
-    try {
-        const models = await listVendorModels(vendorId);
-        const next = new Map(vendorModelsByVendor.value);
-        next.set(vendorId, models);
-        vendorModelsByVendor.value = next;
-    } catch {
-        const next = new Map(vendorModelsByVendor.value);
-        next.set(vendorId, []);
-        vendorModelsByVendor.value = next;
-    } finally {
-        const next = new Set(loadingVendorIds.value);
-        next.delete(vendorId);
-        loadingVendorIds.value = next;
-    }
-}
-
-function getVendorModels(vendorId?: number): VendorModel[] {
-    return vendorId ? vendorModelsByVendor.value.get(vendorId) ?? [] : [];
-}
-
-function isVendorModelsLoading(vendorId?: number): boolean {
-    return vendorId ? loadingVendorIds.value.has(vendorId) : false;
-}
-
-function handleVendorChange(upstream: UpstreamFormState) {
-    upstream.vendor_model_id = undefined;
-    if (upstream.vendor_id) {
-        void loadVendorModels(upstream.vendor_id);
-    }
-}
-
-function addUpstream() {
-    formState.upstreams.push(createUpstream());
-}
 
 function handleRoutingModeChange() {
     if (formState.routing_mode !== 'single') {
@@ -334,42 +203,11 @@ function handleRoutingModeChange() {
     formState.upstreams = [upstream];
 }
 
-function removeUpstream(index: number) {
-    if (formState.upstreams.length > 1) {
-        formState.upstreams.splice(index, 1);
-    }
-}
-
-function moveUpstream(index: number, offset: number) {
-    const targetIndex = index + offset;
-    if (targetIndex < 0 || targetIndex >= formState.upstreams.length) {
-        return;
-    }
-
-    const [upstream] = formState.upstreams.splice(index, 1);
-    if (upstream) {
-        formState.upstreams.splice(targetIndex, 0, upstream);
-    }
-}
-
-function handleTest(upstream: UpstreamFormState) {
-    const vendor = vendors.value.find(v => v.id === upstream.vendor_id);
-    if (!vendor) return;
-    const vendorModelName = upstream.vendor_model_id
-        ? (getVendorModels(upstream.vendor_id).find(vm => vm.id === upstream.vendor_model_id)?.model_id ?? null)
-        : null;
-    testDialogRef.value?.open(vendor, (vendorModelName ?? formState.name) || undefined, {
-        modelName: formState.name,
-        vendorModelName,
-    });
-}
-
 function openCreate() {
     resetForm();
     isEdit.value = false;
     currentId.value = 0;
     billingExpanded.value = [];
-    void loadVendors();
     getConfig().then(config => {
         moduleBillingEnabled.value = config.module_billing_enabled === 'true';
     });
@@ -395,10 +233,6 @@ function openEdit(model: Model) {
         output: model.prices?.output || undefined,
         cache_read: model.prices?.cache_read || undefined,
     };
-    void loadVendors();
-    for (const vendorId of new Set(upstreams.map(upstream => upstream.vendor_id))) {
-        void loadVendorModels(vendorId);
-    }
     getConfig().then(config => {
         moduleBillingEnabled.value = config.module_billing_enabled === 'true';
     });
@@ -464,8 +298,6 @@ function resetForm() {
     formState.name = '';
     formState.routing_mode = 'single';
     formState.upstreams = [createUpstream()];
-    vendorModelsByVendor.value = new Map();
-    loadingVendorIds.value = new Set();
     formState.enable = true;
     formState.prices = {
         input: undefined,
@@ -485,6 +317,21 @@ defineExpose({ openCreate, openEdit });
 </script>
 
 <style scoped>
+.modal-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-right: 56px;
+}
+
+.model-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: normal;
+}
+
 .modal-footer {
     display: flex;
     justify-content: flex-end;
@@ -492,62 +339,37 @@ defineExpose({ openCreate, openEdit });
     gap: 8px;
 }
 
-.routing-hint {
-    margin-top: 8px;
-    color: var(--text-secondary);
-    font-size: 12px;
+.model-form {
+    padding-top: 12px;
 }
 
-.upstream-list {
+.routing-mode-selector {
     display: flex;
-    flex-direction: column;
     width: 100%;
-    gap: 8px;
 }
 
-.upstream-card {
-    padding: 12px;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    background: var(--bg-page);
-}
-
-.upstream-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-    font-weight: 500;
-}
-
-.upstream-fields {
-    display: flex;
-    align-items: flex-end;
-    gap: 12px;
-}
-
-.upstream-field {
-    display: flex;
+.routing-mode-selector :deep(.ant-radio-button-wrapper) {
     flex: 1;
-    flex-direction: column;
-    gap: 4px;
+    text-align: center;
 }
 
-.upstream-model-field {
-    flex: 1.2;
-}
-
-.upstream-enabled {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    padding-bottom: 5px;
-}
-
-.upstream-field label,
-.upstream-enabled label {
-    color: var(--text-secondary);
+.routing-help-icon {
+    margin-left: 4px;
     font-size: 12px;
+}
+
+.upstream-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.field-help-icon {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.price-settings {
+    margin-top: 0;
 }
 </style>

@@ -8,6 +8,12 @@ export interface ModelUpstreamConfig {
     enabled: boolean;
 }
 
+export interface ModelUpstreamFormValue {
+    vendor_id?: number;
+    vendor_model_id?: number;
+    enabled: boolean;
+}
+
 export interface ModelRoutingConfig {
     upstreams: ModelUpstreamConfig[];
 }
