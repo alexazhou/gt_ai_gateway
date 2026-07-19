@@ -1,4 +1,4 @@
-import { VendorType, ApiFormat } from "../constants";
+import { ApiFormat } from "../constants";
 import defaultUrls from "../config/vendorDefaultUrls.json";
 
 interface VendorDefaultUrls {
@@ -13,7 +13,7 @@ interface VendorDefaultUrls {
  * @param format - API format
  * @returns default URL, or null if not found
  */
-function getDefaultUrl(vendorType: VendorType, format: ApiFormat): string | null {
+function getDefaultUrl(vendorType: string, format: ApiFormat): string | null {
     return (defaultUrls as any)[vendorType]?.[format as string] || null;
 }
 

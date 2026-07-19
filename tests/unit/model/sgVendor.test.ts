@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { SgVendor, SgVendorConfig } from "../../../src/model/sgVendor";
-import { ApiFormat, VendorType, VendorAuthMode } from "../../../src/constants";
+import { ApiFormat, VendorAuthMode } from "../../../src/constants";
 
 /**
  * SgVendor URL resolution and merge tests
@@ -11,7 +11,7 @@ import { ApiFormat, VendorType, VendorAuthMode } from "../../../src/constants";
 
 function makeVendor(type: string, urls: Record<string, string> = {}): SgVendor {
     const v = new SgVendor();
-    v.type = type as VendorType;
+    v.type = type;
     v.token = "test-token";
     v.urls = urls;
     return v;
@@ -231,7 +231,7 @@ describe("SgVendor.getUrlByFormat — URL merge & resolution", () => {
 
         it("falls back to preset URLs when stored urls is invalid", () => {
             const v = new SgVendor();
-            v.type = "openai" as VendorType;
+            v.type = "openai";
             v.token = "t";
             v.urls = {};
 

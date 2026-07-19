@@ -1,7 +1,7 @@
 import { Model } from "sutando";
 import { CastsAttributes } from "sutando";
 import { inspect, InspectOptions } from "util";
-import { VendorType, ApiFormat, VendorAuthMode } from "../constants";
+import { ApiFormat, VendorAuthMode } from "../constants";
 import vendorDefaultUrls from "../service/vendorDefaultUrls";
 import customError from "../util/customError";
 import urlUtil from "../util/urlUtil";
@@ -60,7 +60,7 @@ class SgVendor extends Model {
     table = "vendor";
 
     id!: number;
-    type!: VendorType;
+    type!: string;
     name!: string;
     token!: string;
     urls!: Record<string, string>;

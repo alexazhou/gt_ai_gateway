@@ -12,19 +12,6 @@ export enum FailedCode {
     UPSTREAM_ERROR = "upstream_error",
 }
 
-export enum VendorType {
-    ALIYUN = "aliyun",
-    ALIYUN_CODING = "aliyun_coding",
-    VOLCENGINE_CODING = "volcengine_coding",
-    DEEPSEEK = "deepseek",
-    MIMO = "mimo",
-    MIMO_TOKEN_PLAN = "mimo_token_plan",
-    OPENCODE_GO = "opencode_go",
-    OPENROUTER = "openrouter",
-    OTHER = "other",
-}
-
-
 export enum VendorAuthMode {
     API_KEY = "api_key",
     BEARER_TOKEN = "bearer_token",
