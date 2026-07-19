@@ -77,7 +77,9 @@ describe("Model API (Positive)", () => {
             expect(response.status).toBe(200);
             expect(response.body).toHaveProperty("id");
             expect(response.body.name).toBe("gpt-3.5-turbo");
-            expect(response.body.vendor_id).toBe(openaiVendorId);
+            expect(response.body.routing_config.upstreams[0].vendor_id).toBe(openaiVendorId);
+            expect(response.body).not.toHaveProperty("vendor_id");
+            expect(response.body).not.toHaveProperty("vendor_model_id");
             expect(response.body).toHaveProperty("created_at");
             expect(response.body).toHaveProperty("updated_at");
             expect(response.body).toHaveProperty("enable");
@@ -99,7 +101,7 @@ describe("Model API (Positive)", () => {
 
             expect(response.status).toBe(200);
             expect(response.body.name).toBe("claude-3-haiku-20240307");
-            expect(response.body.vendor_id).toBe(anthropicVendorId);
+            expect(response.body.routing_config.upstreams[0].vendor_id).toBe(anthropicVendorId);
         });
 
         it("should create a random model", async () => {
@@ -111,7 +113,7 @@ describe("Model API (Positive)", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(response.body.vendor_id).toBe(openaiVendorId);
+            expect(response.body.routing_config.upstreams[0].vendor_id).toBe(openaiVendorId);
             expect(response.body.name).toBeTruthy();
         });
     });
@@ -137,7 +139,9 @@ describe("Model API (Positive)", () => {
 
             expect(model).toHaveProperty("id");
             expect(model).toHaveProperty("name");
-            expect(model).toHaveProperty("vendor_id");
+            expect(model).not.toHaveProperty("vendor_id");
+            expect(model).not.toHaveProperty("vendor_model_id");
+            expect(model).toHaveProperty("routing_config");
             expect(model).toHaveProperty("created_at");
             expect(model).toHaveProperty("updated_at");
             expect(model).toHaveProperty("enable");
@@ -149,9 +153,26 @@ describe("Model API (Positive)", () => {
                 adminToken,
             );
 
-            const vendorIds = response.body.list.map((m: any) => m.vendor_id);
+            const vendorIds = response.body.list.flatMap((model: any) => (
+                model.routing_config.upstreams.map((upstream: any) => upstream.vendor_id)
+            ));
             expect(vendorIds).toContain(openaiVendorId);
             expect(vendorIds).toContain(anthropicVendorId);
+        });
+
+        it("should filter models by routing upstream vendor", async () => {
+            const response = await requestHelper.get(
+                `/model/list.json?vendor_id=${anthropicVendorId}`,
+                adminToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.list.length).toBeGreaterThan(0);
+            expect(response.body.list.every((model: any) => (
+                model.routing_config.upstreams.some((upstream: any) => (
+                    upstream.vendor_id === anthropicVendorId
+                ))
+            ))).toBe(true);
         });
     });
 
@@ -237,11 +258,11 @@ describe("Model API (Positive)", () => {
 
             expect(response.status).toBe(200);
             expect(response.body.name).toBe("updated-gpt-3.5");
-            expect(response.body.vendor_id).toBe(modelToUpdate.vendor_id);
+            expect(response.body.routing_config).toEqual(modelToUpdate.routing_config);
             modelToUpdate = response.body;
         });
 
-        it("should update model vendor_id", async () => {
+        it("should update model upstream vendor", async () => {
             const response = await requestHelper.put(
                 `/model/${modelToUpdate.id}`,
                 withSingleUpstream(modelToUpdate, anthropicVendorId),
@@ -249,7 +270,7 @@ describe("Model API (Positive)", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(response.body.vendor_id).toBe(anthropicVendorId);
+            expect(response.body.routing_config.upstreams[0].vendor_id).toBe(anthropicVendorId);
             modelToUpdate = response.body;
         });
 
@@ -304,7 +325,7 @@ describe("Model API (Positive)", () => {
 
             expect(response.status).toBe(200);
             expect(response.body.name).toBe("multi-field-updated");
-            expect(response.body.vendor_id).toBe(anthropicVendorId);
+            expect(response.body.routing_config.upstreams[0].vendor_id).toBe(anthropicVendorId);
             expect(response.body.enable).toBeFalsy();
         });
 
@@ -326,7 +347,7 @@ describe("Model API (Positive)", () => {
 
             expect(response.status).toBe(200);
             expect(response.body.name).toBe(originalName);
-            expect(response.body.vendor_id).toBe(anthropicVendorId);
+            expect(response.body.routing_config.upstreams[0].vendor_id).toBe(anthropicVendorId);
         });
     });
 
@@ -447,7 +468,7 @@ describe("Model API (Positive)", () => {
         });
     });
 
-    describe("vendor_model_id field", () => {
+    describe("routing config vendor_model_id", () => {
         let vendorModelId: number;
 
         beforeAll(async () => {
@@ -460,7 +481,7 @@ describe("Model API (Positive)", () => {
             vendorModelId = res.body.id;
         });
 
-        it("should default vendor_model_id to null when not provided", async () => {
+        it("should omit vendor_model_id when not provided", async () => {
             const response = await requestHelper.post(
                 "/model/create.json",
                 modelFixtures.createRandomModel(openaiVendorId, "no-vendor-model"),
@@ -468,7 +489,7 @@ describe("Model API (Positive)", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(response.body.vendor_model_id).toBeNull();
+            expect(response.body.routing_config.upstreams[0]).not.toHaveProperty("vendor_model_id");
         });
 
         it("should create a model with vendor_model_id set", async () => {
@@ -483,7 +504,7 @@ describe("Model API (Positive)", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(response.body.vendor_model_id).toBe(vendorModelId);
+            expect(response.body.routing_config.upstreams[0].vendor_model_id).toBe(vendorModelId);
         });
 
         it("should update model to set vendor_model_id", async () => {
@@ -493,7 +514,7 @@ describe("Model API (Positive)", () => {
                 adminToken,
             );
             const modelId = createRes.body.id;
-            expect(createRes.body.vendor_model_id).toBeNull();
+            expect(createRes.body.routing_config.upstreams[0]).not.toHaveProperty("vendor_model_id");
 
             const response = await requestHelper.put(
                 `/model/${modelId}`,
@@ -502,7 +523,7 @@ describe("Model API (Positive)", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(response.body.vendor_model_id).toBe(vendorModelId);
+            expect(response.body.routing_config.upstreams[0].vendor_model_id).toBe(vendorModelId);
         });
 
         it("should update model to clear vendor_model_id", async () => {
@@ -524,7 +545,7 @@ describe("Model API (Positive)", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(response.body.vendor_model_id).toBeNull();
+            expect(response.body.routing_config.upstreams[0]).not.toHaveProperty("vendor_model_id");
         });
     });
 

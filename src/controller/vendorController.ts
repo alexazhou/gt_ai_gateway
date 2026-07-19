@@ -1,9 +1,9 @@
 import { Context } from "hono";
 import { SgVendor } from "../model/sgVendor";
-import { SgModel } from "../model/sgModel";
 import vendorService from "../service/vendorService";
 import vendorDefaultUrls from "../service/vendorDefaultUrls";
 import vendorTestService from "../service/vendorTestService";
+import modelService from "../service/modelService";
 import ormService from "../service/ormService";
 import senderService from "../service/senderService";
 import customError from "../util/customError";
@@ -165,9 +165,7 @@ async function deleteVendor(c: Context) {
         throw new customError.NotFoundError("Vendor not found");
     }
 
-    // 检查是否有关联的模型
-    const relatedModelCount = Number(await SgModel.query().where("vendor_id", vendorId).count() || 0);
-    if (relatedModelCount > 0) {
+    if (await modelService.hasModelsUsingVendor(vendorId)) {
         throw new customError.AppError("Cannot delete vendor with associated models");
     }
 

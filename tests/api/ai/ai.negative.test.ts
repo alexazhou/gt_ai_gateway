@@ -84,8 +84,11 @@ describe("AI Chat API (Negative)", () => {
             adminToken,
         );
 
-        // Create model with non-existent vendor
-        await dbHelper.execute("INSERT INTO model (name, vendor_id, enable) VALUES ('vendor-not-found-model', 999999, 1)");
+        // Insert an invalid routing config to verify unavailable-upstream handling.
+        await dbHelper.execute(
+            `INSERT INTO model (name, enable, routing_mode, routing_config)
+             VALUES ('vendor-not-found-model', 1, 'single', '{"upstreams":[{"vendor_id":999999,"enabled":true}]}')`,
+        );
     });
 
     describe("POST /llm/v1/chat/completions", () => {
@@ -282,7 +285,7 @@ describe("AI Chat API (Negative)", () => {
             expect(latestRecord!.vendor_model_name).toBe("non-existent-model");
         }, 30000);
 
-        it("should return 404 when vendor does not exist", async () => {
+        it("should return 503 when no upstream is available", async () => {
             const chatRequest = mockHelper.generateOpenAIChatRequest({
                 model: "vendor-not-found-model",
             });
@@ -293,25 +296,15 @@ describe("AI Chat API (Negative)", () => {
                 testUserToken,
             );
 
-            expect(response.status).toBe(404);
+            expect(response.status).toBe(503);
             expect(response.body).toEqual({
                 error: {
-                    message: expect.stringContaining("vendor not found"),
-                    type: "not_found_error",
+                    message: expect.stringContaining("No available upstream"),
+                    type: "api_error",
                     param: null,
-                    code: "not_found_error"
+                    code: "api_error"
                 }
             });
-
-            // Verify a failed record was created in the database
-            const records = dbHelper.query<any>("SELECT * FROM record ORDER BY id DESC LIMIT 1");
-            const latestRecord = records[0];
-            expect(latestRecord).toBeDefined();
-            expect(latestRecord!.status).toBe("failed");
-            expect(latestRecord!.failed_code).toBe("vendor_not_found");
-            expect(latestRecord!.model_id).not.toBeNull();
-            expect(latestRecord!.vendor_id).toBe(999999);
-            expect(latestRecord!.vendor_model_name).toBe("vendor-not-found-model");
         }, 30000);
     });
 
@@ -427,7 +420,7 @@ describe("AI Chat API (Negative)", () => {
             expect(latestRecord!.vendor_model_name).toBe("non-existent-model");
         }, 30000);
 
-        it("should return 404 when vendor does not exist", async () => {
+        it("should return 503 when no upstream is available", async () => {
             const messageRequest = mockHelper.generateAnthropicMessageRequest({
                 model: "vendor-not-found-model",
             });
@@ -438,24 +431,14 @@ describe("AI Chat API (Negative)", () => {
                 testUserToken,
             );
 
-            expect(response.status).toBe(404);
+            expect(response.status).toBe(503);
             expect(response.body).toEqual({
                 type: "error",
                 error: {
-                    type: "not_found_error",
-                    message: expect.stringContaining("vendor not found")
+                    type: "api_error",
+                    message: expect.stringContaining("No available upstream")
                 }
             });
-
-            // Verify a failed record was created in the database
-            const records = dbHelper.query<any>("SELECT * FROM record ORDER BY id DESC LIMIT 1");
-            const latestRecord = records[0];
-            expect(latestRecord).toBeDefined();
-            expect(latestRecord!.status).toBe("failed");
-            expect(latestRecord!.failed_code).toBe("vendor_not_found");
-            expect(latestRecord!.model_id).not.toBeNull();
-            expect(latestRecord!.vendor_id).toBe(999999);
-            expect(latestRecord!.vendor_model_name).toBe("vendor-not-found-model");
         }, 30000);
     });
 
@@ -493,7 +476,7 @@ describe("AI Chat API (Negative)", () => {
             expect(latestRecord!.vendor_model_name).toBe("non-existent-model");
         }, 30000);
 
-        it("should return 404 when vendor does not exist", async () => {
+        it("should return 503 when no upstream is available", async () => {
             const responsesRequest = {
                 model: "vendor-not-found-model",
                 messages: [{ role: "user", content: "Hello" }]
@@ -505,25 +488,15 @@ describe("AI Chat API (Negative)", () => {
                 testUserToken,
             );
 
-            expect(response.status).toBe(404);
+            expect(response.status).toBe(503);
             expect(response.body).toEqual({
                 error: {
-                    message: expect.stringContaining("vendor not found"),
-                    type: "not_found_error",
+                    message: expect.stringContaining("No available upstream"),
+                    type: "api_error",
                     param: null,
-                    code: "not_found_error"
+                    code: "api_error"
                 }
             });
-
-            // Verify a failed record was created in the database
-            const records = dbHelper.query<any>("SELECT * FROM record ORDER BY id DESC LIMIT 1");
-            const latestRecord = records[0];
-            expect(latestRecord).toBeDefined();
-            expect(latestRecord!.status).toBe("failed");
-            expect(latestRecord!.failed_code).toBe("vendor_not_found");
-            expect(latestRecord!.model_id).not.toBeNull();
-            expect(latestRecord!.vendor_id).toBe(999999);
-            expect(latestRecord!.vendor_model_name).toBe("vendor-not-found-model");
         }, 30000);
     });
 });

@@ -277,9 +277,9 @@ describe("AI Protocol Conversion API", () => {
     }, 30000);
 
 
-    it("should use vendor_model allowed_formats when model has no vendor_model_id but matching vendor_model exists", async () => {
+    it("should use vendor_model allowed_formats when an upstream has no vendor_model_id but a matching vendor_model exists", async () => {
         // This test verifies the auto-matching behavior:
-        // When model.vendor_model_id is NULL, the system should automatically
+        // When upstream.vendor_model_id is omitted, the system should automatically
         // find a vendor_model with matching name and use its allowed_formats.
 
         const mockBaseUrl = config.UPSTREAM_CONFIG.mock.url;
@@ -311,7 +311,7 @@ describe("AI Protocol Conversion API", () => {
             adminToken,
         );
 
-        // 3. Create a model WITHOUT vendor_model_id (auto mode)
+        // 3. Create a model with an automatic upstream (no vendor_model_id)
         // The model name matches the vendor_model's model_id
         const autoModelName = "restricted-model";
         const autoModel = await requestHelper.post(

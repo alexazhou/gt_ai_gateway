@@ -160,7 +160,7 @@ health[upstreamFormat].last_failure_at = now.toISOString();
 
 controller 直接用请求 JSON 构造 `SgModel`。Sutando custom cast 负责 `routing_config` 与配置类之间的转换，数据库关联和路由规则由 service 校验。
 
-迁移将每个已有 model 的 `vendor_id/vendor_model_id` 包装成一个 `single` 上游。前端创建和更新时始终提交完整路由配置；旧字段只保留用于现有数据库读取逻辑。
+迁移先将每个已有 model 的 `vendor_id/vendor_model_id` 包装成一个 `single` 上游，再删除这两个顶层字段。后续只以 `routing_config.upstreams` 为准。
 
 ## 7. 验收重点
 

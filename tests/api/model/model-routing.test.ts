@@ -53,7 +53,8 @@ describe("Model multi-upstream routing", () => {
         expect(response.body.routing_config).toEqual({
             upstreams: [{ vendor_id: primaryVendorId, enabled: true }],
         });
-        expect(response.body.vendor_id).toBe(primaryVendorId);
+        expect(response.body).not.toHaveProperty("vendor_id");
+        expect(response.body).not.toHaveProperty("vendor_model_id");
     });
 
     it("requires automatic upstreams to match vendor models outside single mode", async () => {

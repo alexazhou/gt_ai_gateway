@@ -62,7 +62,7 @@ OpenAIToAnthropicConverter
 
 1. 根据客户端 endpoint 确定 `clientFormat`。
 2. 根据模型和供应商配置解析 `upstreamFormat`。
-3. 如果模型配置了 `vendor_model_id`，先替换请求体中的模型名。
+3. 如果选中的上游配置了 `vendor_model_id`，先替换请求体中的模型名。
 4. 先按客户端协议执行请求插件。
 5. 如果 `clientFormat !== upstreamFormat`，创建转换器并执行 `convertRequestBody()`。
 6. 转换后更新转换器中的请求模型名，用于流式响应补充模型字段。

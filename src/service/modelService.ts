@@ -1,8 +1,24 @@
+import type { Builder } from "sutando";
 import { SgModel } from "../model/sgModel";
 
 import { SgVendor } from "../model/sgVendor";
 import customError from "../util/customError";
 import modelRoutingService from "./modelRoutingService";
+
+interface ModelListOptions {
+    vendorId?: number;
+    keyword?: string;
+    pageSize: number;
+    offset: number;
+}
+
+
+function filterByVendor(query: Builder<SgModel>, vendorId: number): void {
+    query.whereRaw(
+        "EXISTS (SELECT 1 FROM json_each(model.routing_config, '$.upstreams') AS upstream WHERE json_extract(upstream.value, '$.vendor_id') = ?)",
+        [vendorId],
+    );
+}
 
 
 async function getModel(modelName: string, enable?: boolean): Promise<SgModel | null> {
@@ -19,21 +35,53 @@ async function getModel(modelName: string, enable?: boolean): Promise<SgModel | 
 }
 
 
+async function listModels(options: ModelListOptions) {
+    const query = SgModel.query().orderBy("id", "desc");
+    if (options.vendorId) {
+        filterByVendor(query, options.vendorId);
+    }
+    if (options.keyword) {
+        query.where("name", "like", `%${options.keyword}%`);
+    }
+
+    const total = Number(await query.clone().count() || 0);
+    const models = await query.limit(options.pageSize).offset(options.offset).get();
+    return {
+        list: models.toArray<SgModel>(),
+        total,
+    };
+}
+
+
+async function hasModelsUsingVendor(vendorId: number): Promise<boolean> {
+    const query = SgModel.query();
+    filterByVendor(query, vendorId);
+    return Number(await query.count() || 0) > 0;
+}
+
+
 async function listEnabledModels() {
     const models = await SgModel.query()
         .where("enable", 1)
         .orderBy("id", "asc")
         .get();
     const modelList = models.toArray<SgModel>();
-    const vendorIds = [...new Set(modelList.map(model => model.vendor_id as number))];
+    const vendorIds = [...new Set(modelList.flatMap(model => (
+        model.getRoutingConfig().upstreams
+            .filter(upstream => upstream.enabled)
+            .map(upstream => upstream.vendor_id)
+    )))];
     const vendorList = vendorIds.length > 0
         ? (await SgVendor.query().whereIn("id", vendorIds).get()).toArray<SgVendor>()
         : [];
     const vendorMap = new Map(vendorList.map(vendor => [vendor.id, vendor]));
 
     return modelList.map(model => {
-        const vendor = vendorMap.get(model.vendor_id!);
-        if (!vendor) {
+        const vendorNames = [...new Set(model.getRoutingConfig().upstreams
+            .filter(upstream => upstream.enabled)
+            .map(upstream => vendorMap.get(upstream.vendor_id)?.name)
+            .filter((name): name is string => Boolean(name)))];
+        if (vendorNames.length === 0) {
             throw new customError.AppError(`Vendor not found for model ${model.name}`, 500);
         }
 
@@ -41,7 +89,7 @@ async function listEnabledModels() {
             id: model.name,
             object: "model",
             created: Math.floor(new Date(model.created_at).getTime() / 1000),
-            owned_by: vendor.name,
+            owned_by: vendorNames.join(", "),
         };
     });
 }
@@ -62,24 +110,12 @@ async function checkDuplicateEnabledModel(
 }
 
 
-function syncLegacyRoutingFields(model: SgModel): void {
-    const firstEnabled = model.getRoutingConfig().upstreams.find(upstream => upstream.enabled);
-    if (!firstEnabled) {
-        return;
-    }
-
-    model.vendor_id = firstEnabled.vendor_id;
-    model.vendor_model_id = firstEnabled.vendor_model_id ?? null;
-}
-
-
 async function createModel(model: SgModel): Promise<SgModel> {
     if (model.enable && await checkDuplicateEnabledModel(model.name ?? "")) {
         throw new customError.AppError("An enabled model with this name already exists", 409);
     }
 
     await modelRoutingService.validateConfig(model);
-    syncLegacyRoutingFields(model);
     await model.save();
     return model;
 }
@@ -104,7 +140,6 @@ async function updateModel(inputModel: SgModel): Promise<SgModel | null> {
     }
 
     await modelRoutingService.validateConfig(model);
-    syncLegacyRoutingFields(model);
     await model.save();
 
     return await SgModel.query().find(model.id);
@@ -124,6 +159,8 @@ async function deleteModel(modelId: number): Promise<boolean> {
 
 export default {
     getModel,
+    listModels,
+    hasModelsUsingVendor,
     listEnabledModels,
     createModel,
     updateModel,

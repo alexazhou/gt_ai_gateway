@@ -56,14 +56,28 @@
                 </template>
             </template>
             <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'vendor_id'">
-                    {{ getVendorName(record.vendor_id) }}
+                <template v-if="column.key === 'vendor'">
+                    <a-space direction="vertical" size="small">
+                        <span
+                            v-for="(upstream, index) in record.routing_config.upstreams"
+                            :key="`${upstream.vendor_id}-${upstream.vendor_model_id ?? 'auto'}-${index}`"
+                            :style="{ color: upstream.enabled ? undefined : '#bbb' }"
+                        >
+                            {{ getVendorName(upstream.vendor_id) }}
+                        </span>
+                    </a-space>
                 </template>
-                <template v-if="column.key === 'vendor_model_id'">
-                    <span v-if="record.vendor_model_id" class="vendor-model-tag">
-                        {{ getVendorModelName(record.vendor_model_id) }}
-                    </span>
-                    <span v-else style="color: #bbb;">自动</span>
+                <template v-if="column.key === 'upstream_model'">
+                    <a-space direction="vertical" size="small">
+                        <span
+                            v-for="(upstream, index) in record.routing_config.upstreams"
+                            :key="`${upstream.vendor_id}-${upstream.vendor_model_id ?? 'auto'}-${index}`"
+                            class="vendor-model-tag"
+                            :style="{ color: upstream.enabled ? undefined : '#bbb' }"
+                        >
+                            {{ upstream.vendor_model_id ? getVendorModelName(upstream.vendor_model_id) : `自动（${record.name}）` }}
+                        </span>
+                    </a-space>
                 </template>
                 <template v-if="column.key === 'enable'">
                     <a-tag :color="Boolean(record.enable) ? 'green' : 'red'">
@@ -149,8 +163,8 @@ const columns = computed<TableColumnsType<Model>>(() => {
     const cols: TableColumnsType<Model> = [
         { title: 'ID', key: 'id', dataIndex: 'id' },
         { title: '模型名称', key: 'name', dataIndex: 'name' },
-        { title: '供应商', key: 'vendor_id', dataIndex: 'vendor_id' },
-        { title: '供应商模型', key: 'vendor_model_id', dataIndex: 'vendor_model_id' },
+        { title: '供应商', key: 'vendor' },
+        { title: '供应商模型', key: 'upstream_model' },
         { title: '状态', key: 'enable', dataIndex: 'enable' },
     ];
     if (moduleBillingEnabled.value) {
@@ -198,10 +212,12 @@ function handleView(record: Model) {
 }
 
 function handleTest(record: Model) {
-    const vendor = vendors.value.find(v => v.id === record.vendor_id);
+    const upstream = record.routing_config.upstreams.find(item => item.enabled);
+    if (!upstream) return;
+    const vendor = vendors.value.find(v => v.id === upstream.vendor_id);
     if (!vendor) return;
-    const vendorModel = record.vendor_model_id
-        ? (vendorModelsMap.value.get(record.vendor_model_id) ?? null)
+    const vendorModel = upstream.vendor_model_id
+        ? (vendorModelsMap.value.get(upstream.vendor_model_id) ?? null)
         : null;
     const vendorModelName = vendorModel?.model_id ?? null;
     const upstreamModel = vendorModelName ?? record.name;
@@ -242,7 +258,11 @@ function getVendorModelName(id: number): string {
 }
 
 async function loadVendorModelsForPage(models: Model[]) {
-    const ids = [...new Set(models.map(m => m.vendor_model_id).filter((id): id is number => id != null))];
+    const ids = [...new Set(models.flatMap(model => (
+        model.routing_config.upstreams
+            .map(upstream => upstream.vendor_model_id)
+            .filter((id): id is number => id != null)
+    )))];
     if (ids.length === 0) return;
     try {
         const vms = await fetchVendorModelsByIds(ids);
