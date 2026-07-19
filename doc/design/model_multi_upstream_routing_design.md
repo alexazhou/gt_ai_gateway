@@ -86,7 +86,7 @@ health 保留协议对象层级，便于以后增加其他状态字段。
 - 同一个实际上游不能重复配置。
 - `enabled` 缺省为 `true`。
 
-旧的 `vendor_id/vendor_model_id` 请求转换为 `single` 配置。保存新配置时，仍将第一个启用上游同步到旧字段，兼容现有接口和前端。
+创建和更新请求必须提交完整的 `routing_mode/routing_config`。保存时将第一个启用上游同步到旧字段，供现有数据库读取逻辑使用。
 
 ## 4. 路由服务
 
@@ -158,7 +158,9 @@ health[upstreamFormat].last_failure_at = now.toISOString();
 }
 ```
 
-迁移将每个已有 model 的 `vendor_id/vendor_model_id` 包装成一个 `single` 上游。旧字段暂时保留，避免同时修改现有前端和其他接口。
+controller 直接用请求 JSON 构造 `SgModel`。Sutando custom cast 负责 `routing_config` 与配置类之间的转换，数据库关联和路由规则由 service 校验。
+
+迁移将每个已有 model 的 `vendor_id/vendor_model_id` 包装成一个 `single` 上游。前端创建和更新时始终提交完整路由配置；旧字段只保留用于现有数据库读取逻辑。
 
 ## 7. 验收重点
 

@@ -1,68 +1,15 @@
 import { Context } from "hono";
 import { SgModel } from "../model/sgModel";
-import { SgVendor } from "../model/sgVendor";
 import modelService from "../service/modelService";
 import customError from "../util/customError";
 import { createListResponse, parsePaginationQuery } from "../util/pagination";
 
 
-async function checkDuplicateEnabledModel(
-    name: string,
-    excludeId?: number,
-): Promise<boolean> {
-    const query = SgModel.query()
-        .where("name", name)
-        .where("enable", 1);
-    if (excludeId) {
-        query.where("id", "!=", excludeId);
-    }
-    const existing = await query.first();
-    return !!existing;
-}
-
-
 async function createModel(c: Context) {
-    const body = await c.req.json();
-    const { name, vendor_id, enable = true, prices = {}, vendor_model_id = null, routing_mode, routing_config } = body;
+    const model = new SgModel(await c.req.json());
+    console.log("[modelController] Creating model:", model);
 
-    console.log("[modelController] Creating model:", { name, vendor_id, enable, prices, vendor_model_id });
-
-    // Validate required fields
-    if (!name || (!vendor_id && !routing_config)) {
-        throw new customError.AppError("Missing required fields");
-    }
-
-    // Validate vendor_id exists
-    if (vendor_id) {
-        const vendor = await SgVendor.query().find(vendor_id);
-        if (!vendor) {
-            throw new customError.NotFoundError("Vendor not found");
-        }
-    }
-
-    // Check for duplicate enabled model
-    if (enable) {
-        const isDuplicate = await checkDuplicateEnabledModel(name);
-        if (isDuplicate) {
-            throw new customError.AppError("An enabled model with this name already exists", 409);
-        }
-    }
-
-    const routing = await modelService.resolveRoutingWriteData(name, {
-        vendor_id,
-        vendor_model_id,
-        routing_mode,
-        routing_config,
-    });
-    const instance = await SgModel.query().create({
-        name,
-        vendor_id: routing.vendor_id,
-        enable,
-        prices,
-        vendor_model_id: routing.vendor_model_id,
-        routing_mode: routing.routing_mode,
-        routing_config: routing.routing_config,
-    });
+    const instance = await modelService.createModel(model);
 
     console.log("[modelController] Model created successfully:", instance);
     return c.json(instance);
@@ -143,28 +90,11 @@ async function updateModel(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const { name, vendor_id, enable, prices, vendor_model_id, routing_mode, routing_config } = await c.req.json();
+    const model = new SgModel(await c.req.json());
+    model.id = modelId;
+    console.log("[modelController] Updating model:", model);
 
-    console.log("[modelController] Updating model:", {
-        modelId,
-        name,
-        vendor_id,
-        enable,
-        prices,
-        vendor_model_id,
-        routing_mode,
-        routing_config,
-    });
-
-    const updatedModel = await modelService.updateModel(modelId, {
-        name,
-        vendor_id,
-        enable,
-        prices,
-        vendor_model_id,
-        routing_mode,
-        routing_config,
-    });
+    const updatedModel = await modelService.updateModel(model);
 
     if (!updatedModel) {
         throw new customError.NotFoundError("Model not found");

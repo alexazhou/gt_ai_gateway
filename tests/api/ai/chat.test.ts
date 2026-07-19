@@ -388,10 +388,14 @@ describe("AI Chat API", () => {
             const createModelRes = await requestHelper.post(
                 "/model/create.json",
                 {
-                    name: "gateway-alias-model",
-                    vendor_id: openaiVendorId,
-                    vendor_model_id: vendorModelId,
-                    enable: true,
+                    ...modelFixtures.createRandomModel(openaiVendorId, "gateway-alias-model"),
+                    routing_config: {
+                        upstreams: [{
+                            vendor_id: openaiVendorId,
+                            vendor_model_id: vendorModelId,
+                            enabled: true,
+                        }],
+                    },
                 },
                 adminToken,
             );

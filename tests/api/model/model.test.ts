@@ -14,6 +14,33 @@ let openaiVendorId: number;
 let anthropicVendorId: number;
 let createdModelId: number;
 
+
+function toModelRequest(model: any) {
+    return {
+        name: model.name,
+        enable: Boolean(model.enable),
+        prices: model.prices ?? {},
+        routing_mode: model.routing_mode,
+        routing_config: model.routing_config,
+    };
+}
+
+
+function withSingleUpstream(model: any, vendorId: number, vendorModelId?: number) {
+    return {
+        ...toModelRequest(model),
+        routing_mode: "single",
+        routing_config: {
+            upstreams: [{
+                vendor_id: vendorId,
+                ...(vendorModelId ? { vendor_model_id: vendorModelId } : {}),
+                enabled: true,
+            }],
+        },
+    };
+}
+
+
 describe("Model API (Positive)", () => {
     beforeAll(async () => {
         await dbHelper.truncate();
@@ -201,46 +228,59 @@ describe("Model API (Positive)", () => {
         it("should update model name", async () => {
             const response = await requestHelper.put(
                 `/model/${modelToUpdate.id}`,
-                { name: "updated-gpt-3.5" },
+                {
+                    ...toModelRequest(modelToUpdate),
+                    name: "updated-gpt-3.5",
+                },
                 adminToken,
             );
 
             expect(response.status).toBe(200);
             expect(response.body.name).toBe("updated-gpt-3.5");
             expect(response.body.vendor_id).toBe(modelToUpdate.vendor_id);
+            modelToUpdate = response.body;
         });
 
         it("should update model vendor_id", async () => {
             const response = await requestHelper.put(
                 `/model/${modelToUpdate.id}`,
-                { vendor_id: anthropicVendorId },
+                withSingleUpstream(modelToUpdate, anthropicVendorId),
                 adminToken,
             );
 
             expect(response.status).toBe(200);
             expect(response.body.vendor_id).toBe(anthropicVendorId);
+            modelToUpdate = response.body;
         });
 
         it("should update model enable to false", async () => {
             const response = await requestHelper.put(
                 `/model/${modelToUpdate.id}`,
-                { enable: false },
+                {
+                    ...toModelRequest(modelToUpdate),
+                    enable: false,
+                },
                 adminToken,
             );
 
             expect(response.status).toBe(200);
             expect(response.body.enable).toBeFalsy();
+            modelToUpdate = response.body;
         });
 
         it("should update model enable to true", async () => {
             const response = await requestHelper.put(
                 `/model/${modelToUpdate.id}`,
-                { enable: true },
+                {
+                    ...toModelRequest(modelToUpdate),
+                    enable: true,
+                },
                 adminToken,
             );
 
             expect(response.status).toBe(200);
             expect(response.body.enable).toBeTruthy();
+            modelToUpdate = response.body;
         });
 
         it("should update multiple fields at once", async () => {
@@ -255,8 +295,8 @@ describe("Model API (Positive)", () => {
             const response = await requestHelper.put(
                 `/model/${modelId}`,
                 {
+                    ...withSingleUpstream(createResponse.body, anthropicVendorId),
                     name: "multi-field-updated",
-                    vendor_id: anthropicVendorId,
                     enable: false,
                 },
                 adminToken,
@@ -268,7 +308,7 @@ describe("Model API (Positive)", () => {
             expect(response.body.enable).toBeFalsy();
         });
 
-        it("should preserve fields that are not updated", async () => {
+        it("should preserve fields included in the full update", async () => {
             const modelData = modelFixtures.createRandomModel(openaiVendorId, "preserve-fields-model");
             const createResponse = await requestHelper.post(
                 "/model/create.json",
@@ -280,7 +320,7 @@ describe("Model API (Positive)", () => {
 
             const response = await requestHelper.put(
                 `/model/${modelId}`,
-                { vendor_id: anthropicVendorId },
+                withSingleUpstream(createResponse.body, anthropicVendorId),
                 adminToken,
             );
 
@@ -298,21 +338,24 @@ describe("Model API (Positive)", () => {
         beforeAll(async () => {
             const enabled1 = await requestHelper.post(
                 "/model/create.json",
-                { name: "duplicate-test-1", vendor_id: openaiVendorId, enable: true },
+                modelFixtures.createRandomModel(openaiVendorId, "duplicate-test-1"),
                 adminToken,
             );
             enabledModel1 = enabled1.body;
 
             const disabled1 = await requestHelper.post(
                 "/model/create.json",
-                { name: "duplicate-test-2", vendor_id: openaiVendorId, enable: false },
+                {
+                    ...modelFixtures.createRandomModel(openaiVendorId, "duplicate-test-2"),
+                    enable: false,
+                },
                 adminToken,
             );
             disabledModel1 = disabled1.body;
 
             const enabled2 = await requestHelper.post(
                 "/model/create.json",
-                { name: "duplicate-test-3", vendor_id: openaiVendorId, enable: true },
+                modelFixtures.createRandomModel(openaiVendorId, "duplicate-test-3"),
                 adminToken,
             );
             enabledModel2 = enabled2.body;
@@ -321,7 +364,11 @@ describe("Model API (Positive)", () => {
         it("should return error when editing model to enabled with existing enabled model name", async () => {
             const response = await requestHelper.put(
                 `/model/${disabledModel1.id}`,
-                { name: enabledModel1.name, enable: true },
+                {
+                    ...toModelRequest(disabledModel1),
+                    name: enabledModel1.name,
+                    enable: true,
+                },
                 adminToken,
             );
 
@@ -332,7 +379,11 @@ describe("Model API (Positive)", () => {
         it("should succeed when editing model to disabled with existing enabled model name", async () => {
             const response = await requestHelper.put(
                 `/model/${disabledModel1.id}`,
-                { name: enabledModel1.name, enable: false },
+                {
+                    ...toModelRequest(disabledModel1),
+                    name: enabledModel1.name,
+                    enable: false,
+                },
                 adminToken,
             );
 
@@ -344,15 +395,24 @@ describe("Model API (Positive)", () => {
         it("should return error when editing model enable to true with duplicate name", async () => {
             const response = await requestHelper.put(
                 `/model/${disabledModel1.id}`,
-                { name: "new-duplicate-name", enable: true },
+                {
+                    ...toModelRequest(disabledModel1),
+                    name: "new-duplicate-name",
+                    enable: true,
+                },
                 adminToken,
             );
 
             expect(response.status).toBe(200);
+            disabledModel1 = response.body;
 
             const duplicateResponse = await requestHelper.put(
                 `/model/${enabledModel2.id}`,
-                { name: "new-duplicate-name", enable: true },
+                {
+                    ...toModelRequest(enabledModel2),
+                    name: "new-duplicate-name",
+                    enable: true,
+                },
                 adminToken,
             );
 
@@ -363,7 +423,7 @@ describe("Model API (Positive)", () => {
         it("should return error when creating enabled model with existing enabled name", async () => {
             const response = await requestHelper.post(
                 "/model/create.json",
-                { name: enabledModel1.name, vendor_id: openaiVendorId, enable: true },
+                modelFixtures.createRandomModel(openaiVendorId, enabledModel1.name),
                 adminToken,
             );
 
@@ -374,7 +434,10 @@ describe("Model API (Positive)", () => {
         it("should succeed when creating disabled model with existing enabled name", async () => {
             const response = await requestHelper.post(
                 "/model/create.json",
-                { name: enabledModel1.name, vendor_id: openaiVendorId, enable: false },
+                {
+                    ...modelFixtures.createRandomModel(openaiVendorId, enabledModel1.name),
+                    enable: false,
+                },
                 adminToken,
             );
 
@@ -411,11 +474,11 @@ describe("Model API (Positive)", () => {
         it("should create a model with vendor_model_id set", async () => {
             const response = await requestHelper.post(
                 "/model/create.json",
-                {
-                    name: "model-with-vendor-model",
-                    vendor_id: openaiVendorId,
-                    vendor_model_id: vendorModelId,
-                },
+                withSingleUpstream(
+                    modelFixtures.createRandomModel(openaiVendorId, "model-with-vendor-model"),
+                    openaiVendorId,
+                    vendorModelId,
+                ),
                 adminToken,
             );
 
@@ -434,7 +497,7 @@ describe("Model API (Positive)", () => {
 
             const response = await requestHelper.put(
                 `/model/${modelId}`,
-                { vendor_model_id: vendorModelId },
+                withSingleUpstream(createRes.body, openaiVendorId, vendorModelId),
                 adminToken,
             );
 
@@ -445,18 +508,18 @@ describe("Model API (Positive)", () => {
         it("should update model to clear vendor_model_id", async () => {
             const createRes = await requestHelper.post(
                 "/model/create.json",
-                {
-                    name: "clear-vendor-model-test",
-                    vendor_id: openaiVendorId,
-                    vendor_model_id: vendorModelId,
-                },
+                withSingleUpstream(
+                    modelFixtures.createRandomModel(openaiVendorId, "clear-vendor-model-test"),
+                    openaiVendorId,
+                    vendorModelId,
+                ),
                 adminToken,
             );
             const modelId = createRes.body.id;
 
             const response = await requestHelper.put(
                 `/model/${modelId}`,
-                { vendor_model_id: null },
+                withSingleUpstream(createRes.body, openaiVendorId),
                 adminToken,
             );
 

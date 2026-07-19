@@ -15,6 +15,7 @@ let openaiVendorId: number;
 let testUserId: number;
 let testUserToken: string;
 let modelId: number;
+let modelConfig: any;
 
 describe("Billing API", () => {
     beforeAll(async () => {
@@ -42,9 +43,7 @@ describe("Billing API", () => {
     describe("Model Pricing", () => {
         it("should create a model with pricing fields", async () => {
             const modelData = {
-                name: "gpt-3.5-turbo-billing",
-                vendor_id: openaiVendorId,
-                enable: true,
+                ...modelFixtures.createRandomModel(openaiVendorId, "gpt-3.5-turbo-billing"),
                 prices: {
                     input: 0.5,
                     output: 1.5,
@@ -63,14 +62,11 @@ describe("Billing API", () => {
             expect(response.body.prices.output).toBe(1.5);
 
             modelId = response.body.id;
+            modelConfig = response.body;
         });
 
         it("should create a model with default pricing (0)", async () => {
-            const modelData = {
-                name: "gpt-4-free",
-                vendor_id: openaiVendorId,
-                enable: true,
-            };
+            const modelData = modelFixtures.createRandomModel(openaiVendorId, "gpt-4-free");
             const response = await requestHelper.post(
                 "/model/create.json",
                 modelData,
@@ -85,6 +81,10 @@ describe("Billing API", () => {
             const response = await requestHelper.put(
                 `/model/${modelId}`,
                 {
+                    name: modelConfig.name,
+                    enable: Boolean(modelConfig.enable),
+                    routing_mode: modelConfig.routing_mode,
+                    routing_config: modelConfig.routing_config,
                     prices: {
                         input: 1.0,
                         output: 2.0,
@@ -96,6 +96,7 @@ describe("Billing API", () => {
             expect(response.status).toBe(200);
             expect(response.body.prices.input).toBe(1.0);
             expect(response.body.prices.output).toBe(2.0);
+            modelConfig = response.body;
         });
 
         it("should get model with pricing fields", async () => {

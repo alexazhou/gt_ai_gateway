@@ -4,6 +4,7 @@ import dbHelper from "../../helpers/dbHelper";
 import { setupAdminUser } from "../../globalSetup";
 import userService from "../../../src/service/userService";
 import { ROOT_USER_ID } from "../../../src/constants";
+import modelFixtures from "../../fixtures/modelFixtures";
 
 /**
  * Root Token Tests
@@ -137,10 +138,7 @@ describe("Root Token Tests", () => {
             // Create a model using root token
             const modelResponse = await requestHelper.post(
                 "/model/create.json",
-                {
-                    name: "gpt-4",
-                    vendor_id: vendorId,
-                },
+                modelFixtures.createRandomModel(vendorId, "gpt-4"),
                 ROOT_TOKEN,
             );
             modelId = modelResponse.body.id;
@@ -196,10 +194,7 @@ describe("Root Token Tests", () => {
             it("should allow creating model with root token", async () => {
                 const response = await requestHelper.post(
                     "/model/create.json",
-                    {
-                        name: "gpt-3.5-turbo",
-                        vendor_id: vendorId,
-                    },
+                    modelFixtures.createRandomModel(vendorId, "gpt-3.5-turbo"),
                     ROOT_TOKEN,
                 );
 
@@ -262,10 +257,7 @@ describe("Root Token Tests", () => {
             // Create a model
             await requestHelper.post(
                 "/model/create.json",
-                {
-                    name: modelName,
-                    vendor_id: vendorId,
-                },
+                modelFixtures.createRandomModel(vendorId, modelName),
                 ROOT_TOKEN,
             );
         });
@@ -293,10 +285,7 @@ describe("Root Token Tests", () => {
             const anthropicModel = "claude-3-haiku-20240307";
             await requestHelper.post(
                 "/model/create.json",
-                {
-                    name: anthropicModel,
-                    vendor_id: vendorId,
-                },
+                modelFixtures.createRandomModel(vendorId, anthropicModel),
                 ROOT_TOKEN,
             );
 

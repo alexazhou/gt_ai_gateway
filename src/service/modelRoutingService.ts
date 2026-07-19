@@ -4,7 +4,7 @@ import {
     RETRYABLE_UPSTREAM_STATUS_CODES,
     UPSTREAM_FAILURE_COOLDOWN_MS,
 } from "../constants";
-import { ModelRoutingConfig, ModelUpstreamConfig, SgModel } from "../model/sgModel";
+import { SgModel } from "../model/sgModel";
 import { SgVendor } from "../model/sgVendor";
 import { SgVendorModel } from "../model/sgVendorModel";
 import customError from "../util/customError";
@@ -25,59 +25,34 @@ const strategies: Record<ModelRoutingMode, BaseRoutingStrategy> = {
 };
 
 
-function normalizeMode(mode: unknown): ModelRoutingMode {
-    if (Object.values(ModelRoutingMode).includes(mode as ModelRoutingMode)) {
-        return mode as ModelRoutingMode;
+async function validateConfig(
+    model: SgModel,
+): Promise<void> {
+    if (typeof model.name !== "string" || !model.name.trim()) {
+        throw new customError.AppError("Model name is required");
     }
 
-    throw new customError.AppError("Invalid routing mode");
-}
-
-
-function normalizeUpstream(value: unknown): ModelUpstreamConfig {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-        throw new customError.AppError("Invalid upstream configuration");
+    if (!Object.values(ModelRoutingMode).includes(model.routing_mode)) {
+        throw new customError.AppError("Invalid routing mode");
     }
 
-    const raw = value as Record<string, unknown>;
-    const vendorId = Number(raw.vendor_id);
-    if (!Number.isInteger(vendorId) || vendorId <= 0) {
-        throw new customError.AppError("Each upstream must specify a valid vendor_id");
-    }
-
-    const upstream = new ModelUpstreamConfig({
-        vendor_id: vendorId,
-        enabled: raw.enabled !== false,
-    });
-
-    if (raw.vendor_model_id !== undefined && raw.vendor_model_id !== null) {
-        const vendorModelId = Number(raw.vendor_model_id);
-        if (!Number.isInteger(vendorModelId) || vendorModelId <= 0) {
+    const mode = model.routing_mode;
+    const upstreams = model.getRoutingConfig().upstreams;
+    for (const upstream of upstreams) {
+        if (!Number.isInteger(upstream.vendor_id) || upstream.vendor_id <= 0) {
+            throw new customError.AppError("Each upstream must specify a valid vendor_id");
+        }
+        if (
+            upstream.vendor_model_id !== undefined
+            && (!Number.isInteger(upstream.vendor_model_id) || upstream.vendor_model_id <= 0)
+        ) {
             throw new customError.AppError("vendor_model_id must be a positive integer");
         }
-        upstream.vendor_model_id = vendorModelId;
+        if (typeof upstream.enabled !== "boolean") {
+            throw new customError.AppError("enabled must be a boolean");
+        }
     }
 
-    return upstream;
-}
-
-
-async function validateConfig(
-    modelName: string,
-    modeValue: unknown,
-    configValue: unknown,
-): Promise<{ mode: ModelRoutingMode; config: ModelRoutingConfig }> {
-    const mode = normalizeMode(modeValue);
-    if (!configValue || typeof configValue !== "object" || Array.isArray(configValue)) {
-        throw new customError.AppError("routing_config must be an object");
-    }
-
-    const rawUpstreams = (configValue as Record<string, unknown>).upstreams;
-    if (!Array.isArray(rawUpstreams)) {
-        throw new customError.AppError("routing_config.upstreams must be an array");
-    }
-
-    const upstreams = rawUpstreams.map(normalizeUpstream);
     const enabledUpstreams = upstreams.filter(upstream => upstream.enabled);
     if (enabledUpstreams.length === 0) {
         throw new customError.AppError("At least one upstream must be enabled");
@@ -88,7 +63,7 @@ async function validateConfig(
 
     const routeKeys = new Set<string>();
     for (const upstream of enabledUpstreams) {
-        const routeKey = `${upstream.vendor_id}:${upstream.vendor_model_id ?? modelName}`;
+        const routeKey = `${upstream.vendor_id}:${upstream.vendor_model_id ?? model.name}`;
         if (routeKeys.has(routeKey)) {
             throw new customError.AppError("Duplicate enabled upstream");
         }
@@ -112,17 +87,15 @@ async function validateConfig(
         } else if (mode !== ModelRoutingMode.SINGLE && upstream.enabled) {
             const vendorModel = await SgVendorModel.query()
                 .where("vendor_id", upstream.vendor_id)
-                .where("model_id", modelName)
+                .where("model_id", model.name)
                 .first();
             if (!vendorModel) {
                 throw new customError.AppError(
-                    `Vendor ${upstream.vendor_id} does not have model ${modelName}`,
+                    `Vendor ${upstream.vendor_id} does not have model ${model.name}`,
                 );
             }
         }
     }
-
-    return { mode, config: new ModelRoutingConfig({ upstreams }) };
 }
 
 
@@ -204,11 +177,8 @@ async function selectUpstream(
     clientFormat: ApiFormat,
     now: number = Date.now(),
 ): Promise<ModelRoutingResult | null> {
-    const mode = Object.values(ModelRoutingMode).includes(model.routing_mode)
-        ? model.routing_mode
-        : ModelRoutingMode.SINGLE;
     const vendorModels = await resolveAvailableVendorModels(model, clientFormat, now);
-    const selected = strategies[mode].selectUpstream(model, vendorModels);
+    const selected = strategies[model.routing_mode].selectUpstream(model, vendorModels);
     return selected ? new ModelRoutingResult(selected.id) : null;
 }
 

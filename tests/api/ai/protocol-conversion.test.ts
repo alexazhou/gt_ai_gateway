@@ -97,7 +97,13 @@ describe("AI Protocol Conversion API", () => {
             "/model/create.json",
             {
                 ...modelFixtures.createRandomModel(responsesErrorVendor.body.id, responsesErrorModelName),
-                vendor_model_id: addResponsesVendorModel.body.id,
+                routing_config: {
+                    upstreams: [{
+                        vendor_id: responsesErrorVendor.body.id,
+                        vendor_model_id: addResponsesVendorModel.body.id,
+                        enabled: true,
+                    }],
+                },
             },
             adminToken,
         );
@@ -310,11 +316,7 @@ describe("AI Protocol Conversion API", () => {
         const autoModelName = "restricted-model";
         const autoModel = await requestHelper.post(
             "/model/create.json",
-            {
-                name: autoModelName,
-                vendor_id: dualFormatVendor.body.id,
-                enable: true,
-            },
+            modelFixtures.createRandomModel(dualFormatVendor.body.id, autoModelName),
             adminToken,
         );
 

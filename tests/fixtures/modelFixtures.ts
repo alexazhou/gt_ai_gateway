@@ -5,45 +5,38 @@ import config from "../config";
  */
 
 const MODEL_FIXTURES = {
-    basic: (vendorId: number) => ({
-        name: "test-model",
-        vendor_id: vendorId,
-        enable: true,
-    }),
+    basic: (vendorId: number) => createModel("test-model", vendorId),
     gpt35: (vendorId: number) => {
         const upstreamConfig = config.getCurrentUpstreamConfig();
-        return {
-            name: upstreamConfig.openai.model,
-            vendor_id: vendorId,
-            enable: true,
-        };
+        return createModel(upstreamConfig.openai.model, vendorId);
     },
-    gpt4: (vendorId: number) => ({
-        name: "gpt-4",
-        vendor_id: vendorId,
-        enable: true,
-    }),
+    gpt4: (vendorId: number) => createModel("gpt-4", vendorId),
     claudeHaiku: (vendorId: number) => {
         const upstreamConfig = config.getCurrentUpstreamConfig();
-        return {
-            name: upstreamConfig.anthropic.model,
-            vendor_id: vendorId,
-            enable: true,
-        };
+        return createModel(upstreamConfig.anthropic.model, vendorId);
     },
-    claudeSonnet: (vendorId: number) => ({
-        name: "claude-3-sonnet-20240229",
-        vendor_id: vendorId,
-        enable: true,
-    }),
+    claudeSonnet: (vendorId: number) => createModel("claude-3-sonnet-20240229", vendorId),
 };
 
-function createRandomModel(vendorId: number, name?: string) {
+
+function createModel(name: string, vendorId: number) {
     return {
-        name: name || `test-model-${Date.now()}`,
-        vendor_id: vendorId,
+        name,
         enable: true,
+        prices: {},
+        routing_mode: "single" as const,
+        routing_config: {
+            upstreams: [{
+                vendor_id: vendorId,
+                enabled: true,
+            }],
+        },
     };
+}
+
+
+function createRandomModel(vendorId: number, name?: string) {
+    return createModel(name || `test-model-${Date.now()}`, vendorId);
 }
 
 export default {

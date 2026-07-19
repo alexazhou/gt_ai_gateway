@@ -1,26 +1,8 @@
-import { ModelRoutingConfig, SgModel } from "../model/sgModel";
+import { SgModel } from "../model/sgModel";
 
 import { SgVendor } from "../model/sgVendor";
-import { ModelRoutingMode } from "../constants";
 import customError from "../util/customError";
 import modelRoutingService from "./modelRoutingService";
-
-interface ModelRoutingInput {
-    vendor_id?: number;
-    vendor_model_id?: number | null;
-    routing_mode?: ModelRoutingMode;
-    routing_config?: unknown;
-}
-
-interface ModelUpdateInput {
-    name?: string;
-    vendor_id?: number;
-    vendor_model_id?: number | null;
-    enable?: boolean;
-    prices?: unknown;
-    routing_mode?: ModelRoutingMode;
-    routing_config?: unknown;
-}
 
 
 async function getModel(modelName: string, enable?: boolean): Promise<SgModel | null> {
@@ -80,114 +62,52 @@ async function checkDuplicateEnabledModel(
 }
 
 
-async function resolveRoutingWriteData(
-    modelName: string,
-    data: ModelRoutingInput,
-    currentModel?: SgModel,
-): Promise<{
-    routing_mode: ModelRoutingMode;
-    routing_config: ModelRoutingConfig;
-    vendor_id: number;
-    vendor_model_id: number | null;
-}> {
-    const hasRoutingInput = data.routing_mode !== undefined || data.routing_config !== undefined;
-    const hasLegacyRoutingInput = data.vendor_id !== undefined || data.vendor_model_id !== undefined;
-
-    let mode = data.routing_mode ?? currentModel?.routing_mode ?? ModelRoutingMode.SINGLE;
-    let config = data.routing_config ?? currentModel?.getRoutingConfig();
-    if (!hasRoutingInput && (hasLegacyRoutingInput || !currentModel)) {
-        const vendorId = data.vendor_id ?? currentModel?.vendor_id;
-        if (!vendorId) {
-            throw new customError.AppError("Missing required fields");
-        }
-        mode = ModelRoutingMode.SINGLE;
-        const vendorModelId = data.vendor_model_id !== undefined
-            ? data.vendor_model_id
-            : currentModel?.vendor_model_id;
-        config = new ModelRoutingConfig({
-            upstreams: [{
-                vendor_id: vendorId,
-                ...(vendorModelId ? { vendor_model_id: vendorModelId } : {}),
-                enabled: true,
-            }],
-        });
-    }
-    if (!config) {
-        throw new customError.AppError("Missing required fields");
+function syncLegacyRoutingFields(model: SgModel): void {
+    const firstEnabled = model.getRoutingConfig().upstreams.find(upstream => upstream.enabled);
+    if (!firstEnabled) {
+        return;
     }
 
-    const validated = await modelRoutingService.validateConfig(modelName, mode, config);
-    const firstEnabled = validated.config.upstreams.find(upstream => upstream.enabled)!;
-    return {
-        routing_mode: validated.mode,
-        routing_config: validated.config,
-        vendor_id: firstEnabled.vendor_id,
-        vendor_model_id: firstEnabled.vendor_model_id ?? null,
-    };
+    model.vendor_id = firstEnabled.vendor_id;
+    model.vendor_model_id = firstEnabled.vendor_model_id ?? null;
 }
 
 
-async function updateModel(
-    modelId: number,
-    data: ModelUpdateInput,
-): Promise<SgModel | null> {
-    const model = await SgModel.query().find(modelId);
+async function createModel(model: SgModel): Promise<SgModel> {
+    if (model.enable && await checkDuplicateEnabledModel(model.name ?? "")) {
+        throw new customError.AppError("An enabled model with this name already exists", 409);
+    }
+
+    await modelRoutingService.validateConfig(model);
+    syncLegacyRoutingFields(model);
+    await model.save();
+    return model;
+}
+
+
+async function updateModel(inputModel: SgModel): Promise<SgModel | null> {
+    const model = await SgModel.query().find(inputModel.id);
 
     if (!model) {
         return null;
     }
 
-    // Validate vendor_id exists if provided
-    if (data.vendor_id !== undefined) {
-        const vendor = await SgVendor.query().find(data.vendor_id);
-        if (!vendor) {
-            return null;
-        }
-    }
+    const { id: _id, ...updateData } = inputModel.toData();
+    model.fill(updateData);
 
     // Check for duplicate enabled model when enabling or changing name
-    const newName = data.name ?? model.name ?? "";
-    const newEnable = data.enable !== undefined ? data.enable : model.enable;
-
-    if (newEnable) {
-        const isDuplicate = await checkDuplicateEnabledModel(newName, modelId);
+    if (model.enable) {
+        const isDuplicate = await checkDuplicateEnabledModel(model.name ?? "", model.id);
         if (isDuplicate) {
             throw new customError.AppError("An enabled model with this name already exists", 409);
         }
     }
 
-    // Note: name, vendor_id, enable, input_price, output_price can be updated. The id cannot be modified.
-    const updateData: Record<string, unknown> = {
-        name: newName,
-        vendor_id: data.vendor_id ?? model.vendor_id,
-        enable: newEnable,
-    };
+    await modelRoutingService.validateConfig(model);
+    syncLegacyRoutingFields(model);
+    await model.save();
 
-    if (data.prices !== undefined) {
-        updateData.prices = JSON.stringify(data.prices);
-    }
-
-    if ("vendor_model_id" in data) {
-        updateData.vendor_model_id = data.vendor_model_id ?? null;
-    }
-
-    const hasRoutingUpdate = data.vendor_id !== undefined
-        || data.vendor_model_id !== undefined
-        || data.routing_mode !== undefined
-        || data.routing_config !== undefined;
-    if (hasRoutingUpdate) {
-        const routing = await resolveRoutingWriteData(newName, data, model);
-        updateData.vendor_id = routing.vendor_id;
-        updateData.vendor_model_id = routing.vendor_model_id;
-        updateData.routing_mode = routing.routing_mode;
-        updateData.routing_config = JSON.stringify(routing.routing_config);
-    }
-
-    await SgModel.query()
-        .where("id", modelId)
-        .update(updateData);
-
-    return await SgModel.query().find(modelId);
+    return await SgModel.query().find(model.id);
 }
 
 
@@ -205,7 +125,7 @@ async function deleteModel(modelId: number): Promise<boolean> {
 export default {
     getModel,
     listEnabledModels,
-    resolveRoutingWriteData,
+    createModel,
     updateModel,
     deleteModel,
 };

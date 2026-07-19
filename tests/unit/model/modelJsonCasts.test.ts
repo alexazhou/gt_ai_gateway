@@ -13,13 +13,12 @@ import { ApiFormat } from "../../../src/constants";
 
 describe("model JSON custom casts", () => {
     it("casts routing_config to ModelRoutingConfig and nested upstream classes", () => {
-        const config = ModelRoutingConfig.get(
-            {} as SgModel,
-            "routing_config",
-            JSON.stringify({
+        const model = new SgModel({
+            routing_config: {
                 upstreams: [{ vendor_id: 3, vendor_model_id: 7, enabled: true }],
-            }),
-        );
+            },
+        });
+        const config = model.getRoutingConfig();
 
         expect(config).toBeInstanceOf(ModelRoutingConfig);
         expect(config.upstreams[0]).toBeInstanceOf(ModelUpstreamConfig);

@@ -3,6 +3,7 @@ import requestHelper from "../../helpers/requestHelper";
 import dbHelper from "../../helpers/dbHelper"
 import { setupAdminUser } from "../../globalSetup";
 import userFixtures from "../../fixtures/userFixtures";
+import modelFixtures from "../../fixtures/modelFixtures";
 
 /**
  * Authentication and Authorization Tests
@@ -67,10 +68,7 @@ describe("Auth API Tests", () => {
         // Create OpenAI model for testing
         const modelResponse = await requestHelper.post(
             "/model/create.json",
-            {
-                name: "gpt-4",
-                vendor_id: vendorId,
-            },
+            modelFixtures.createRandomModel(vendorId, "gpt-4"),
             adminToken,
         );
         modelId = modelResponse.body.id;
@@ -92,10 +90,7 @@ describe("Auth API Tests", () => {
         // Create Anthropic model for testing
         const anthropicModelResponse = await requestHelper.post(
             "/model/create.json",
-            {
-                name: "claude-3-opus-20240229",
-                vendor_id: anthropicVendorId,
-            },
+            modelFixtures.createRandomModel(anthropicVendorId, "claude-3-opus-20240229"),
             adminToken,
         );
         anthropicModelId = anthropicModelResponse.body.id;
@@ -321,11 +316,7 @@ describe("Auth API Tests", () => {
             it("should return 403 with normal user token", async () => {
                 const response = await requestHelper.post(
                     "/model/create.json",
-                    {
-                        name: "New Model",
-                        vendor_id: vendorId,
-                        model_name: "gpt-3.5-turbo",
-                    },
+                    modelFixtures.createRandomModel(vendorId, "New Model"),
                     normalToken,
                 );
 
@@ -335,11 +326,7 @@ describe("Auth API Tests", () => {
             it("should return 200 with admin token", async () => {
                 const response = await requestHelper.post(
                     "/model/create.json",
-                    {
-                        name: "New Model",
-                        vendor_id: vendorId,
-                        model_name: "gpt-3.5-turbo",
-                    },
+                    modelFixtures.createRandomModel(vendorId, "New Model"),
                     adminToken,
                 );
 

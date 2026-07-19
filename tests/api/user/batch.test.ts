@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import requestHelper from '../../helpers/requestHelper';
 import dbHelper from '../../helpers/dbHelper';
+import modelFixtures from '../../fixtures/modelFixtures';
 
 describe('Batch API', () => {
     let rootToken = 'root-token-123';
@@ -59,12 +60,16 @@ describe('Batch API', () => {
                 type: 'openai', name: 'Model Vendor', token: 'token' 
             }, rootToken);
 
-            const model1 = await requestHelper.post('/model/create.json', { 
-                name: 'Model 1', vendor_id: vendor.body.id 
-            }, rootToken);
-            const model2 = await requestHelper.post('/model/create.json', { 
-                name: 'Model 2', vendor_id: vendor.body.id 
-            }, rootToken);
+            const model1 = await requestHelper.post(
+                '/model/create.json',
+                modelFixtures.createRandomModel(vendor.body.id, 'Model 1'),
+                rootToken,
+            );
+            const model2 = await requestHelper.post(
+                '/model/create.json',
+                modelFixtures.createRandomModel(vendor.body.id, 'Model 2'),
+                rootToken,
+            );
 
             const response = await requestHelper.post('/model/batch.json', { 
                 ids: [model1.body.id, model2.body.id] 

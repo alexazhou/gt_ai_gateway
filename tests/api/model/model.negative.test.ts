@@ -9,8 +9,6 @@ import { setupAdminUser } from "../../globalSetup";
  * Model Endpoint Negative Tests
  */
 
-let existingModelId: number;
-let existingModelName: string;
 let existingVendorId: number;
 let updateModelId: number;
 let adminToken: string;
@@ -29,26 +27,24 @@ describe("Model API (Negative)", () => {
         existingVendorId = vendor.body.id;
 
         // Create an existing model
-        const model = await requestHelper.post("/model/create.json", {
-            name: "duplicate-model",
-            vendor_id: existingVendorId,
-        }, adminToken);
-        existingModelId = model.body.id;
-        existingModelName = "duplicate-model";
+        await requestHelper.post(
+            "/model/create.json",
+            modelFixtures.createRandomModel(existingVendorId, "duplicate-model"),
+            adminToken,
+        );
 
         // Create a model for update tests
-        const updateModel = await requestHelper.post("/model/create.json", {
-            name: "update-test-model",
-            vendor_id: existingVendorId,
-        }, adminToken);
+        const updateModel = await requestHelper.post(
+            "/model/create.json",
+            modelFixtures.createRandomModel(existingVendorId, "update-test-model"),
+            adminToken,
+        );
         updateModelId = updateModel.body.id;
     });
 
     describe("POST /model/create.json", () => {
         it("should return error when name is missing", async () => {
-            const modelData = {
-                vendor_id: existingVendorId,
-            };
+            const { name: _name, ...modelData } = modelFixtures.createRandomModel(existingVendorId);
             const response = await requestHelper.post(
                 "/model/create.json",
                 modelData,
@@ -57,9 +53,12 @@ describe("Model API (Negative)", () => {
             expect(response.status).toBeGreaterThanOrEqual(400);
         });
 
-        it("should return error when vendor_id is missing", async () => {
+        it("should return error when routing config is missing", async () => {
             const modelData = {
                 name: "test-model",
+                enable: true,
+                prices: {},
+                routing_mode: "single",
             };
             const response = await requestHelper.post(
                 "/model/create.json",
@@ -80,10 +79,7 @@ describe("Model API (Negative)", () => {
         });
 
         it("should return error when vendor_id does not exist", async () => {
-            const modelData = {
-                name: "test-model",
-                vendor_id: 99999,
-            };
+            const modelData = modelFixtures.createRandomModel(99999, "test-model");
             const response = await requestHelper.post(
                 "/model/create.json",
                 modelData,
@@ -164,10 +160,11 @@ describe("Model API (Negative)", () => {
             expect(response.body).toHaveProperty("error");
         });
 
-        it("should return error when vendor_id does not exist", async () => {
+        it("should return error when routing vendor does not exist", async () => {
             const response = await requestHelper.put(
                 `/model/${updateModelId}`,
-                { vendor_id: 99999 },
+                modelFixtures.createRandomModel(99999, "update-test-model"),
+                adminToken,
             );
 
             expect(response.status).toBeGreaterThanOrEqual(400);

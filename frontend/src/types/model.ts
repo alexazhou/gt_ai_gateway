@@ -26,33 +26,12 @@ export interface Model extends BaseEntity {
     } | null;
 }
 
-export interface CreateModelRequest {
-    name: string;
-    vendor_id?: number;
-    enable?: boolean;
-    prices?: {
-        input?: number;
-        output?: number;
-        cache_read?: number;
-    } | null;
-    vendor_model_id?: number | null;
-    routing_mode?: ModelRoutingMode;
-    routing_config?: ModelRoutingConfig;
-}
+export type CreateModelRequest = Pick<
+    Model,
+    'name' | 'enable' | 'prices' | 'routing_mode' | 'routing_config'
+>;
 
-export interface UpdateModelRequest {
-    name?: string;
-    vendor_id?: number;
-    enable?: boolean;
-    prices?: {
-        input?: number;
-        output?: number;
-        cache_read?: number;
-    } | null;
-    vendor_model_id?: number | null;
-    routing_mode?: ModelRoutingMode;
-    routing_config?: ModelRoutingConfig;
-}
+export type UpdateModelRequest = CreateModelRequest;
 
 export interface ModelQuery extends TableQuery {
     vendor_id?: number;

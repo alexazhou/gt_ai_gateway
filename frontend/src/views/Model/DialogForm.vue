@@ -206,7 +206,7 @@ import { createModel, updateModel } from '@/api/model';
 import { listVendors, listVendorModels } from '@/api/vendor';
 import { getConfig } from '@/api/config';
 import SettingsCollapse from '@/components/common/SettingsCollapse.vue';
-import type { Model, ModelRoutingMode, ModelRoutingConfig } from '@/types/model';
+import type { CreateModelRequest, Model, ModelRoutingMode, ModelRoutingConfig } from '@/types/model';
 import type { Vendor as VendorType, VendorModel } from '@/types/vendor';
 import { normalizeListResponse } from '@/utils/listResponse';
 import { notifyError, notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
@@ -382,14 +382,8 @@ function openEdit(model: Model) {
     currentId.value = model.id;
     billingExpanded.value = [];
     formState.name = model.name;
-    formState.routing_mode = model.routing_mode ?? 'single';
-    const upstreams = model.routing_config?.upstreams?.length
-        ? model.routing_config.upstreams
-        : [{
-            vendor_id: model.vendor_id,
-            vendor_model_id: model.vendor_model_id ?? undefined,
-            enabled: true,
-        }];
+    formState.routing_mode = model.routing_mode;
+    const upstreams = model.routing_config.upstreams;
     formState.upstreams = upstreams.map(upstream => createUpstream({
         vendor_id: upstream.vendor_id,
         vendor_model_id: upstream.vendor_model_id,
@@ -437,7 +431,7 @@ async function handleOk() {
                 enabled: upstream.enabled,
             })),
         };
-        const requestData = {
+        const requestData: CreateModelRequest = {
             name: formState.name,
             enable: formState.enable,
             routing_mode: formState.routing_mode,

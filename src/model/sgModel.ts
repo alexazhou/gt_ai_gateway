@@ -9,7 +9,7 @@ class ModelUpstreamConfig {
 
     constructor(data?: Partial<ModelUpstreamConfig>) {
         if (data?.vendor_id !== undefined) this.vendor_id = data.vendor_id;
-        if (typeof data?.vendor_model_id === "number") this.vendor_model_id = data.vendor_model_id;
+        if (data?.vendor_model_id !== undefined) this.vendor_model_id = data.vendor_model_id;
         if (data?.enabled !== undefined) this.enabled = data.enabled;
     }
 
@@ -82,8 +82,18 @@ class SgModel extends Model {
     created_at!: Date;
     updated_at!: Date;
 
+    constructor(attributes: Record<string, unknown> = {}) {
+        super();
+        this.fill({
+            enable: true,
+            prices: {},
+            ...attributes,
+        });
+    }
+
+
     getRoutingConfig(): ModelRoutingConfig {
-        return this.routing_config;
+        return this.routing_config ?? new ModelRoutingConfig();
     }
 
     [inspect.custom](depth: number, options: InspectOptions) {

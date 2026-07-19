@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import requestHelper from "../../helpers/requestHelper";
 import mockHelper from "../../helpers/mockHelper";
 import vendorFixtures from "../../fixtures/vendorFixtures";
+import modelFixtures from "../../fixtures/modelFixtures";
 import dbHelper from "../../helpers/dbHelper"
 import { setupAdminUser } from "../../globalSetup";
 
@@ -43,8 +44,7 @@ describe("Gateway - Model Enable Filter", () => {
         const disabledModel = await requestHelper.post(
             "/model/create.json",
             {
-                name: "disabled-model",
-                vendor_id: openaiVendorId,
+                ...modelFixtures.createRandomModel(openaiVendorId, "disabled-model"),
                 enable: false,
             },
             adminToken,
@@ -54,11 +54,7 @@ describe("Gateway - Model Enable Filter", () => {
         // Create enabled model (requires admin)
         const enabledModel = await requestHelper.post(
             "/model/create.json",
-            {
-                name: "enabled-model",
-                vendor_id: openaiVendorId,
-                enable: true,
-            },
+            modelFixtures.createRandomModel(openaiVendorId, "enabled-model"),
             adminToken,
         );
         enabledModelId = enabledModel.body.id;

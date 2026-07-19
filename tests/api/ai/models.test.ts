@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import requestHelper from "../../helpers/requestHelper";
 import dbHelper from "../../helpers/dbHelper";
 import { setupAdminUser } from "../../globalSetup";
+import modelFixtures from "../../fixtures/modelFixtures";
 
 const adminToken = "admin-token-123";
 const normalToken = "models-user-token";
@@ -40,17 +41,20 @@ describe("GET /llm/v1/models", () => {
 
         await requestHelper.post(
             "/model/create.json",
-            { name: "gpt-4o", vendor_id: openaiVendor.body.id, enable: true },
+            modelFixtures.createRandomModel(openaiVendor.body.id, "gpt-4o"),
             adminToken,
         );
         await requestHelper.post(
             "/model/create.json",
-            { name: "claude-sonnet-4-5", vendor_id: anthropicVendor.body.id, enable: true },
+            modelFixtures.createRandomModel(anthropicVendor.body.id, "claude-sonnet-4-5"),
             adminToken,
         );
         await requestHelper.post(
             "/model/create.json",
-            { name: "disabled-model", vendor_id: openaiVendor.body.id, enable: false },
+            {
+                ...modelFixtures.createRandomModel(openaiVendor.body.id, "disabled-model"),
+                enable: false,
+            },
             adminToken,
         );
     });

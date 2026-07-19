@@ -5,6 +5,7 @@ import mockHelper from "../../helpers/mockHelper";
 import dbHelper from "../../helpers/dbHelper";
 import { setupAdminUser } from "../../globalSetup";
 import config from "../../config";
+import modelFixtures from "../../fixtures/modelFixtures";
 
 /**
  * Stream Failure Handling Tests
@@ -62,7 +63,7 @@ describe("Stream Failure Handling", () => {
         openaiIncompleteModelName = `openai-incomplete-${Date.now()}`;
         await requestHelper.post(
             "/model/create.json",
-            { name: openaiIncompleteModelName, vendor_id: openaiIncompleteVendor.body.id, enable: true },
+            modelFixtures.createRandomModel(openaiIncompleteVendor.body.id, openaiIncompleteModelName),
             adminToken,
         );
 
@@ -80,7 +81,7 @@ describe("Stream Failure Handling", () => {
         openaiDisconnectModelName = `openai-disconnect-${Date.now()}`;
         await requestHelper.post(
             "/model/create.json",
-            { name: openaiDisconnectModelName, vendor_id: openaiDisconnectVendor.body.id, enable: true },
+            modelFixtures.createRandomModel(openaiDisconnectVendor.body.id, openaiDisconnectModelName),
             adminToken,
         );
 
@@ -98,7 +99,7 @@ describe("Stream Failure Handling", () => {
         anthropicIncompleteModelName = `anthropic-incomplete-${Date.now()}`;
         await requestHelper.post(
             "/model/create.json",
-            { name: anthropicIncompleteModelName, vendor_id: anthropicIncompleteVendor.body.id, enable: true },
+            modelFixtures.createRandomModel(anthropicIncompleteVendor.body.id, anthropicIncompleteModelName),
             adminToken,
         );
 
@@ -116,7 +117,7 @@ describe("Stream Failure Handling", () => {
         responsesIncompleteModelName = `responses-incomplete-${Date.now()}`;
         await requestHelper.post(
             "/model/create.json",
-            { name: responsesIncompleteModelName, vendor_id: responsesIncompleteVendor.body.id, enable: true },
+            modelFixtures.createRandomModel(responsesIncompleteVendor.body.id, responsesIncompleteModelName),
             adminToken,
         );
 
@@ -134,11 +135,10 @@ describe("Stream Failure Handling", () => {
         responsesClientAnthropicStreamErrorModelName = `responses-client-anthropic-stream-error-${Date.now()}`;
         await requestHelper.post(
             "/model/create.json",
-            {
-                name: responsesClientAnthropicStreamErrorModelName,
-                vendor_id: responsesClientAnthropicErrorVendor.body.id,
-                enable: true,
-            },
+            modelFixtures.createRandomModel(
+                responsesClientAnthropicErrorVendor.body.id,
+                responsesClientAnthropicStreamErrorModelName,
+            ),
             adminToken,
         );
 
@@ -156,7 +156,7 @@ describe("Stream Failure Handling", () => {
         openaiSlowModelName = `openai-slow-${Date.now()}`;
         await requestHelper.post(
             "/model/create.json",
-            { name: openaiSlowModelName, vendor_id: openaiSlowVendor.body.id, enable: true },
+            modelFixtures.createRandomModel(openaiSlowVendor.body.id, openaiSlowModelName),
             adminToken,
         );
 
@@ -174,7 +174,7 @@ describe("Stream Failure Handling", () => {
         anthropicSlowModelName = `anthropic-slow-${Date.now()}`;
         await requestHelper.post(
             "/model/create.json",
-            { name: anthropicSlowModelName, vendor_id: anthropicSlowVendor.body.id, enable: true },
+            modelFixtures.createRandomModel(anthropicSlowVendor.body.id, anthropicSlowModelName),
             adminToken,
         );
 
@@ -192,7 +192,7 @@ describe("Stream Failure Handling", () => {
         responsesSlowModelName = `responses-slow-${Date.now()}`;
         await requestHelper.post(
             "/model/create.json",
-            { name: responsesSlowModelName, vendor_id: responsesSlowVendor.body.id, enable: true },
+            modelFixtures.createRandomModel(responsesSlowVendor.body.id, responsesSlowModelName),
             adminToken,
         );
 
@@ -210,7 +210,10 @@ describe("Stream Failure Handling", () => {
         responsesCompleteThenHangModelName = `responses-complete-then-hang-${Date.now()}`;
         await requestHelper.post(
             "/model/create.json",
-            { name: responsesCompleteThenHangModelName, vendor_id: responsesCompleteThenHangVendor.body.id, enable: true },
+            modelFixtures.createRandomModel(
+                responsesCompleteThenHangVendor.body.id,
+                responsesCompleteThenHangModelName,
+            ),
             adminToken,
         );
     });
@@ -260,7 +263,7 @@ describe("Stream Failure Handling", () => {
             const modelName = `openai-ok-${Date.now()}`;
             await requestHelper.post(
                 "/model/create.json",
-                { name: modelName, vendor_id: vendor.body.id, enable: true },
+                modelFixtures.createRandomModel(vendor.body.id, modelName),
                 adminToken,
             );
 
