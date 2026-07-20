@@ -15,7 +15,10 @@ import LoadBalanceRoutingStrategy from "./routingStrategy/loadBalanceRoutingStra
 import SingleRoutingStrategy from "./routingStrategy/singleRoutingStrategy";
 
 class ModelRoutingResult {
-    constructor(readonly vendorModelId: number) {}
+    constructor(
+        readonly vendorId: number,
+        readonly vendorModelId?: number,
+    ) {}
 }
 
 const strategies: Record<ModelRoutingMode, BaseRoutingStrategy> = {
@@ -84,7 +87,7 @@ async function validateConfig(
             if (vendorModel.vendor_id !== upstream.vendor_id) {
                 throw new customError.AppError("Vendor model does not belong to the selected vendor");
             }
-        } else if (mode !== ModelRoutingMode.SINGLE && upstream.enabled) {
+        } else if (mode === ModelRoutingMode.FAILOVER && upstream.enabled) {
             const vendorModel = await SgVendorModel.query()
                 .where("vendor_id", upstream.vendor_id)
                 .where("model_id", model.name)
@@ -118,37 +121,40 @@ async function resolveAvailableVendorModels(
 
         let vendorModel = upstream.vendor_model_id
             ? await SgVendorModel.query().find(upstream.vendor_model_id)
-            : await SgVendorModel.query()
+            : null;
+        if (upstream.vendor_model_id && !vendorModel) {
+            continue;
+        }
+        if (!upstream.vendor_model_id && model.routing_mode !== ModelRoutingMode.LOAD_BALANCE) {
+            vendorModel = await SgVendorModel.query()
                 .where("vendor_id", upstream.vendor_id)
                 .where("model_id", model.name)
                 .first();
-        if (upstream.vendor_model_id && !vendorModel) {
-            continue;
         }
         if (vendorModel && vendorModel.vendor_id !== upstream.vendor_id) {
             continue;
         }
 
-        if (!vendorModel && !upstream.vendor_model_id && model.name) {
+        if (!vendorModel && !upstream.vendor_model_id && model.routing_mode !== ModelRoutingMode.LOAD_BALANCE && model.name) {
             vendorModel = await SgVendorModel.query().create({
                 vendor_id: upstream.vendor_id,
                 model_id: model.name,
             });
         }
-        if (!vendorModel) {
-            throw new customError.AppError("Upstream model name is missing", 503);
-        }
 
         let upstreamFormat: ApiFormat;
         try {
-            const supportedFormats = vendorModel.getSupportedFormats() ?? vendor.getSupportedFormats();
+            const supportedFormats = vendorModel?.getSupportedFormats() ?? vendor.getSupportedFormats();
             upstreamFormat = protocolUtils.resolveUpstreamFormat(clientFormat, supportedFormats);
             vendor.getUrlByFormat(upstreamFormat);
         } catch {
             continue;
         }
 
-        if (!isCoolingDown(vendorModel, upstreamFormat, now)) {
+        if (!vendorModel) {
+            // Automatic load-balance upstreams do not persist vendor_model state.
+            vendorModels.push(new SgVendorModel({ vendor_id: upstream.vendor_id }));
+        } else if (!isCoolingDown(vendorModel, upstreamFormat, now)) {
             vendorModels.push(vendorModel);
         }
     }
@@ -179,7 +185,7 @@ async function selectUpstream(
 ): Promise<ModelRoutingResult | null> {
     const vendorModels = await resolveAvailableVendorModels(model, clientFormat, now);
     const selected = strategies[model.routing_mode].selectUpstream(model, vendorModels);
-    return selected ? new ModelRoutingResult(selected.id) : null;
+    return selected ? new ModelRoutingResult(selected.vendor_id, selected.id || undefined) : null;
 }
 
 
@@ -188,6 +194,9 @@ async function markFailure(
     upstreamFormat: ApiFormat,
     failedAt: Date = new Date(),
 ): Promise<boolean> {
+    if (!result.vendorModelId) {
+        return false;
+    }
     const vendorModel = await SgVendorModel.query().find(result.vendorModelId);
     if (!vendorModel) {
         return false;

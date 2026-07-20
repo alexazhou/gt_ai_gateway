@@ -57,21 +57,49 @@ describe("Model multi-upstream routing", () => {
         expect(response.body).not.toHaveProperty("vendor_model_id");
     });
 
-    it("requires automatic upstreams to match vendor models outside single mode", async () => {
+    it("allows load-balance automatic upstreams without creating vendor model records", async () => {
+        const modelName = "automatic-load-balance-model";
         const response = await requestHelper.post(
             "/model/create.json",
             {
-                name: "missing-automatic-vendor-model",
-                routing_mode: "failover",
+                name: modelName,
+                routing_mode: "load_balance",
                 routing_config: {
-                    upstreams: [{ vendor_id: primaryVendorId, enabled: true }],
+                    upstreams: [
+                        { vendor_id: primaryVendorId, enabled: true },
+                        { vendor_id: secondaryVendorId, enabled: true },
+                    ],
                 },
             },
             adminToken,
         );
 
-        expect(response.status).toBe(400);
-        expect(response.body.error).toContain("does not have model");
+        expect(response.status).toBe(200);
+
+        const user = await requestHelper.post(
+            "/user/create.json",
+            mockHelper.generateUser(),
+            adminToken,
+        );
+        const upstreamResponse = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: modelName, stream: false }),
+            user.body.token,
+        );
+
+        expect(upstreamResponse.status).toBe(200);
+        expect(upstreamResponse.body.model).toBe(modelName);
+
+        const primaryVendorModels = await requestHelper.get(
+            `/vendor/${primaryVendorId}/model/list.json`,
+            adminToken,
+        );
+        const secondaryVendorModels = await requestHelper.get(
+            `/vendor/${secondaryVendorId}/model/list.json`,
+            adminToken,
+        );
+        expect(primaryVendorModels.body.some((item: any) => item.model_id === modelName)).toBe(false);
+        expect(secondaryVendorModels.body.some((item: any) => item.model_id === modelName)).toBe(false);
     });
 
     it("rejects multiple enabled upstreams in single mode", async () => {

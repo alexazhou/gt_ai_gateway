@@ -24,9 +24,10 @@ async function sendRequestToUpstream(
     vendor: SgVendor,
     format: ApiFormat,
     body: string,
-    vendorModelId: number,
+    vendorModelId?: number,
+    automaticVendorModelName?: string,
 ): Promise<Response> {
-    let vendorModelName: string | null = null;
+    let vendorModelName: string | null = automaticVendorModelName ?? null;
     let supportedFormats: ApiFormat[] | null = null;
 
     if (vendorModelId) {
@@ -240,17 +241,19 @@ async function sendRequest(
             throw new customError.AppError("No available upstream", 503);
         }
 
-        const vendorModel = await SgVendorModel.query().find(routingResult.vendorModelId);
-        if (!vendorModel) {
-            throw new customError.AppError("Vendor model not found", 503);
-        }
-
-        const vendor = await SgVendor.query().find(vendorModel.vendor_id);
+        const vendor = await SgVendor.query().find(routingResult.vendorId);
         if (!vendor) {
             throw new customError.AppError("Vendor not found", 503);
         }
 
-        const supportedFormats = vendorModel.getSupportedFormats() ?? vendor.getSupportedFormats();
+        const vendorModel = routingResult.vendorModelId
+            ? await SgVendorModel.query().find(routingResult.vendorModelId)
+            : null;
+        if (routingResult.vendorModelId && !vendorModel) {
+            throw new customError.AppError("Vendor model not found", 503);
+        }
+
+        const supportedFormats = vendorModel?.getSupportedFormats() ?? vendor.getSupportedFormats();
         const upstreamFormat = protocolUtils.resolveUpstreamFormat(format, supportedFormats);
 
         try {
@@ -262,6 +265,7 @@ async function sendRequest(
                 format,
                 body,
                 routingResult.vendorModelId,
+                routingResult.vendorModelId ? undefined : modelConfig.name ?? undefined,
             );
 
             if (!response.ok && modelRoutingService.isRetryableStatus(response.status)) {
