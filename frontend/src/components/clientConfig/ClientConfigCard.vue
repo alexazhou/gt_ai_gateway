@@ -252,6 +252,23 @@ defineEmits<{
     padding: 0 4px;
 }
 
+.merged-mode-tag {
+    border-width: 1px !important;
+    border-style: solid !important;
+}
+
+.merged-mode-tag.ant-tag-blue {
+    border-color: #91caff !important;
+}
+
+.merged-mode-tag.ant-tag-green {
+    border-color: #b7eb8f !important;
+}
+
+.merged-mode-tag.ant-tag-purple {
+    border-color: #d3adf7 !important;
+}
+
 .rename-button {
     color: var(--text-tertiary, #bfbfbf);
     margin-left: 4px;
