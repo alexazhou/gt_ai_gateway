@@ -26,7 +26,6 @@ defineProps<{
     display: inline-flex;
     max-width: 100%;
     overflow: hidden;
-    border: 1px solid var(--accent-primary-border);
     border-radius: 4px;
     font-size: 13px;
     line-height: 22px;
@@ -37,7 +36,11 @@ defineProps<{
     flex: 0 0 auto;
     padding: 0 7px;
     background: var(--accent-primary-soft);
+    border: 1px solid var(--accent-primary-border);
+    border-right: 0;
+    border-radius: 4px 0 0 4px;
     color: var(--accent-primary);
+    font-family: monospace;
     font-weight: 400;
 }
 
@@ -48,6 +51,9 @@ defineProps<{
     overflow: hidden;
     padding: 0 7px;
     background: var(--bg-info-item);
+    border: 1px solid #d9d9d9;
+    border-left: 0;
+    border-radius: 0 4px 4px 0;
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-secondary);
