@@ -54,29 +54,26 @@
                         </a-tooltip>
                     </span>
                 </template>
+                <template v-else-if="column.key === 'upstream_model'">
+                    <span style="display: flex; align-items: center; gap: 4px;">
+                        上游模型
+                        <a-tooltip title="供应商/模型">
+                            <InfoCircleOutlined style="font-size: 12px; color: #999;" />
+                        </a-tooltip>
+                    </span>
+                </template>
             </template>
             <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'vendor'">
-                    <a-space direction="vertical" size="small">
-                        <span
-                            v-for="(upstream, index) in record.routing_config.upstreams"
-                            :key="`${upstream.vendor_id}-${upstream.vendor_model_id ?? 'auto'}-${index}`"
-                            :style="{ color: upstream.enabled ? undefined : '#bbb' }"
-                        >
-                            {{ getVendorName(upstream.vendor_id) }}
-                        </span>
-                    </a-space>
-                </template>
                 <template v-if="column.key === 'upstream_model'">
                     <a-space direction="vertical" size="small">
-                        <span
+                        <UpstreamModel
                             v-for="(upstream, index) in record.routing_config.upstreams"
                             :key="`${upstream.vendor_id}-${upstream.vendor_model_id ?? 'auto'}-${index}`"
-                            class="vendor-model-tag"
-                            :style="{ color: upstream.enabled ? undefined : '#bbb' }"
-                        >
-                            {{ upstream.vendor_model_id ? getVendorModelName(upstream.vendor_model_id) : `自动（${record.name}）` }}
-                        </span>
+                            :vendor-name="getVendorName(upstream.vendor_id)"
+                            :model-name="upstream.vendor_model_id ? getVendorModelName(upstream.vendor_model_id) : 'auto'"
+                            :auto-mapped="!upstream.vendor_model_id"
+                            :disabled="!upstream.enabled"
+                        />
                     </a-space>
                 </template>
                 <template v-if="column.key === 'enable'">
@@ -132,6 +129,7 @@ import { formatDate } from '@/utils/format';
 import { normalizeListResponse } from '@/utils/listResponse';
 import DialogForm from './DialogForm.vue';
 import DialogTest from '@/views/Vendor/DialogTest.vue';
+import UpstreamModel from './UpstreamModel.vue';
 import type { Model, ModelQuery } from '@/types/model';
 import type { Vendor as VendorType, VendorModel } from '@/types/vendor';
 import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
@@ -160,8 +158,7 @@ const columns = computed<TableColumnsType<Model>>(() => {
     const cols: TableColumnsType<Model> = [
         { title: 'ID', key: 'id', dataIndex: 'id' },
         { title: '模型名称', key: 'name', dataIndex: 'name' },
-        { title: '供应商', key: 'vendor' },
-        { title: '供应商模型', key: 'upstream_model' },
+        { title: '上游模型', key: 'upstream_model' },
         { title: '状态', key: 'enable', dataIndex: 'enable' },
     ];
     if (moduleBillingEnabled.value) {
@@ -312,9 +309,4 @@ watch(data, (models) => {
     color: #52c41a;
 }
 
-.vendor-model-tag {
-    font-size: 12px;
-    color: #555;
-    font-family: monospace;
-}
 </style>
