@@ -1,7 +1,7 @@
 {
     "name": "ai-gateway-tauri",
     "private": true,
-    "version": "1.8.4-beta2",
+    "version": "1.8.4",
     "scripts": {
         "dev": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri dev",
         "build": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build",
