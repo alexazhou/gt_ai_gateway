@@ -20,7 +20,7 @@
                     <span>供应商管理</span>
                 </a-menu-item>
                 <a-menu-item key="/model">
-                    <TagOutlined />
+                    <DatabaseOutlined />
                     <span>模型管理</span>
                 </a-menu-item>
                 <a-menu-item key="/record">
@@ -87,7 +87,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { DashboardOutlined, TeamOutlined, CloudUploadOutlined, TagOutlined, FileTextOutlined, ExperimentOutlined, MenuFoldOutlined, MenuUnfoldOutlined, ApiOutlined, DollarOutlined, CodeOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons-vue';
+import { DashboardOutlined, TeamOutlined, CloudUploadOutlined, DatabaseOutlined, FileTextOutlined, ExperimentOutlined, MenuFoldOutlined, MenuUnfoldOutlined, ApiOutlined, DollarOutlined, CodeOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons-vue';
 import { useAppStore } from '@/stores/app';
 import { checkUpdate } from '@/api/system';
 import { getConfig } from '@/api/config';

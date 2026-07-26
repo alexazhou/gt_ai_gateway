@@ -93,19 +93,51 @@
                     {{ formatDate(record.created_at) }}
                 </template>
                 <template v-if="column.key === 'action'">
-                    <a-space>
-                        <a-button type="link" style="padding: 0" @click="handleEdit(record)">
-                            编辑
-                        </a-button>
-                        <a-button type="link" style="padding: 0" @click="handleView(record)">
-                            查看
-                        </a-button>
-                        <a-button type="link" style="padding: 0" @click="handleTest(record)">
-                            测试
-                        </a-button>
-                        <a-button type="link" danger style="padding: 0" @click="handleDelete(record)">
-                            删除
-                        </a-button>
+                    <a-space :size="0">
+                        <a-tooltip title="编辑">
+                            <a-button
+                                type="text"
+                                size="small"
+                                class="model-action-button"
+                                aria-label="编辑"
+                                @click="handleEdit(record)"
+                            >
+                                <EditOutlined />
+                            </a-button>
+                        </a-tooltip>
+                        <a-tooltip title="查看">
+                            <a-button
+                                type="text"
+                                size="small"
+                                class="model-action-button"
+                                aria-label="查看"
+                                @click="handleView(record)"
+                            >
+                                <EyeOutlined />
+                            </a-button>
+                        </a-tooltip>
+                        <a-tooltip title="测试">
+                            <a-button
+                                type="text"
+                                size="small"
+                                class="model-action-button"
+                                aria-label="测试"
+                                @click="handleTest(record)"
+                            >
+                                <ExperimentOutlined />
+                            </a-button>
+                        </a-tooltip>
+                        <a-tooltip title="删除">
+                            <a-button
+                                danger
+                                type="text"
+                                size="small"
+                                aria-label="删除"
+                                @click="handleDelete(record)"
+                            >
+                                <DeleteOutlined />
+                            </a-button>
+                        </a-tooltip>
                     </a-space>
                 </template>
             </template>
@@ -120,7 +152,13 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import type { TableColumnsType } from 'ant-design-vue';
 import { Modal } from 'ant-design-vue/es';
-import { InfoCircleOutlined } from '@ant-design/icons-vue';
+import {
+    DeleteOutlined,
+    EditOutlined,
+    ExperimentOutlined,
+    EyeOutlined,
+    InfoCircleOutlined,
+} from '@ant-design/icons-vue';
 import { deleteModel, listModels } from '@/api/model';
 import { listVendors, fetchVendorModelsByIds } from '@/api/vendor';
 import { getConfig } from '@/api/config';
@@ -166,7 +204,7 @@ const columns = computed<TableColumnsType<Model>>(() => {
     }
     cols.push(
         { title: '创建时间', key: 'created_at', dataIndex: 'created_at' },
-        { title: '操作', key: 'action', width: 160, fixed: 'right' as const },
+        { title: '操作', key: 'action', width: 120, fixed: 'right' as const },
     );
     return cols;
 });
@@ -307,6 +345,10 @@ watch(data, (models) => {
 
 .price-icon.output {
     color: #52c41a;
+}
+
+.model-action-button {
+    color: var(--accent-primary);
 }
 
 </style>

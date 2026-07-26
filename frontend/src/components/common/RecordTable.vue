@@ -62,9 +62,17 @@
                 </div>
             </template>
             <template v-if="column.key === 'action'">
-                <a-button type="link" size="small" @click="handleView(record)">
-                    查看
-                </a-button>
+                <a-tooltip title="查看">
+                    <a-button
+                        type="text"
+                        size="small"
+                        class="record-action-button"
+                        aria-label="查看"
+                        @click="handleView(record)"
+                    >
+                        <EyeOutlined />
+                    </a-button>
+                </a-tooltip>
             </template>
         </template>
     </a-table>
@@ -74,7 +82,7 @@
 import { computed } from 'vue';
 import type { TableColumnsType, TablePaginationConfig } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
-import { ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons-vue';
+import { ArrowUpOutlined, ArrowDownOutlined, EyeOutlined } from '@ant-design/icons-vue';
 import { formatDate } from '@/utils/format';
 import type { Record } from '@/types/record';
 import dayjs from 'dayjs';
@@ -109,7 +117,7 @@ const defaultColumns: TableColumnsType<Record> = [
     { title: '时间', key: 'timing' },
     { title: '状态', key: 'status', dataIndex: 'status' },
     { title: '创建时间', key: 'created_at', dataIndex: 'created_at' },
-    { title: '操作', key: 'action', width: 80, fixed: 'right' as const },
+    { title: '操作', key: 'action', width: 60, fixed: 'right' as const },
 ];
 
 const displayColumns = computed(() => {
@@ -287,5 +295,9 @@ function getStatusText(status: string | null, failedCode?: string | null): strin
 .vendor-model-name {
     font-size: 12px;
     color: #8c8c8c;
+}
+
+.record-action-button {
+    color: var(--accent-primary);
 }
 </style>

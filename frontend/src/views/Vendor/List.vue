@@ -57,22 +57,62 @@
                     {{ formatDate(record.created_at) }}
                 </template>
                 <template v-if="column.key === 'action'">
-                    <a-space>
-                        <a-button type="link" style="padding: 0" @click="handleEdit(record)">
-                            编辑
-                        </a-button>
-                        <a-button type="link" style="padding: 0" @click="handleTest(record)">
-                            测试
-                        </a-button>
-                        <a-button type="link" style="padding: 0" @click="handleModels(record)">
-                            模型
-                        </a-button>
-                        <a-button type="link" style="padding: 0" @click="handleView(record)">
-                            查看
-                        </a-button>
-                        <a-button type="link" danger style="padding: 0" @click="handleDelete(record)">
-                            删除
-                        </a-button>
+                    <a-space :size="0">
+                        <a-tooltip title="编辑">
+                            <a-button
+                                type="text"
+                                size="small"
+                                class="vendor-action-button"
+                                aria-label="编辑"
+                                @click="handleEdit(record)"
+                            >
+                                <EditOutlined />
+                            </a-button>
+                        </a-tooltip>
+                        <a-tooltip title="测试">
+                            <a-button
+                                type="text"
+                                size="small"
+                                class="vendor-action-button"
+                                aria-label="测试"
+                                @click="handleTest(record)"
+                            >
+                                <ExperimentOutlined />
+                            </a-button>
+                        </a-tooltip>
+                        <a-tooltip title="模型">
+                            <a-button
+                                type="text"
+                                size="small"
+                                class="vendor-action-button"
+                                aria-label="模型"
+                                @click="handleModels(record)"
+                            >
+                                <DatabaseOutlined />
+                            </a-button>
+                        </a-tooltip>
+                        <a-tooltip title="查看">
+                            <a-button
+                                type="text"
+                                size="small"
+                                class="vendor-action-button"
+                                aria-label="查看"
+                                @click="handleView(record)"
+                            >
+                                <EyeOutlined />
+                            </a-button>
+                        </a-tooltip>
+                        <a-tooltip title="删除">
+                            <a-button
+                                danger
+                                type="text"
+                                size="small"
+                                aria-label="删除"
+                                @click="handleDelete(record)"
+                            >
+                                <DeleteOutlined />
+                            </a-button>
+                        </a-tooltip>
                     </a-space>
                 </template>
             </template>
@@ -87,6 +127,13 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import type { TableColumnsType } from 'ant-design-vue';
+import {
+    DatabaseOutlined,
+    DeleteOutlined,
+    EditOutlined,
+    ExperimentOutlined,
+    EyeOutlined,
+} from '@ant-design/icons-vue';
 import { useRouter } from 'vue-router';
 import { Modal } from 'ant-design-vue/es';
 import { listVendors, deleteVendor } from '@/api/vendor';
@@ -122,7 +169,7 @@ const columns: TableColumnsType<Vendor> = [
     { title: '名称', key: 'name', dataIndex: 'name' },
     { title: '模型数量', key: 'model_count', dataIndex: 'model_count', width: 100 },
     { title: '创建时间', key: 'created_at', dataIndex: 'created_at', width: 180 },
-    { title: '操作', key: 'action', width: 180, fixed: 'right' as const },
+    { title: '操作', key: 'action', width: 140, fixed: 'right' as const },
 ];
 
 function handleCreate() {
@@ -229,5 +276,9 @@ function getTypeTagStyle(type: VendorType) {
     justify-content: space-between;
     align-items: flex-start;
     margin-bottom: 16px;
+}
+
+.vendor-action-button {
+    color: var(--accent-primary);
 }
 </style>

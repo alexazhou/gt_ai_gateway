@@ -77,13 +77,29 @@
                     </a-tag>
                 </template>
                 <template v-if="column.key === 'action'">
-                    <a-space>
-                        <a-button type="link" style="padding: 0" @click="handleView(record)">
-                            查看
-                        </a-button>
-                        <a-button type="link" style="padding: 0" @click="handleEdit(record)">
-                            编辑
-                        </a-button>
+                    <a-space :size="0">
+                        <a-tooltip title="查看">
+                            <a-button
+                                type="text"
+                                size="small"
+                                class="user-action-button"
+                                aria-label="查看"
+                                @click="handleView(record)"
+                            >
+                                <EyeOutlined />
+                            </a-button>
+                        </a-tooltip>
+                        <a-tooltip title="编辑">
+                            <a-button
+                                type="text"
+                                size="small"
+                                class="user-action-button"
+                                aria-label="编辑"
+                                @click="handleEdit(record)"
+                            >
+                                <EditOutlined />
+                            </a-button>
+                        </a-tooltip>
                     </a-space>
                 </template>
             </template>
@@ -97,6 +113,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import type { TableColumnsType } from 'ant-design-vue';
+import { EditOutlined, EyeOutlined } from '@ant-design/icons-vue';
 import { useRouter } from 'vue-router';
 import { listUsers } from '@/api/user';
 import { useResourceTable } from '@/composables/useResourceTable';
@@ -176,5 +193,9 @@ function getPopupContainer(node: HTMLElement): HTMLElement {
     justify-content: space-between;
     align-items: flex-start;
     margin-bottom: 16px;
+}
+
+.user-action-button {
+    color: var(--accent-primary);
 }
 </style>
