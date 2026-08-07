@@ -23,10 +23,17 @@
                 />
             </a-form-item>
             <a-form-item label="名称" name="name">
-                <a-input v-model:value="formState.name" placeholder="请输入供应商名称" />
+                <a-input
+                    v-model:value="formState.name"
+                    placeholder="请输入供应商名称"
+                />
             </a-form-item>
             <a-form-item label="Token" name="token">
-                <a-input-password
+                <!--
+                    新建时不能使用密码输入框：Safari 会把名称和 password 字段误判为登录表单，
+                    导致在名称字段也弹出 Keychain 密码建议。
+                -->
+                <a-input
                     v-model:value="formState.token"
                     placeholder="请输入 API Token"
                 />
@@ -320,4 +327,5 @@ defineExpose({ open });
     color: #8c8c8c;
     font-size: 12px;
 }
+
 </style>

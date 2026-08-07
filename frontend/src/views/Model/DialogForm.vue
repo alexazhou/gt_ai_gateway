@@ -82,7 +82,7 @@
             <a-form-item :required="!isView">
                 <template #label>
                     <span class="upstream-label">
-                        上游配置
+                        上游模型
                         <a-tooltip title="配置模型请求实际使用的供应商和上游模型">
                             <InfoCircleOutlined class="field-help-icon" />
                         </a-tooltip>
