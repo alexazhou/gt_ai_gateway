@@ -2,7 +2,6 @@ import { Context } from "hono";
 import { SgModel } from "../model/sgModel";
 import { SgUser } from "../model/sgUser";
 import { SgVendor } from "../model/sgVendor";
-import { SgVendorModel } from "../model/sgVendorModel";
 import recordService from "./recordService";
 import { SgRecordStatus, ApiFormat, VendorAuthMode } from "../constants";
 import pluginService from "./pluginService";
@@ -230,19 +229,13 @@ async function sendRequest(
             throw new customError.AppError("Vendor not found", 503);
         }
 
-        const vendorModel = routingResult.vendorModelId
-            ? await SgVendorModel.query().find(routingResult.vendorModelId)
-            : null;
-        if (routingResult.vendorModelId && !vendorModel) {
-            throw new customError.AppError("Vendor model not found", 503);
-        }
-
-        const supportedFormats = vendorModel?.getSupportedFormats() ?? vendor.getSupportedFormats();
+        // 上游模型已在选择阶段解析，结果直接携带，无需再查库
+        const supportedFormats = routingResult.supportedFormats;
         const upstreamFormat = protocolUtils.resolveUpstreamFormat(format, supportedFormats);
 
         // 失败切换是否开启；健康 key 中间段统一使用模型名
         const failoverEnabled = modelConfig.getRoutingConfig().failover.enabled;
-        const vendorModelName = vendorModel ? vendorModel.model_id : (modelConfig.name ?? "");
+        const vendorModelName = routingResult.vendorModelName;
 
         try {
             const response = await sendRequestToUpstream(

@@ -9,17 +9,10 @@ import { SgVendorModel } from "../model/sgVendorModel";
 import customError from "../util/customError";
 import protocolUtils from "../util/protocolUtils";
 import upstreamHealthService, { UpstreamHealthState } from "./upstreamHealthService";
-import BaseRoutingStrategy from "./routingStrategy/baseRoutingStrategy";
+import BaseRoutingStrategy, { ModelRoutingResult } from "./routingStrategy/baseRoutingStrategy";
 import FirstAvailableRoutingStrategy from "./routingStrategy/firstAvailableRoutingStrategy";
 import LoadBalanceRoutingStrategy from "./routingStrategy/loadBalanceRoutingStrategy";
 import SingleRoutingStrategy from "./routingStrategy/singleRoutingStrategy";
-
-class ModelRoutingResult {
-    constructor(
-        readonly vendorId: number,
-        readonly vendorModelId?: number,
-    ) {}
-}
 
 const strategies: Record<ModelRoutingMode, BaseRoutingStrategy> = {
     [ModelRoutingMode.SINGLE]: new SingleRoutingStrategy(),
@@ -102,17 +95,17 @@ async function validateConfig(
 }
 
 
-async function resolveAvailableVendorModels(
+async function resolveAvailableCandidates(
     model: SgModel,
     clientFormat: ApiFormat,
     now: number,
-): Promise<SgVendorModel[]> {
+): Promise<ModelRoutingResult[]> {
     const upstreams = model.getRoutingConfig().upstreams.filter(upstream => upstream.enabled);
     if (upstreams.length === 0) {
         throw new customError.AppError(`No enabled upstream for model ${model.name}`, 503);
     }
 
-    const vendorModels: SgVendorModel[] = [];
+    const candidates: ModelRoutingResult[] = [];
     for (const upstream of upstreams) {
         const vendor = await SgVendor.query().find(upstream.vendor_id);
         if (!vendor) {
@@ -142,9 +135,10 @@ async function resolveAvailableVendorModels(
             });
         }
 
+        let supportedFormats: ApiFormat[];
         let upstreamFormat: ApiFormat;
         try {
-            const supportedFormats = vendorModel?.getSupportedFormats() ?? vendor.getSupportedFormats();
+            supportedFormats = vendorModel?.getSupportedFormats() ?? vendor.getSupportedFormats();
             upstreamFormat = protocolUtils.resolveUpstreamFormat(clientFormat, supportedFormats);
             vendor.getUrlByFormat(upstreamFormat);
         } catch {
@@ -163,10 +157,12 @@ async function resolveAvailableVendorModels(
             continue;
         }
 
-        vendorModels.push(vendorModel ?? new SgVendorModel({ vendor_id: upstream.vendor_id }));
+        candidates.push(
+            new ModelRoutingResult(upstream.vendor_id, vendorModelName, supportedFormats),
+        );
     }
 
-    return vendorModels;
+    return candidates;
 }
 
 
@@ -180,9 +176,9 @@ async function selectUpstream(
         throw new customError.AppError("Invalid routing mode");
     }
 
-    const vendorModels = await resolveAvailableVendorModels(model, clientFormat, now);
-    const selected = strategy.selectUpstream(model, vendorModels);
-    return selected ? new ModelRoutingResult(selected.vendor_id, selected.id || undefined) : null;
+    const candidates = await resolveAvailableCandidates(model, clientFormat, now);
+    // 选中的 candidate 本身就是路由结果，无需再包装
+    return strategy.selectUpstream(model, candidates);
 }
 
 

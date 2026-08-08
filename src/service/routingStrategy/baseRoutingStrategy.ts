@@ -1,11 +1,20 @@
+import type { ApiFormat } from "../../constants";
 import type { SgModel } from "../../model/sgModel";
-import type { SgVendorModel } from "../../model/sgVendorModel";
+
+class ModelRoutingResult {
+    constructor(
+        readonly vendorId: number,
+        readonly vendorModelName: string,
+        readonly supportedFormats: ApiFormat[],
+    ) {}
+}
 
 abstract class BaseRoutingStrategy {
     abstract selectUpstream(
         model: SgModel,
-        vendorModels: SgVendorModel[],
-    ): SgVendorModel | null;
+        candidates: ModelRoutingResult[],
+    ): ModelRoutingResult | null;
 }
 
 export default BaseRoutingStrategy;
+export { ModelRoutingResult };

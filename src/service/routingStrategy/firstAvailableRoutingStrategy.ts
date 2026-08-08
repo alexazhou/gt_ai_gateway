@@ -1,13 +1,12 @@
 import type { SgModel } from "../../model/sgModel";
-import type { SgVendorModel } from "../../model/sgVendorModel";
-import BaseRoutingStrategy from "./baseRoutingStrategy";
+import BaseRoutingStrategy, { type ModelRoutingResult } from "./baseRoutingStrategy";
 
 class FirstAvailableRoutingStrategy extends BaseRoutingStrategy {
     selectUpstream(
         _model: SgModel,
-        vendorModels: SgVendorModel[],
-    ): SgVendorModel | null {
-        return vendorModels[0] ?? null;
+        candidates: ModelRoutingResult[],
+    ): ModelRoutingResult | null {
+        return candidates[0] ?? null;
     }
 }
 
