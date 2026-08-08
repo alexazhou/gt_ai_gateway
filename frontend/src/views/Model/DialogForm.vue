@@ -71,8 +71,8 @@
                             <InfoCircleOutlined class="routing-help-icon" />
                         </a-tooltip>
                     </a-radio-button>
-                    <a-radio-button value="failover">
-                        故障转移
+                    <a-radio-button value="first_available">
+                        首选可用
                         <a-tooltip title="按列表顺序选择，第一个不可用时自动切换到下一个">
                             <InfoCircleOutlined class="routing-help-icon" />
                         </a-tooltip>
@@ -94,6 +94,20 @@
                     :routing-mode="formState.routing_mode"
                     :model-name="formState.name"
                     @update:upstreams="formState.upstreams = $event"
+                />
+            </a-form-item>
+            <a-form-item v-if="formState.routing_mode !== 'single'" name="failover_enabled">
+                <template #label>
+                    <span class="upstream-label">
+                        失败切换
+                        <a-tooltip title="上游返回可重试错误时，自动切换到下一个可用上游">
+                            <InfoCircleOutlined class="field-help-icon" />
+                        </a-tooltip>
+                    </span>
+                </template>
+                <a-switch
+                    v-model:checked="formState.failoverEnabled"
+                    :disabled="isView"
                 />
             </a-form-item>
             <a-form-item v-if="moduleBillingEnabled" label="价格设置">
@@ -156,6 +170,7 @@ const formState = reactive({
     name: '',
     routing_mode: 'single' as ModelRoutingMode,
     upstreams: [createUpstream()] as ModelUpstreamFormValue[],
+    failoverEnabled: true,
     enable: true,
     prices: {
         input: undefined as number | undefined,
@@ -215,6 +230,7 @@ function openModel(model: Model, mode: 'edit' | 'view') {
         enabled: upstream.enabled,
     }));
     formState.enable = Boolean(model.enable);
+    formState.failoverEnabled = model.routing_config.failover?.enabled ?? true;
     formState.prices = {
         input: model.prices?.input || undefined,
         output: model.prices?.output || undefined,
@@ -251,6 +267,7 @@ async function handleOk() {
                 ...(upstream.vendor_model_id ? { vendor_model_id: upstream.vendor_model_id } : {}),
                 enabled: upstream.enabled,
             })),
+            failover: { enabled: formState.failoverEnabled },
         };
         const requestData: CreateModelRequest = {
             name: formState.name,
@@ -285,6 +302,7 @@ function resetForm() {
     formState.name = '';
     formState.routing_mode = 'single';
     formState.upstreams = [createUpstream()];
+    formState.failoverEnabled = true;
     formState.enable = true;
     formState.prices = {
         input: undefined,

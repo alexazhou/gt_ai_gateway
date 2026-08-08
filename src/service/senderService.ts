@@ -15,6 +15,7 @@ import streamLogService from "./streamLogService";
 import responseHandlerService from "./responseHandlerService";
 import fetchUtil from "../util/fetchUtil";
 import modelRoutingService, { type ModelRoutingResult } from "./modelRoutingService";
+import upstreamHealthService from "./upstreamHealthService";
 
 
 async function sendRequestToUpstream(
@@ -256,6 +257,10 @@ async function sendRequest(
         const supportedFormats = vendorModel?.getSupportedFormats() ?? vendor.getSupportedFormats();
         const upstreamFormat = protocolUtils.resolveUpstreamFormat(format, supportedFormats);
 
+        // 失败切换是否开启；健康 key 中间段统一使用模型名
+        const failoverEnabled = modelConfig.getRoutingConfig().failover.enabled;
+        const vendorModelName = vendorModel ? vendorModel.model_id : (modelConfig.name ?? "");
+
         try {
             const response = await sendRequestToUpstream(
                 c,
@@ -269,8 +274,10 @@ async function sendRequest(
             );
 
             if (!response.ok && modelRoutingService.isRetryableStatus(response.status)) {
-                const failureRecorded = await modelRoutingService.markFailure(routingResult, upstreamFormat);
-                if (failureRecorded) {
+                // 失败标记与 failover 开关解耦：无论是否切换，都记录上游失败，
+                // 让冷却对后续请求和其他模型生效
+                upstreamHealthService.markFailure(routingResult.vendorId, vendorModelName, upstreamFormat);
+                if (failoverEnabled) {
                     c.status(200);
                     continue;
                 }
@@ -282,8 +289,8 @@ async function sendRequest(
                 throw e;
             }
 
-            const failureRecorded = await modelRoutingService.markFailure(routingResult, upstreamFormat);
-            if (failureRecorded) {
+            upstreamHealthService.markFailure(routingResult.vendorId, vendorModelName, upstreamFormat);
+            if (failoverEnabled) {
                 continue;
             }
 

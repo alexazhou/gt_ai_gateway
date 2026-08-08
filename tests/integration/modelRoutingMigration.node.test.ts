@@ -13,8 +13,8 @@ afterEach(() => {
 });
 
 
-describe("model multi-upstream migrations", () => {
-    it("converts legacy model upstream fields into routing configuration before removing them", () => {
+describe("model multi-upstream migration", () => {
+    it("converts legacy model upstream fields into routing configuration in one migration", () => {
         db = new Database(":memory:");
         db.exec(`
             CREATE TABLE model (
@@ -48,16 +48,17 @@ describe("model multi-upstream migrations", () => {
             "SELECT routing_mode, routing_config FROM model WHERE id = ?",
         ).get(2) as { routing_mode: string; routing_config: string };
 
+        // 存量 model 显式写成 single 上游（不依赖列默认值）
         expect(migrated.routing_mode).toBe("single");
         expect(JSON.parse(migrated.routing_config)).toEqual({
             upstreams: [{ vendor_id: 3, vendor_model_id: 7, enabled: true }],
+            failover: { enabled: true },
         });
-        expect(unconfigured.routing_mode).toBe("single");
-        expect(JSON.parse(unconfigured.routing_config)).toEqual({ upstreams: [] });
-        expect(db.prepare("SELECT health FROM vendor_model WHERE id = 7").get()).toEqual({ health: "{}" });
+        // 未配置上游的 model 两列缺省均为 NULL，由代码兜底
+        expect(unconfigured.routing_mode).toBeNull();
+        expect(unconfigured.routing_config).toBeNull();
 
-        db.exec(readFileSync(join(migrationDirectory, "migrate_0027.sql"), "utf8"));
-
+        // 顶层 vendor 字段已被删除
         const modelColumns = db.prepare("PRAGMA table_info(model)").all() as Array<{ name: string }>;
         expect(modelColumns.map(column => column.name)).not.toContain("vendor_id");
         expect(modelColumns.map(column => column.name)).not.toContain("vendor_model_id");
@@ -65,7 +66,9 @@ describe("model multi-upstream migrations", () => {
             "routing_mode",
             "routing_config",
         ]));
+
+        // 健康状态已移到进程内存，vendor_model 表不再有 health 列
         const vendorModelColumns = db.prepare("PRAGMA table_info(vendor_model)").all() as Array<{ name: string }>;
-        expect(vendorModelColumns.map(column => column.name)).toContain("health");
+        expect(vendorModelColumns.map(column => column.name)).not.toContain("health");
     });
 });

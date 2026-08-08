@@ -56,7 +56,7 @@ function mountEditor(upstreams = [
     return mount(UpstreamConfig, {
         props: {
             mode: 'edit',
-            routingMode: 'failover',
+            routingMode: 'first_available',
             modelName: 'gateway-model',
             upstreams,
         },
@@ -86,7 +86,7 @@ describe('UpstreamConfig', () => {
         ]]);
     });
 
-    it('moves failover upstreams without modifying their configuration', async () => {
+    it('moves first_available upstreams without modifying their configuration', async () => {
         const wrapper = mountEditor();
 
         await wrapper.get('button[aria-label="下移"]').trigger('click');
@@ -103,7 +103,7 @@ describe('UpstreamConfig', () => {
         const mountCases = [
             { routingMode: 'single' as const, upstreams: [{ enabled: true }], hasEnabledColumn: false },
             { routingMode: 'load_balance' as const, upstreams: [{ enabled: true }, { enabled: true }, { enabled: true }], hasEnabledColumn: true },
-            { routingMode: 'failover' as const, upstreams: [{ enabled: true }, { enabled: true }, { enabled: true }], hasEnabledColumn: true },
+            { routingMode: 'first_available' as const, upstreams: [{ enabled: true }, { enabled: true }, { enabled: true }], hasEnabledColumn: true },
         ];
 
         for (const { routingMode, upstreams, hasEnabledColumn } of mountCases) {

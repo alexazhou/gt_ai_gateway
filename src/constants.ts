@@ -26,7 +26,7 @@ export enum ApiFormat {
 export enum ModelRoutingMode {
     SINGLE = "single",
     LOAD_BALANCE = "load_balance",
-    FAILOVER = "failover",
+    FIRST_AVAILABLE = "first_available",
 }
 
 export const UPSTREAM_FAILURE_COOLDOWN_MS = 30_000;

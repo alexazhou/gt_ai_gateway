@@ -52,6 +52,7 @@ describe("Model multi-upstream routing", () => {
         expect(response.body.routing_mode).toBe("load_balance");
         expect(response.body.routing_config).toEqual({
             upstreams: [{ vendor_id: primaryVendorId, enabled: true }],
+            failover: { enabled: true },
         });
         expect(response.body).not.toHaveProperty("vendor_id");
         expect(response.body).not.toHaveProperty("vendor_model_id");
@@ -235,7 +236,7 @@ describe("Model multi-upstream routing", () => {
             "/model/create.json",
             {
                 name: "failover-model",
-                routing_mode: "failover",
+                routing_mode: "first_available",
                 routing_config: {
                     upstreams: [
                         {
@@ -285,7 +286,8 @@ describe("Model multi-upstream routing", () => {
             `/vendor/${unavailableVendor.body.id}/model/list.json`,
             adminToken,
         );
-        expect(failedVendorModels.body[0].health.openai.last_failure_at).toBeTruthy();
+        // 健康状态不再持久化到 vendor_model 表
+        expect(failedVendorModels.body[0]).not.toHaveProperty("health");
     });
 
     it("skips cooling-down upstreams on later failover requests", async () => {
@@ -321,7 +323,7 @@ describe("Model multi-upstream routing", () => {
             "/model/create.json",
             {
                 name: "cooldown-failover-model",
-                routing_mode: "failover",
+                routing_mode: "first_available",
                 routing_config: {
                     upstreams: [
                         {
@@ -405,7 +407,7 @@ describe("Model multi-upstream routing", () => {
             "/model/create.json",
             {
                 name: "non-retryable-failover-model",
-                routing_mode: "failover",
+                routing_mode: "first_available",
                 routing_config: {
                     upstreams: [
                         {
@@ -448,6 +450,194 @@ describe("Model multi-upstream routing", () => {
             `/vendor/${invalidRequestVendor.body.id}/model/list.json`,
             adminToken,
         );
-        expect(vendorModels.body[0].health).toEqual({});
+        expect(vendorModels.body[0]).not.toHaveProperty("health");
+    });
+
+    it("returns the failure directly when failover is disabled", async () => {
+        const failingVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                ...vendorFixtures.VENDOR_FIXTURES.openai(),
+                name: "Failing upstream (no failover)",
+                urls: { openai: "http://localhost:9999/chat/completions/unavailable" },
+            },
+            adminToken,
+        );
+        const failingModel = await requestHelper.post(
+            `/vendor/${failingVendor.body.id}/model/add.json`,
+            { model_id: "no-failover-model" },
+            adminToken,
+        );
+        const model = await requestHelper.post(
+            "/model/create.json",
+            {
+                name: "no-failover-model",
+                routing_mode: "first_available",
+                routing_config: {
+                    upstreams: [
+                        {
+                            vendor_id: failingVendor.body.id,
+                            vendor_model_id: failingModel.body.id,
+                            enabled: true,
+                        },
+                    ],
+                    failover: { enabled: false },
+                },
+            },
+            adminToken,
+        );
+        expect(model.status).toBe(200);
+
+        const user = await requestHelper.post(
+            "/user/create.json",
+            mockHelper.generateUser(),
+            adminToken,
+        );
+        const response = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "no-failover-model", stream: false }),
+            user.body.token,
+        );
+
+        expect(response.status).toBe(503);
+
+        const records = await requestHelper.get(
+            `/record/list.json?model_ids=${model.body.id}`,
+            adminToken,
+        );
+        expect(records.body.total).toBe(1);
+    });
+
+    it("records upstream failure even when failover is disabled", async () => {
+        const failingVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                ...vendorFixtures.VENDOR_FIXTURES.openai(),
+                name: "Failing upstream (mark anyway)",
+                urls: { openai: "http://localhost:9999/chat/completions/unavailable" },
+            },
+            adminToken,
+        );
+        const failingModel = await requestHelper.post(
+            `/vendor/${failingVendor.body.id}/model/add.json`,
+            { model_id: "mark-anyway-model" },
+            adminToken,
+        );
+        const model = await requestHelper.post(
+            "/model/create.json",
+            {
+                name: "mark-anyway-model",
+                routing_mode: "first_available",
+                routing_config: {
+                    upstreams: [
+                        {
+                            vendor_id: failingVendor.body.id,
+                            vendor_model_id: failingModel.body.id,
+                            enabled: true,
+                        },
+                    ],
+                    failover: { enabled: false },
+                },
+            },
+            adminToken,
+        );
+        expect(model.status).toBe(200);
+
+        const user = await requestHelper.post(
+            "/user/create.json",
+            mockHelper.generateUser(),
+            adminToken,
+        );
+
+        const firstResponse = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "mark-anyway-model", stream: false }),
+            user.body.token,
+        );
+        expect(firstResponse.status).toBe(503);
+
+        // 第一次失败已把上游标记冷却（即使 failover 关闭），第二次请求直接无可用上游
+        const secondResponse = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "mark-anyway-model", stream: false }),
+            user.body.token,
+        );
+        expect(secondResponse.status).toBe(503);
+        expect(secondResponse.body.error.message).toContain("No available upstream");
+
+        const records = await requestHelper.get(
+            `/record/list.json?model_ids=${model.body.id}`,
+            adminToken,
+        );
+        expect(records.body.total).toBe(1);
+    });
+
+    it("fails over automatic upstreams (no vendor_model_id) in first_available mode", async () => {
+        const primaryVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                ...vendorFixtures.VENDOR_FIXTURES.openai(),
+                name: "Auto primary unavailable",
+                urls: { openai: "http://localhost:9999/chat/completions/unavailable" },
+            },
+            adminToken,
+        );
+        const backupVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                ...vendorFixtures.VENDOR_FIXTURES.openai(),
+                name: "Auto backup",
+                urls: { openai: "http://localhost:9999/chat/completions" },
+            },
+            adminToken,
+        );
+        // first_available 要求自动上游在保存时能匹配到同名 vendor model
+        await requestHelper.post(
+            `/vendor/${primaryVendor.body.id}/model/add.json`,
+            { model_id: "auto-first-available" },
+            adminToken,
+        );
+        await requestHelper.post(
+            `/vendor/${backupVendor.body.id}/model/add.json`,
+            { model_id: "auto-first-available" },
+            adminToken,
+        );
+        const model = await requestHelper.post(
+            "/model/create.json",
+            {
+                name: "auto-first-available",
+                routing_mode: "first_available",
+                routing_config: {
+                    upstreams: [
+                        { vendor_id: primaryVendor.body.id, enabled: true },
+                        { vendor_id: backupVendor.body.id, enabled: true },
+                    ],
+                },
+            },
+            adminToken,
+        );
+        expect(model.status).toBe(200);
+
+        const user = await requestHelper.post(
+            "/user/create.json",
+            mockHelper.generateUser(),
+            adminToken,
+        );
+        const response = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "auto-first-available", stream: false }),
+            user.body.token,
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.body.model).toBe("auto-first-available");
+
+        const records = await requestHelper.get(
+            `/record/list.json?model_ids=${model.body.id}`,
+            adminToken,
+        );
+        expect(records.body.total).toBe(2);
+        expect(records.body.list[0].vendor_id).toBe(backupVendor.body.id);
+        expect(records.body.list[1].vendor_id).toBe(primaryVendor.body.id);
     });
 });

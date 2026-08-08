@@ -60,7 +60,7 @@
                         />
                     </div>
                     <div class="upstream-actions">
-                        <a-tooltip v-if="routingMode === 'failover'" title="上移">
+                        <a-tooltip v-if="routingMode === 'first_available'" title="上移">
                             <a-button
                                 type="text"
                                 size="small"
@@ -71,7 +71,7 @@
                                 <ArrowUpOutlined />
                             </a-button>
                         </a-tooltip>
-                        <a-tooltip v-if="routingMode === 'failover'" title="下移">
+                        <a-tooltip v-if="routingMode === 'first_available'" title="下移">
                             <a-button
                                 type="text"
                                 size="small"

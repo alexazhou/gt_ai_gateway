@@ -22,11 +22,31 @@ class ModelUpstreamConfig {
     }
 }
 
+class ModelFailoverConfig {
+    enabled: boolean = true;
+
+    constructor(data?: Partial<ModelFailoverConfig>) {
+        if (data?.enabled !== undefined && typeof data.enabled === "boolean") {
+            this.enabled = data.enabled;
+        }
+    }
+
+    toJSON() {
+        return {
+            enabled: this.enabled,
+        };
+    }
+}
+
 // @ts-expect-error Sutando .d.ts 声明 static get/set() 无参，运行时传 4 个实参
 class ModelRoutingConfig extends CastsAttributes {
     upstreams: ModelUpstreamConfig[] = [];
+    failover: ModelFailoverConfig = new ModelFailoverConfig();
 
-    constructor(data?: { upstreams?: Array<ModelUpstreamConfig | Partial<ModelUpstreamConfig>> }) {
+    constructor(data?: {
+        upstreams?: Array<ModelUpstreamConfig | Partial<ModelUpstreamConfig>>;
+        failover?: ModelFailoverConfig | Partial<ModelFailoverConfig>;
+    }) {
         super();
         if (Array.isArray(data?.upstreams)) {
             this.upstreams = data.upstreams.map(upstream => (
@@ -35,11 +55,17 @@ class ModelRoutingConfig extends CastsAttributes {
                     : new ModelUpstreamConfig(upstream)
             ));
         }
+        if (data?.failover) {
+            this.failover = data.failover instanceof ModelFailoverConfig
+                ? data.failover
+                : new ModelFailoverConfig(data.failover);
+        }
     }
 
     toJSON() {
         return {
             upstreams: this.upstreams.map(upstream => upstream.toJSON()),
+            failover: this.failover.toJSON(),
         };
     }
 
@@ -52,7 +78,10 @@ class ModelRoutingConfig extends CastsAttributes {
     static set(
         self: SgModel,
         key: string,
-        value: ModelRoutingConfig | { upstreams?: Array<Partial<ModelUpstreamConfig>> },
+        value: ModelRoutingConfig | {
+            upstreams?: Array<Partial<ModelUpstreamConfig>>;
+            failover?: Partial<ModelFailoverConfig>;
+        },
     ): string {
         const config = value instanceof ModelRoutingConfig
             ? value
@@ -99,4 +128,4 @@ class SgModel extends Model {
     }
 }
 
-export { SgModel, ModelRoutingConfig, ModelUpstreamConfig };
+export { SgModel, ModelRoutingConfig, ModelUpstreamConfig, ModelFailoverConfig };

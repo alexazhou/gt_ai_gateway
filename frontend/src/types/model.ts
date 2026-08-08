@@ -1,6 +1,6 @@
 import type { BaseEntity, TableQuery } from './index';
 
-export type ModelRoutingMode = 'single' | 'load_balance' | 'failover';
+export type ModelRoutingMode = 'single' | 'load_balance' | 'first_available';
 
 export interface ModelUpstreamConfig {
     vendor_id: number;
@@ -14,8 +14,13 @@ export interface ModelUpstreamFormValue {
     enabled: boolean;
 }
 
+export interface ModelFailoverConfig {
+    enabled: boolean;
+}
+
 export interface ModelRoutingConfig {
     upstreams: ModelUpstreamConfig[];
+    failover: ModelFailoverConfig;
 }
 
 export interface ModelPrices {

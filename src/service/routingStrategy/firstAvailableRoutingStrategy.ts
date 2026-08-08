@@ -2,7 +2,7 @@ import type { SgModel } from "../../model/sgModel";
 import type { SgVendorModel } from "../../model/sgVendorModel";
 import BaseRoutingStrategy from "./baseRoutingStrategy";
 
-class FailoverRoutingStrategy extends BaseRoutingStrategy {
+class FirstAvailableRoutingStrategy extends BaseRoutingStrategy {
     selectUpstream(
         _model: SgModel,
         vendorModels: SgVendorModel[],
@@ -11,4 +11,4 @@ class FailoverRoutingStrategy extends BaseRoutingStrategy {
     }
 }
 
-export default FailoverRoutingStrategy;
+export default FirstAvailableRoutingStrategy;

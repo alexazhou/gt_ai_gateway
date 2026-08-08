@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModelRoutingMode } from "../../../src/constants";
 import { SgModel } from "../../../src/model/sgModel";
 import { SgVendorModel } from "../../../src/model/sgVendorModel";
-import FailoverRoutingStrategy from "../../../src/service/routingStrategy/failoverRoutingStrategy";
+import FirstAvailableRoutingStrategy from "../../../src/service/routingStrategy/firstAvailableRoutingStrategy";
 import LoadBalanceRoutingStrategy from "../../../src/service/routingStrategy/loadBalanceRoutingStrategy";
 import SingleRoutingStrategy from "../../../src/service/routingStrategy/singleRoutingStrategy";
 
@@ -44,22 +44,22 @@ describe("routing strategies", () => {
         )).toBe(second);
     });
 
-    it("failover selects the first healthy upstream in configuration order", () => {
+    it("first_available selects the first healthy upstream in configuration order", () => {
         const first = vendorModel(1);
         const second = vendorModel(2);
-        const strategy = new FailoverRoutingStrategy();
+        const strategy = new FirstAvailableRoutingStrategy();
 
         expect(strategy.selectUpstream(
-            model(ModelRoutingMode.FAILOVER),
+            model(ModelRoutingMode.FIRST_AVAILABLE),
             [first, second],
         )).toBe(first);
     });
 
     it("returns null when no healthy upstream remains", () => {
-        const strategy = new FailoverRoutingStrategy();
+        const strategy = new FirstAvailableRoutingStrategy();
 
         expect(strategy.selectUpstream(
-            model(ModelRoutingMode.FAILOVER),
+            model(ModelRoutingMode.FIRST_AVAILABLE),
             [],
         )).toBeNull();
     });

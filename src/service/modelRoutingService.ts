@@ -2,15 +2,15 @@ import {
     ApiFormat,
     ModelRoutingMode,
     RETRYABLE_UPSTREAM_STATUS_CODES,
-    UPSTREAM_FAILURE_COOLDOWN_MS,
 } from "../constants";
 import { SgModel } from "../model/sgModel";
 import { SgVendor } from "../model/sgVendor";
 import { SgVendorModel } from "../model/sgVendorModel";
 import customError from "../util/customError";
 import protocolUtils from "../util/protocolUtils";
+import upstreamHealthService, { UpstreamHealthState } from "./upstreamHealthService";
 import BaseRoutingStrategy from "./routingStrategy/baseRoutingStrategy";
-import FailoverRoutingStrategy from "./routingStrategy/failoverRoutingStrategy";
+import FirstAvailableRoutingStrategy from "./routingStrategy/firstAvailableRoutingStrategy";
 import LoadBalanceRoutingStrategy from "./routingStrategy/loadBalanceRoutingStrategy";
 import SingleRoutingStrategy from "./routingStrategy/singleRoutingStrategy";
 
@@ -24,7 +24,7 @@ class ModelRoutingResult {
 const strategies: Record<ModelRoutingMode, BaseRoutingStrategy> = {
     [ModelRoutingMode.SINGLE]: new SingleRoutingStrategy(),
     [ModelRoutingMode.LOAD_BALANCE]: new LoadBalanceRoutingStrategy(),
-    [ModelRoutingMode.FAILOVER]: new FailoverRoutingStrategy(),
+    [ModelRoutingMode.FIRST_AVAILABLE]: new FirstAvailableRoutingStrategy(),
 };
 
 
@@ -87,7 +87,7 @@ async function validateConfig(
             if (vendorModel.vendor_id !== upstream.vendor_id) {
                 throw new customError.AppError("Vendor model does not belong to the selected vendor");
             }
-        } else if (mode === ModelRoutingMode.FAILOVER && upstream.enabled) {
+        } else if (mode === ModelRoutingMode.FIRST_AVAILABLE && upstream.enabled) {
             const vendorModel = await SgVendorModel.query()
                 .where("vendor_id", upstream.vendor_id)
                 .where("model_id", model.name)
@@ -151,30 +151,22 @@ async function resolveAvailableVendorModels(
             continue;
         }
 
-        if (!vendorModel) {
-            // Automatic load-balance upstreams do not persist vendor_model state.
-            vendorModels.push(new SgVendorModel({ vendor_id: upstream.vendor_id }));
-        } else if (!isCoolingDown(vendorModel, upstreamFormat, now)) {
-            vendorModels.push(vendorModel);
+        // 自动上游（无 vendor_model_id）同样参与冷却：key 使用模型名
+        const vendorModelName = vendorModel?.model_id ?? model.name ?? "";
+        const healthStatus = upstreamHealthService.getHealthStatus(
+            upstream.vendor_id,
+            vendorModelName,
+            upstreamFormat,
+            now,
+        );
+        if (healthStatus.state === UpstreamHealthState.DOWN) {
+            continue;
         }
+
+        vendorModels.push(vendorModel ?? new SgVendorModel({ vendor_id: upstream.vendor_id }));
     }
 
     return vendorModels;
-}
-
-
-function isCoolingDown(
-    vendorModel: SgVendorModel,
-    upstreamFormat: ApiFormat,
-    now: number,
-): boolean {
-    const lastFailureAt = vendorModel.getHealth().getLastFailureAt(upstreamFormat);
-    if (!lastFailureAt) {
-        return false;
-    }
-
-    const failedAt = Date.parse(lastFailureAt);
-    return Number.isFinite(failedAt) && now - failedAt < UPSTREAM_FAILURE_COOLDOWN_MS;
 }
 
 
@@ -183,32 +175,14 @@ async function selectUpstream(
     clientFormat: ApiFormat,
     now: number = Date.now(),
 ): Promise<ModelRoutingResult | null> {
+    const strategy = strategies[model.routing_mode];
+    if (!strategy) {
+        throw new customError.AppError("Invalid routing mode");
+    }
+
     const vendorModels = await resolveAvailableVendorModels(model, clientFormat, now);
-    const selected = strategies[model.routing_mode].selectUpstream(model, vendorModels);
+    const selected = strategy.selectUpstream(model, vendorModels);
     return selected ? new ModelRoutingResult(selected.vendor_id, selected.id || undefined) : null;
-}
-
-
-async function markFailure(
-    result: ModelRoutingResult,
-    upstreamFormat: ApiFormat,
-    failedAt: Date = new Date(),
-): Promise<boolean> {
-    if (!result.vendorModelId) {
-        return false;
-    }
-    const vendorModel = await SgVendorModel.query().find(result.vendorModelId);
-    if (!vendorModel) {
-        return false;
-    }
-
-    const health = vendorModel.getHealth();
-    health.recordFailure(upstreamFormat, failedAt);
-    vendorModel.health = health;
-    await SgVendorModel.query()
-        .where("id", vendorModel.id)
-        .update({ health: JSON.stringify(health) });
-    return true;
 }
 
 
@@ -221,6 +195,5 @@ export { ModelRoutingResult };
 export default {
     validateConfig,
     selectUpstream,
-    markFailure,
     isRetryableStatus,
 };
