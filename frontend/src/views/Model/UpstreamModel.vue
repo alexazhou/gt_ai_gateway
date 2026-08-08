@@ -28,13 +28,15 @@ defineProps<{
     overflow: hidden;
     border-radius: 4px;
     font-size: 13px;
-    line-height: 22px;
     vertical-align: middle;
 }
 
 .vendor-name {
+    display: inline-flex;
+    align-items: center;
     flex: 0 0 auto;
-    padding: 0 7px;
+    padding: 5px 7px 4px;
+    line-height: 1;
     background: var(--accent-primary-soft);
     border: 1px solid var(--accent-primary-border);
     border-right: 0;
@@ -49,7 +51,8 @@ defineProps<{
     align-items: center;
     min-width: 0;
     overflow: hidden;
-    padding: 0 7px;
+    padding: 5px 7px 4px;
+    line-height: 1;
     background: var(--bg-info-item);
     border: 1px solid #d9d9d9;
     border-left: 0;
@@ -66,7 +69,6 @@ defineProps<{
     color: var(--text-secondary);
     cursor: help;
     font-size: 11px;
-    vertical-align: -1px;
 }
 
 .upstream-model.disabled {

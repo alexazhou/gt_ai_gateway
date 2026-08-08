@@ -98,4 +98,27 @@ describe('UpstreamConfig', () => {
             ],
         ]]);
     });
+
+    it('sizes the actions column by content (auto) instead of hardcoded widths', () => {
+        const mountCases = [
+            { routingMode: 'single' as const, upstreams: [{ enabled: true }], hasEnabledColumn: false },
+            { routingMode: 'load_balance' as const, upstreams: [{ enabled: true }, { enabled: true }, { enabled: true }], hasEnabledColumn: true },
+            { routingMode: 'failover' as const, upstreams: [{ enabled: true }, { enabled: true }, { enabled: true }], hasEnabledColumn: true },
+        ];
+
+        for (const { routingMode, upstreams, hasEnabledColumn } of mountCases) {
+            const wrapper = mount(UpstreamConfig, {
+                props: { mode: 'edit', routingMode, modelName: 'gateway-model', upstreams },
+                global,
+            });
+            const style = wrapper.get('.upstream-table').attributes('style') ?? '';
+            expect(style).toContain('auto');
+            expect(style).not.toContain('calc(');
+            if (hasEnabledColumn) {
+                expect(style).toContain('44px');
+            } else {
+                expect(style).not.toContain('44px');
+            }
+        }
+    });
 });

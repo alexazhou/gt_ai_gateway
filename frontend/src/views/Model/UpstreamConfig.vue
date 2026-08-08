@@ -1,11 +1,11 @@
 <template>
     <div class="upstream-editor">
         <div class="upstream-list">
-            <div class="upstream-table">
-                <div
-                    class="upstream-table-header"
-                    :class="{ 'single-mode-grid': routingMode === 'single' }"
-                >
+            <div
+                class="upstream-table"
+                :style="gridStyle"
+            >
+                <div class="upstream-table-header">
                     <span>供应商</span>
                     <span>上游模型</span>
                     <span v-if="routingMode !== 'single'" class="centered-column">启用</span>
@@ -15,7 +15,6 @@
                     v-for="(upstream, index) in upstreams"
                     :key="index"
                     class="upstream-row"
-                    :class="{ 'single-mode-grid': routingMode === 'single' }"
                 >
                     <div class="upstream-field">
                         <a-select
@@ -129,7 +128,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import {
     ArrowDownOutlined,
     ArrowUpOutlined,
@@ -150,6 +149,13 @@ const props = defineProps<{
     modelName: string;
     upstreams: ModelUpstreamFormValue[];
 }>();
+
+const gridStyle = computed(() => ({
+    // 供应商/上游模型自适应撑开，启用列固定，操作列按内容自动撑开（auto）
+    gridTemplateColumns: props.routingMode === 'single'
+        ? 'minmax(0, 1fr) minmax(0, 1fr) auto'
+        : 'minmax(0, 1fr) minmax(0, 1fr) 44px auto',
+}));
 
 const emit = defineEmits<{
     'update:upstreams': [upstreams: ModelUpstreamFormValue[]];
@@ -309,39 +315,33 @@ function handleTest(upstream: ModelUpstreamFormValue) {
 }
 
 .upstream-table {
+    display: grid;
+    column-gap: 10px;
     overflow: hidden;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    background: var(--bg-card);
 }
 
 .upstream-table-header,
 .upstream-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) 44px 128px;
-    align-items: center;
-    gap: 10px;
+    display: contents;
 }
 
-.upstream-table-header {
-    padding: 8px 12px 4px;
+.upstream-table-header > *,
+.upstream-row > * {
     border-bottom: 1px solid var(--border-color);
-    background: var(--bg-info-item);
+}
+
+.upstream-table-header > * {
+    padding: 6px 0;
     color: var(--text-secondary);
     font-size: 12px;
 }
 
-.upstream-row {
-    padding: 6px 12px 10px;
-    border-bottom: 1px solid var(--border-color);
+.upstream-row > * {
+    padding: 6px 0;
 }
 
-.upstream-row:last-child {
+.upstream-row:last-child > * {
     border-bottom: 0;
-}
-
-.single-mode-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) 40px;
 }
 
 .centered-column {
@@ -362,6 +362,8 @@ function handleTest(upstream: ModelUpstreamFormValue) {
 }
 
 .upstream-field {
+    display: flex;
+    align-items: center;
     min-width: 0;
 }
 
