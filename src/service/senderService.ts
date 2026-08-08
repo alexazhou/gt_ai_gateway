@@ -25,26 +25,11 @@ async function sendRequestToUpstream(
     vendor: SgVendor,
     format: ApiFormat,
     body: string,
-    vendorModelId?: number,
-    automaticVendorModelName?: string,
+    vendorModelName: string,
+    supportedFormats: ApiFormat[],
 ): Promise<Response> {
-    let vendorModelName: string | null = automaticVendorModelName ?? null;
-    let supportedFormats: ApiFormat[] | null = null;
-
-    if (vendorModelId) {
-        const vendorModel = await SgVendorModel.query().find(vendorModelId);
-        if (vendorModel) {
-            vendorModelName = vendorModel.model_id;
-            supportedFormats = vendorModel.getSupportedFormats();
-        }
-    }
-
-    // 如果 vendorModel 未配置限制格式，使用 vendor 支持的格式
-    if (!supportedFormats) {
-        supportedFormats = vendor.getSupportedFormats();
-    }
-
     // 根据客户端请求的格式和 vendor/vendorModel 支持的格式，计算最终应该用什么格式
+    // supportedFormats 已由 sendRequest 解析（显式取 vendor_model，自动取 vendor），无需再查库
     const upstreamFormat = protocolUtils.resolveUpstreamFormat(format, supportedFormats);
 
     const needsConversion = format !== upstreamFormat;
@@ -124,16 +109,14 @@ async function sendRequestToUpstream(
 
     // 3. 替换上游模型名
     let upstreamBody = body;
-    if (vendorModelId) {
-        const vendorModel = await SgVendorModel.query().find(vendorModelId);
-        if (vendorModel) {
-            try {
-                const bodyJson = JSON.parse(upstreamBody);
-                bodyJson.model = vendorModel.model_id;
-                upstreamBody = JSON.stringify(bodyJson);
-            } catch (e) {
-                console.log("[senderService] Failed to substitute model name:", e);
-            }
+    // 显式上游替换成 vendor model 名；自动上游名与网关模型名一致，替换为无操作
+    if (vendorModelName) {
+        try {
+            const bodyJson = JSON.parse(upstreamBody);
+            bodyJson.model = vendorModelName;
+            upstreamBody = JSON.stringify(bodyJson);
+        } catch (e) {
+            console.log("[senderService] Failed to substitute model name:", e);
         }
     }
 
@@ -269,8 +252,8 @@ async function sendRequest(
                 vendor,
                 format,
                 body,
-                routingResult.vendorModelId,
-                routingResult.vendorModelId ? undefined : modelConfig.name ?? undefined,
+                vendorModelName,
+                supportedFormats,
             );
 
             if (!response.ok && modelRoutingService.isRetryableStatus(response.status)) {
