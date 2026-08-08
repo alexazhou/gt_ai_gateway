@@ -59,6 +59,7 @@ export interface AnthropicRequest {
 export interface OpenAIMessage {
     role: "system" | "user" | "assistant" | "tool";
     content?: string | null;
+    reasoning_content?: string | null;
     name?: string;
     tool_calls?: Array<{
         id: string;

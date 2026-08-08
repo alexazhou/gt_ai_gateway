@@ -70,20 +70,26 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                 if (typeof msg.content === "string") {
                     messages.push({ role: "assistant", content: msg.content });
                 } else if (Array.isArray(msg.content)) {
-                    const textBlocks = msg.content.filter((b) => b.type === "text" || b.type === "thinking");
+                    const textBlocks = msg.content.filter((b) => b.type === "text");
+                    const thinkingBlocks = msg.content.filter((b) => b.type === "thinking");
                     const toolUseBlocks = msg.content.filter((b) => b.type === "tool_use");
 
                     const combinedText = textBlocks
-                        .map((b) => {
-                            if (b.type === "thinking") return `<thinking>\n${b.thinking}\n</thinking>`;
-                            return b.text;
-                        })
+                        .map((b) => b.text)
+                        .join("\n");
+
+                    const reasoningText = thinkingBlocks
+                        .map((b) => b.thinking)
                         .join("\n");
 
                     const assistantMsg: OpenAIMessage = {
                         role: "assistant",
                         content: combinedText || null,
                     };
+                    
+                    if (thinkingBlocks.length > 0) {
+                        assistantMsg.reasoning_content = reasoningText;
+                    }
 
                     if (toolUseBlocks.length > 0) {
                         assistantMsg.tool_calls = toolUseBlocks.map((tu) => ({

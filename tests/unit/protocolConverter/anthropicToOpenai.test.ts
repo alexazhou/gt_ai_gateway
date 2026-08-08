@@ -208,7 +208,7 @@ describe("AnthropicToOpenAIConverter - convertRequest", () => {
         }).reasoning_effort).toBe(ReasoningEffort.XHIGH);
     });
 
-    it("should include thinking blocks in assistant content", () => {
+    it("should extract thinking blocks to reasoning_content", () => {
         const anthropicReq: AnthropicRequest = {
             model: "claude-3-sonnet-20240229",
             max_tokens: 1024,
@@ -224,7 +224,28 @@ describe("AnthropicToOpenAIConverter - convertRequest", () => {
         };
 
         const result = converter.convertRequest(anthropicReq);
-        expect(result.messages[0].content).toBe("<thinking>\nreasoning\n</thinking>\nanswer");
+        expect(result.messages[0].content).toBe("answer");
+        expect((result.messages[0] as any).reasoning_content).toBe("reasoning");
+    });
+
+    it("should assign empty string to reasoning_content if thinking block is empty", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "thinking", thinking: "" },
+                        { type: "text", text: "answer" },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq);
+        expect(result.messages[0].content).toBe("answer");
+        expect((result.messages[0] as any).reasoning_content).toBe("");
     });
 
     it("should convert assistant message with tool_use to OpenAI tool_calls", () => {
