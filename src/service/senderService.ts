@@ -221,16 +221,12 @@ async function sendRequest(
             format,
         );
         // 无可用上游时 selectUpstream 返回上游为 null 的空结果
-        if (routingResult.vendorId == null || routingResult.vendorModelName == null) {
+        if (routingResult.vendor == null || routingResult.vendorModelName == null) {
             throw new customError.AppError("No available upstream", 503);
         }
 
-        const vendor = await SgVendor.query().find(routingResult.vendorId);
-        if (!vendor) {
-            throw new customError.AppError("Vendor not found", 503);
-        }
-
-        // 上游模型已在选择阶段解析，结果直接携带，无需再查库
+        // vendor 与上游模型已在选择阶段解析，结果直接携带，无需再查库
+        const vendor = routingResult.vendor;
         const supportedFormats = routingResult.supportedFormats;
         const upstreamFormat = protocolUtils.resolveUpstreamFormat(format, supportedFormats);
 
@@ -253,7 +249,7 @@ async function sendRequest(
             if (!response.ok && modelRoutingService.isRetryableStatus(response.status)) {
                 // 失败标记与 failover 开关解耦：无论是否切换，都记录上游失败，
                 // 让冷却对后续请求和其他模型生效
-                upstreamHealthService.markFailure(routingResult.vendorId, vendorModelName, upstreamFormat);
+                upstreamHealthService.markFailure(routingResult.vendor.id, vendorModelName, upstreamFormat);
                 if (failoverEnabled) {
                     c.status(200);
                     continue;
@@ -266,7 +262,7 @@ async function sendRequest(
                 throw e;
             }
 
-            upstreamHealthService.markFailure(routingResult.vendorId, vendorModelName, upstreamFormat);
+            upstreamHealthService.markFailure(routingResult.vendor.id, vendorModelName, upstreamFormat);
             if (failoverEnabled) {
                 continue;
             }

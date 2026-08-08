@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiFormat, ModelRoutingMode } from "../../../src/constants";
 import { SgModel } from "../../../src/model/sgModel";
+import { SgVendor } from "../../../src/model/sgVendor";
 import { ModelRoutingResult } from "../../../src/service/routingStrategy/baseRoutingStrategy";
 import FirstAvailableRoutingStrategy from "../../../src/service/routingStrategy/firstAvailableRoutingStrategy";
 import LoadBalanceRoutingStrategy from "../../../src/service/routingStrategy/loadBalanceRoutingStrategy";
 import SingleRoutingStrategy from "../../../src/service/routingStrategy/singleRoutingStrategy";
 
 function candidate(vendorId: number): ModelRoutingResult {
-    return new ModelRoutingResult(vendorId, `model-${vendorId}`, [ApiFormat.OPENAI]);
+    return new ModelRoutingResult({ id: vendorId } as SgVendor, `model-${vendorId}`, [ApiFormat.OPENAI]);
 }
 
 
@@ -62,7 +63,7 @@ describe("routing strategies", () => {
             model(ModelRoutingMode.FIRST_AVAILABLE),
             [],
         );
-        expect(result.vendorId).toBeNull();
+        expect(result.vendor).toBeNull();
         expect(result.vendorModelName).toBeNull();
         expect(result.supportedFormats).toEqual([]);
     });

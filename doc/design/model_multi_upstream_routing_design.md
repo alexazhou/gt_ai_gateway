@@ -162,7 +162,7 @@ key 中间段统一用 vendor model 名称：显式上游取 `vendor_model.model
 1. 解析启用的上游并确定实际 vendor model 和协议。
 2. 根据内存中的健康状态排除冷却中的候选。
 3. 调用 `routing_mode` 对应的策略类。
-4. 返回 `ModelRoutingResult`，携带 `vendorId`、`vendorModelName` 和 `supportedFormats`；无可用上游时返回上游字段为 `null` 的空结果（`ModelRoutingResult.none()`），由调用方判断后抛出 `503`。
+4. 返回 `ModelRoutingResult`，携带 `vendor` 对象、`vendorModelName` 和 `supportedFormats`；无可用上游时返回上游字段为 `null` 的空结果（`ModelRoutingResult.none()`），由调用方判断后抛出 `503`。
 
 策略接口：
 
@@ -180,7 +180,7 @@ abstract class BaseRoutingStrategy {
 - `single`：返回唯一候选。
 - `load_balance`：等概率随机返回一个候选。
 - `first_available`：返回候选列表中的第一个（候选列表保持 `routing_config.upstreams` 的配置顺序，并已剔除冷却中的上游）。
-- 候选为空时返回 `ModelRoutingResult.none()`（`vendorId` / `vendorModelName` 为 `null`），不再返回 `null`。
+- 候选为空时返回 `ModelRoutingResult.none()`（`vendor` / `vendorModelName` 为 `null`），不再返回 `null`。
 
 路由服务先按每个上游的协议健康状态过滤模型，再交给策略选择。
 

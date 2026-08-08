@@ -158,7 +158,7 @@ async function resolveAvailableCandidates(
         }
 
         candidates.push(
-            new ModelRoutingResult(upstream.vendor_id, vendorModelName, supportedFormats),
+            new ModelRoutingResult(vendor, vendorModelName, supportedFormats),
         );
     }
 

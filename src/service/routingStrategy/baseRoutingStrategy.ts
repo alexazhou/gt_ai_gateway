@@ -1,9 +1,10 @@
 import type { ApiFormat } from "../../constants";
 import type { SgModel } from "../../model/sgModel";
+import type { SgVendor } from "../../model/sgVendor";
 
 class ModelRoutingResult {
     constructor(
-        readonly vendorId: number | null,
+        readonly vendor: SgVendor | null,
         readonly vendorModelName: string | null,
         readonly supportedFormats: ApiFormat[],
     ) {}
