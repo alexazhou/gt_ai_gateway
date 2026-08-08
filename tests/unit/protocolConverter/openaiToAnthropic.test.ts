@@ -55,6 +55,29 @@ describe("OpenAIToAnthropicConverter - convertRequest", () => {
         expect(result.messages[0].role).toBe("user");
     });
 
+    it("should convert reasoning_content in assistant message to thinking block", () => {
+        const openaiReq: OpenAIRequest = {
+            model: "claude-3-sonnet-20240229",
+            messages: [
+                {
+                    role: "assistant",
+                    content: "answer",
+                    reasoning_content: "reasoning",
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(openaiReq);
+        expect(result.messages).toHaveLength(1);
+        expect(result.messages[0]).toEqual({
+            role: "assistant",
+            content: [
+                { type: "thinking", thinking: "reasoning" },
+                { type: "text", text: "answer" },
+            ],
+        });
+    });
+
     it("should convert OpenAI tools to Anthropic format", () => {
         const openaiReq: OpenAIRequest = {
             model: "gpt-4",

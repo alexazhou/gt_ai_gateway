@@ -51,30 +51,38 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                 continue;
             }
 
-            if (msg.role === "assistant" && msg.tool_calls) {
-                const contentBlocks: AnthropicContentBlock[] = [];
+            if (msg.role === "assistant") {
+                if (msg.tool_calls || msg.reasoning_content) {
+                    const contentBlocks: AnthropicContentBlock[] = [];
 
-                if (msg.content) {
-                    contentBlocks.push({ type: "text", text: msg.content });
-                }
-
-                for (const tc of msg.tool_calls) {
-                    let inputObj: Record<string, unknown> = {};
-                    try {
-                        inputObj = JSON.parse(tc.function.arguments);
-                    } catch {
-                        inputObj = { raw: tc.function.arguments };
+                    if (msg.reasoning_content) {
+                        contentBlocks.push({ type: "thinking", thinking: msg.reasoning_content });
                     }
-                    contentBlocks.push({
-                        type: "tool_use",
-                        id: tc.id,
-                        name: tc.function.name,
-                        input: inputObj,
-                    });
-                }
 
-                messages.push({ role: "assistant", content: contentBlocks });
-                continue;
+                    if (msg.content) {
+                        contentBlocks.push({ type: "text", text: msg.content });
+                    }
+
+                    if (msg.tool_calls) {
+                        for (const tc of msg.tool_calls) {
+                            let inputObj: Record<string, unknown> = {};
+                            try {
+                                inputObj = JSON.parse(tc.function.arguments);
+                            } catch {
+                                inputObj = { raw: tc.function.arguments };
+                            }
+                            contentBlocks.push({
+                                type: "tool_use",
+                                id: tc.id,
+                                name: tc.function.name,
+                                input: inputObj,
+                            });
+                        }
+                    }
+
+                    messages.push({ role: "assistant", content: contentBlocks.length > 0 ? contentBlocks : "" });
+                    continue;
+                }
             }
 
             if (msg.role === "user" || msg.role === "assistant") {
