@@ -27,7 +27,7 @@ defineProps<{
     max-width: 100%;
     overflow: hidden;
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 12px;
     vertical-align: middle;
 }
 

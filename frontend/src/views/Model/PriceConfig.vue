@@ -11,17 +11,20 @@
                 <div v-else class="price-display">
                     <span class="price-item" title="输入价格">
                         <ArrowUpOutlined class="price-icon input" />
-                        ¥{{ formatPrice(prices.input) }}
+                        <template v-if="prices.input != null">¥{{ prices.input.toFixed(6) }}</template>
+                        <span v-else class="unset-price">-</span>
                     </span>
                     <span class="price-divider">/</span>
                     <span class="price-item" title="输出价格">
                         <ArrowDownOutlined class="price-icon output" />
-                        ¥{{ formatPrice(prices.output) }}
+                        <template v-if="prices.output != null">¥{{ prices.output.toFixed(6) }}</template>
+                        <span v-else class="unset-price">-</span>
                     </span>
                     <span class="price-divider">/</span>
                     <span class="price-item" title="缓存读取价格">
                         <ArrowUpOutlined class="price-icon cache-read" />
-                        ¥{{ formatPrice(prices.cache_read) }}
+                        <template v-if="prices.cache_read != null">¥{{ prices.cache_read.toFixed(6) }}</template>
+                        <span v-else class="unset-price">-</span>
                     </span>
                 </div>
             </template>
@@ -125,7 +128,10 @@ function updatePrice(key: keyof ModelPrices, value: number | null) {
 
 
 function formatPrice(value?: number): string {
-    return (value ?? 0).toFixed(6);
+    if (value === undefined || value === null) {
+        return '-';
+    }
+    return `¥${value.toFixed(6)}`;
 }
 </script>
 
@@ -185,6 +191,10 @@ function formatPrice(value?: number): string {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+}
+
+.unset-price {
+    color: var(--text-secondary, #999);
 }
 
 .price-icon {
