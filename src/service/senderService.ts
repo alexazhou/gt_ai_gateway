@@ -216,11 +216,12 @@ async function sendRequest(
     body: string,
 ): Promise<Response> {
     while (true) {
-        const routingResult: ModelRoutingResult | null = await modelRoutingService.selectUpstream(
+        const routingResult: ModelRoutingResult = await modelRoutingService.selectUpstream(
             modelConfig,
             format,
         );
-        if (!routingResult) {
+        // 无可用上游时 selectUpstream 返回上游为 null 的空结果
+        if (routingResult.vendorId == null || routingResult.vendorModelName == null) {
             throw new customError.AppError("No available upstream", 503);
         }
 

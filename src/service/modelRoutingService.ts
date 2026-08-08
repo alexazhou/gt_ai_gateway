@@ -170,14 +170,14 @@ async function selectUpstream(
     model: SgModel,
     clientFormat: ApiFormat,
     now: number = Date.now(),
-): Promise<ModelRoutingResult | null> {
+): Promise<ModelRoutingResult> {
     const strategy = strategies[model.routing_mode];
     if (!strategy) {
         throw new customError.AppError("Invalid routing mode");
     }
 
     const candidates = await resolveAvailableCandidates(model, clientFormat, now);
-    // 选中的 candidate 本身就是路由结果，无需再包装
+    // 选中的 candidate 本身就是路由结果；无可用上游时返回上游为 null 的空结果，由调用方判断
     return strategy.selectUpstream(model, candidates);
 }
 

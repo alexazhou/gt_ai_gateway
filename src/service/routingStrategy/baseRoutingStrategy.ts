@@ -3,17 +3,21 @@ import type { SgModel } from "../../model/sgModel";
 
 class ModelRoutingResult {
     constructor(
-        readonly vendorId: number,
-        readonly vendorModelName: string,
+        readonly vendorId: number | null,
+        readonly vendorModelName: string | null,
         readonly supportedFormats: ApiFormat[],
     ) {}
+
+    static none(): ModelRoutingResult {
+        return new ModelRoutingResult(null, null, []);
+    }
 }
 
 abstract class BaseRoutingStrategy {
     abstract selectUpstream(
         model: SgModel,
         candidates: ModelRoutingResult[],
-    ): ModelRoutingResult | null;
+    ): ModelRoutingResult;
 }
 
 export default BaseRoutingStrategy;

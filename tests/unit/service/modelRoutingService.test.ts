@@ -55,12 +55,15 @@ describe("routing strategies", () => {
         )).toBe(first);
     });
 
-    it("returns null when no healthy upstream remains", () => {
+    it("returns an empty result (upstream null) when no healthy upstream remains", () => {
         const strategy = new FirstAvailableRoutingStrategy();
 
-        expect(strategy.selectUpstream(
+        const result = strategy.selectUpstream(
             model(ModelRoutingMode.FIRST_AVAILABLE),
             [],
-        )).toBeNull();
+        );
+        expect(result.vendorId).toBeNull();
+        expect(result.vendorModelName).toBeNull();
+        expect(result.supportedFormats).toEqual([]);
     });
 });
