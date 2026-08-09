@@ -2,7 +2,7 @@ import type { Builder } from "sutando";
 import { SgModel } from "../model/sgModel";
 
 import customError from "../util/customError";
-import modelRoutingService from "./modelRoutingService";
+import routingService from "./routingService/core";
 
 interface ModelListOptions {
     vendorId?: number;
@@ -94,7 +94,7 @@ async function createModel(model: SgModel): Promise<SgModel> {
         throw new customError.AppError("An enabled model with this name already exists", 409);
     }
 
-    await modelRoutingService.validateConfig(model);
+    await routingService.validateConfig(model);
     await model.save();
     return model;
 }
@@ -118,7 +118,7 @@ async function updateModel(inputModel: SgModel): Promise<SgModel | null> {
         }
     }
 
-    await modelRoutingService.validateConfig(model);
+    await routingService.validateConfig(model);
     await model.save();
 
     return await SgModel.query().find(model.id);

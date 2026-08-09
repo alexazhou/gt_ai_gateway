@@ -1,5 +1,4 @@
 import type { ApiFormat } from "../../constants";
-import type { SgModel } from "../../model/sgModel";
 import type { SgVendor } from "../../model/sgVendor";
 
 class ModelRoutingResult {
@@ -12,14 +11,13 @@ class ModelRoutingResult {
     static none(): ModelRoutingResult {
         return new ModelRoutingResult(null, null, []);
     }
+
+    hasUpstream(): this is ModelRoutingResult & {
+        vendor: SgVendor;
+        vendorModelName: string;
+    } {
+        return this.vendor != null && this.vendorModelName != null;
+    }
 }
 
-abstract class BaseRoutingStrategy {
-    abstract selectUpstream(
-        model: SgModel,
-        candidates: ModelRoutingResult[],
-    ): ModelRoutingResult;
-}
-
-export default BaseRoutingStrategy;
 export { ModelRoutingResult };

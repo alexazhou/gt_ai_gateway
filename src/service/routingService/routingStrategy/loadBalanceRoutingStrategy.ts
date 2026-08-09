@@ -1,5 +1,6 @@
-import type { SgModel } from "../../model/sgModel";
-import BaseRoutingStrategy, { ModelRoutingResult } from "./baseRoutingStrategy";
+import type { SgModel } from "../../../model/sgModel";
+import BaseRoutingStrategy from "./baseRoutingStrategy";
+import { ModelRoutingResult } from "../types";
 
 class LoadBalanceRoutingStrategy extends BaseRoutingStrategy {
     selectUpstream(

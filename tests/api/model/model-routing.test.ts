@@ -640,4 +640,154 @@ describe("Model multi-upstream routing", () => {
         expect(records.body.list[0].vendor_id).toBe(backupVendor.body.id);
         expect(records.body.list[1].vendor_id).toBe(primaryVendor.body.id);
     });
+
+    it("returns the last upstream error when all failover attempts fail", async () => {
+        const failingVendorA = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                ...vendorFixtures.VENDOR_FIXTURES.openai(),
+                name: "Exhaust failing upstream A",
+                urls: { openai: "http://localhost:9999/chat/completions/unavailable" },
+            },
+            adminToken,
+        );
+        const failingVendorB = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                ...vendorFixtures.VENDOR_FIXTURES.openai(),
+                name: "Exhaust failing upstream B",
+                urls: { openai: "http://localhost:9999/chat/completions/unavailable" },
+            },
+            adminToken,
+        );
+        const failingModelA = await requestHelper.post(
+            `/vendor/${failingVendorA.body.id}/model/add.json`,
+            { model_id: "exhaust-fail-a" },
+            adminToken,
+        );
+        const failingModelB = await requestHelper.post(
+            `/vendor/${failingVendorB.body.id}/model/add.json`,
+            { model_id: "exhaust-fail-b" },
+            adminToken,
+        );
+        const model = await requestHelper.post(
+            "/model/create.json",
+            {
+                name: "exhaust-failover-model",
+                routing_mode: "first_available",
+                routing_config: {
+                    upstreams: [
+                        {
+                            vendor_id: failingVendorA.body.id,
+                            vendor_model_id: failingModelA.body.id,
+                            enabled: true,
+                        },
+                        {
+                            vendor_id: failingVendorB.body.id,
+                            vendor_model_id: failingModelB.body.id,
+                            enabled: true,
+                        },
+                    ],
+                },
+            },
+            adminToken,
+        );
+        expect(model.status).toBe(200);
+
+        const user = await requestHelper.post(
+            "/user/create.json",
+            mockHelper.generateUser(),
+            adminToken,
+        );
+        const response = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "exhaust-failover-model", stream: false }),
+            user.body.token,
+        );
+
+        // 回传最后一个上游的错误响应（mock 的 503 body），而非 "No available upstream"
+        expect(response.status).toBe(503);
+        expect(response.body.error.message).toBe("Mock upstream unavailable");
+
+        const records = await requestHelper.get(
+            `/record/list.json?model_ids=${model.body.id}`,
+            adminToken,
+        );
+        expect(records.body.total).toBe(2);
+        expect(records.body.list.every((record: any) => record.status === "failed")).toBe(true);
+    });
+
+    it("returns 502 when all failover attempts fail with network errors", async () => {
+        const deadVendorA = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                ...vendorFixtures.VENDOR_FIXTURES.openai(),
+                name: "Dead network upstream A",
+                urls: { openai: "http://localhost:1/chat/completions" },
+            },
+            adminToken,
+        );
+        const deadVendorB = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                ...vendorFixtures.VENDOR_FIXTURES.openai(),
+                name: "Dead network upstream B",
+                urls: { openai: "http://localhost:1/chat/completions" },
+            },
+            adminToken,
+        );
+        const deadModelA = await requestHelper.post(
+            `/vendor/${deadVendorA.body.id}/model/add.json`,
+            { model_id: "dead-net-a" },
+            adminToken,
+        );
+        const deadModelB = await requestHelper.post(
+            `/vendor/${deadVendorB.body.id}/model/add.json`,
+            { model_id: "dead-net-b" },
+            adminToken,
+        );
+        const model = await requestHelper.post(
+            "/model/create.json",
+            {
+                name: "dead-network-model",
+                routing_mode: "first_available",
+                routing_config: {
+                    upstreams: [
+                        {
+                            vendor_id: deadVendorA.body.id,
+                            vendor_model_id: deadModelA.body.id,
+                            enabled: true,
+                        },
+                        {
+                            vendor_id: deadVendorB.body.id,
+                            vendor_model_id: deadModelB.body.id,
+                            enabled: true,
+                        },
+                    ],
+                },
+            },
+            adminToken,
+        );
+        expect(model.status).toBe(200);
+
+        const user = await requestHelper.post(
+            "/user/create.json",
+            mockHelper.generateUser(),
+            adminToken,
+        );
+        const response = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "dead-network-model", stream: false }),
+            user.body.token,
+        );
+
+        expect(response.status).toBe(502);
+        expect(response.body.error.message).toContain("All upstreams failed");
+
+        const records = await requestHelper.get(
+            `/record/list.json?model_ids=${model.body.id}`,
+            adminToken,
+        );
+        expect(records.body.total).toBe(2);
+    });
 });

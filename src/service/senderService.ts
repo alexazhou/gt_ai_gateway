@@ -13,8 +13,31 @@ import protocolUtils from "../util/protocolUtils";
 import streamLogService from "./streamLogService";
 import responseHandlerService from "./responseHandlerService";
 import fetchUtil from "../util/fetchUtil";
-import modelRoutingService, { type ModelRoutingResult } from "./modelRoutingService";
+import routingService, { type ModelRoutingResult } from "./routingService/core";
 import upstreamHealthService from "./upstreamHealthService";
+import RoutingContext from "./routingService/routingContext";
+
+
+// 可重试的 HTTP 错误响应转成异常，与网络异常汇入同一个失败处理点
+class UpstreamResponseError extends Error {
+    constructor(readonly response: Response) {
+        super(`Upstream returned retryable status ${response.status}`);
+    }
+}
+
+
+// 网络异常合成 502 错误响应，与 HTTP 错误响应统一为 Response 回传
+function buildUpstreamFailureResponse(c: Context, error: unknown): Response {
+    const appError = new customError.AppError(
+        `All upstreams failed: ${error instanceof Error ? error.message : String(error)}`,
+        502,
+    );
+    const apiFormat = c.get("api_format");
+    const body = apiFormat
+        ? customError.buildLlmErrorResponse(appError, apiFormat)
+        : { error: appError.message, code: appError.code };
+    return c.json(body, 502);
+}
 
 
 async function sendRequestToUpstream(
@@ -22,15 +45,12 @@ async function sendRequestToUpstream(
     user: SgUser,
     modelConfig: SgModel,
     vendor: SgVendor,
-    format: ApiFormat,
-    body: string,
     vendorModelName: string,
-    supportedFormats: ApiFormat[],
+    format: ApiFormat,
+    upstreamFormat: ApiFormat,
+    body: string,
 ): Promise<Response> {
-    // 根据客户端请求的格式和 vendor/vendorModel 支持的格式，计算最终应该用什么格式
-    // supportedFormats 已由 sendRequest 解析（显式取 vendor_model，自动取 vendor），无需再查库
-    const upstreamFormat = protocolUtils.resolveUpstreamFormat(format, supportedFormats);
-
+    // 客户端格式与最终上游格式已在 sendRequest 解析好，这里直接使用
     const needsConversion = format !== upstreamFormat;
 
     const url = vendor.getUrlByFormat(upstreamFormat);
@@ -215,24 +235,32 @@ async function sendRequest(
     format: ApiFormat,
     body: string,
 ): Promise<Response> {
+    // 每个原始请求一个路由上下文，记录已用后端，避免重试循环
+    const routingContext = new RoutingContext();
+    let lastFailure: Response | null = null;
+
     while (true) {
-        const routingResult: ModelRoutingResult = await modelRoutingService.selectUpstream(
+        const routingResult: ModelRoutingResult = await routingService.selectUpstream(
             modelConfig,
             format,
+            routingContext,
         );
         // 无可用上游时 selectUpstream 返回上游为 null 的空结果
-        if (routingResult.vendor == null || routingResult.vendorModelName == null) {
+        if (!routingResult.hasUpstream()) {
+            // 全部后端已用尽：统一回传最后一次失败（HTTP 错误原样 / 网络异常 502 响应）
+            if (lastFailure) {
+                return lastFailure;
+            }
+            // 一开始就没有可用上游（全部冷却中 / 未启用）
             throw new customError.AppError("No available upstream", 503);
         }
 
         // vendor 与上游模型已在选择阶段解析，结果直接携带，无需再查库
         const vendor = routingResult.vendor;
+        const vendorModelName = routingResult.vendorModelName;
         const supportedFormats = routingResult.supportedFormats;
         const upstreamFormat = protocolUtils.resolveUpstreamFormat(format, supportedFormats);
-
-        // 失败切换是否开启；健康 key 中间段统一使用模型名
         const failoverEnabled = modelConfig.getRoutingConfig().failover.enabled;
-        const vendorModelName = routingResult.vendorModelName;
 
         try {
             const response = await sendRequestToUpstream(
@@ -240,20 +268,15 @@ async function sendRequest(
                 user,
                 modelConfig,
                 vendor,
-                format,
-                body,
                 vendorModelName,
-                supportedFormats,
+                format,
+                upstreamFormat,
+                body,
             );
 
-            if (!response.ok && modelRoutingService.isRetryableStatus(response.status)) {
-                // 失败标记与 failover 开关解耦：无论是否切换，都记录上游失败，
-                // 让冷却对后续请求和其他模型生效
-                upstreamHealthService.markFailure(routingResult.vendor.id, vendorModelName, upstreamFormat);
-                if (failoverEnabled) {
-                    c.status(200);
-                    continue;
-                }
+            // 可重试的 HTTP 错误转成异常，统一走下面的失败处理点
+            if (!response.ok && routingService.isRetryableStatus(response.status)) {
+                throw new UpstreamResponseError(response);
             }
 
             return response;
@@ -262,12 +285,24 @@ async function sendRequest(
                 throw e;
             }
 
-            upstreamHealthService.markFailure(routingResult.vendor.id, vendorModelName, upstreamFormat);
-            if (failoverEnabled) {
-                continue;
+            // 唯一的失败处理点：HTTP 错误与网络异常在这里汇合
+            const httpFailure = e instanceof UpstreamResponseError;
+
+            // 全局冷却：标记失败，让后续请求跳过（本请求的循环防护由 routingContext 承担）
+            upstreamHealthService.markFailure(vendor.id, vendorModelName, upstreamFormat);
+
+            // failover 关闭：HTTP 错误直接回传响应，网络异常抛原始异常，不继续尝试
+            if (!failoverEnabled) {
+                if (httpFailure) {
+                    return e.response;
+                }
+                throw e;
             }
 
-            throw e;
+            lastFailure = httpFailure
+                ? e.response
+                : buildUpstreamFailureResponse(c, e);
+            c.status(200);   // 复位上下文状态，避免上次失败的 error 状态影响下一次尝试
         }
     }
 }

@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiFormat, ModelRoutingMode } from "../../../src/constants";
 import { SgModel } from "../../../src/model/sgModel";
 import { SgVendor } from "../../../src/model/sgVendor";
-import { ModelRoutingResult } from "../../../src/service/routingStrategy/baseRoutingStrategy";
-import FirstAvailableRoutingStrategy from "../../../src/service/routingStrategy/firstAvailableRoutingStrategy";
-import LoadBalanceRoutingStrategy from "../../../src/service/routingStrategy/loadBalanceRoutingStrategy";
-import SingleRoutingStrategy from "../../../src/service/routingStrategy/singleRoutingStrategy";
+import { ModelRoutingResult } from "../../../src/service/routingService/types";
+import FirstAvailableRoutingStrategy from "../../../src/service/routingService/routingStrategy/firstAvailableRoutingStrategy";
+import LoadBalanceRoutingStrategy from "../../../src/service/routingService/routingStrategy/loadBalanceRoutingStrategy";
+import SingleRoutingStrategy from "../../../src/service/routingService/routingStrategy/singleRoutingStrategy";
 
 function candidate(vendorId: number): ModelRoutingResult {
     return new ModelRoutingResult({ id: vendorId } as SgVendor, `model-${vendorId}`, [ApiFormat.OPENAI]);
@@ -66,5 +66,10 @@ describe("routing strategies", () => {
         expect(result.vendor).toBeNull();
         expect(result.vendorModelName).toBeNull();
         expect(result.supportedFormats).toEqual([]);
+    });
+
+    it("hasUpstream reflects whether the result carries an upstream", () => {
+        expect(candidate(1).hasUpstream()).toBe(true);
+        expect(ModelRoutingResult.none().hasUpstream()).toBe(false);
     });
 });
