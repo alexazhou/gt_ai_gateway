@@ -27,7 +27,9 @@ export function capitalizeFirst(str: string): string {
 export function formatBalance(value: number | null | undefined): string {
     const num = Number(value ?? 0);
     if (!Number.isFinite(num)) return '0.00';
-    // 避免显示科学计数法（如 1.2199999999999998e-7）与 -0.00
-    if (Math.abs(num) < 0.005) return '0.00';
+    // 微小正值视为 0；负值（欠费）如实显示（用 6 位小数覆盖微元粒度），
+    // 避免页面显示 0.00 却被后端按负余额拦截
+    if (num >= 0 && num < 0.005) return '0.00';
+    if (num < 0 && num > -0.005) return num.toFixed(6);
     return num.toFixed(2);
 }

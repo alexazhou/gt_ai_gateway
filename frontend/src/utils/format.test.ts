@@ -8,9 +8,15 @@ describe('formatBalance', () => {
         expect(formatBalance(0)).toBe('0.00');
     });
 
-    it('treats tiny floating-point artifacts as zero', () => {
-        expect(formatBalance(-1.2199999999999998e-7)).toBe('0.00');
+    it('treats tiny positive balances as zero', () => {
         expect(formatBalance(1.22e-7)).toBe('0.00');
+        expect(formatBalance(0.000001)).toBe('0.00');
+    });
+
+    it('shows tiny negative balances (debts) honestly instead of 0.00', () => {
+        // 微元粒度余额：-0.000001 元（-1 微元）等欠费必须如实显示
+        expect(formatBalance(-0.000001)).toBe('-0.000001');
+        expect(formatBalance(-0.000014)).toBe('-0.000014');
     });
 
     it('handles null, undefined and non-finite values', () => {

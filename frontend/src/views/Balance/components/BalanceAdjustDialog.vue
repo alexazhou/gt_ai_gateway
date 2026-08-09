@@ -13,6 +13,7 @@
             </a-descriptions-item>
             <a-descriptions-item label="当前余额">
                 ¥{{ formatBalance(currentUser?.balance != null ? currentUser.balance / BALANCE_SCALE : null) }}
+                <a-tag v-if="currentUser && currentUser.balance < 0" color="error" style="margin-left: 8px">欠费</a-tag>
             </a-descriptions-item>
         </a-descriptions>
 

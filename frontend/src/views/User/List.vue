@@ -70,6 +70,7 @@
                         prefix="¥"
                         :value-style="{ color: record.balance > 0 ? 'var(--accent-primary)' : record.balance < 0 ? '#ff4d4f' : 'var(--text-secondary)', fontSize: '14px' }"
                     />
+                    <a-tag v-if="record.balance < 0" color="error" style="margin-left: 8px">欠费</a-tag>
                 </template>
                 <template v-if="column.key === 'status'">
                     <a-tag :color="record.status === 'active' ? 'success' : 'error'">
