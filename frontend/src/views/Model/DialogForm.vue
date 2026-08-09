@@ -52,28 +52,55 @@
                         </a-tooltip>
                     </span>
                 </template>
-                <a-radio-group
+                <a-select
                     v-model:value="formState.routing_mode"
-                    class="routing-mode-selector"
-                    button-style="solid"
+                    placeholder="请选择路由模式"
                     :disabled="isView"
                     @change="handleRoutingModeChange"
                 >
-                    <a-radio-button value="single">
+                    <a-select-option value="single">
                         固定上游
                         <a-tooltip title="使用唯一启用的上游">
                             <InfoCircleOutlined class="routing-help-icon" />
                         </a-tooltip>
-                    </a-radio-button>
-                    <a-radio-button value="load_balance">
+                    </a-select-option>
+                    <a-select-option value="load_balance">
                         负载均衡
-                        <a-tooltip title="从所有可用上游中等概率选择">
+                        <a-tooltip title="在多个可用上游之间分配请求">
+                            <InfoCircleOutlined class="routing-help-icon" />
+                        </a-tooltip>
+                    </a-select-option>
+                    <a-select-option value="first_available">
+                        首选可用
+                        <a-tooltip title="按列表顺序选择，第一个不可用时自动切换到下一个">
+                            <InfoCircleOutlined class="routing-help-icon" />
+                        </a-tooltip>
+                    </a-select-option>
+                </a-select>
+            </a-form-item>
+            <a-form-item v-if="formState.routing_mode === 'load_balance'" name="load_balance_strategy">
+                <template #label>
+                    <span class="upstream-label">
+                        随机方式
+                        <a-tooltip title="按用户随机：同一用户的请求路由稳定，不同用户分散到不同上游；按请求随机：每次请求等概率随机">
+                            <InfoCircleOutlined class="field-help-icon" />
+                        </a-tooltip>
+                    </span>
+                </template>
+                <a-radio-group
+                    v-model:value="formState.load_balance_strategy"
+                    button-style="solid"
+                    :disabled="isView"
+                >
+                    <a-radio-button value="user">
+                        按用户随机
+                        <a-tooltip title="以用户 id 为种子：同一用户的请求始终路由到同一批上游（粘性），不同用户分散到不同上游">
                             <InfoCircleOutlined class="routing-help-icon" />
                         </a-tooltip>
                     </a-radio-button>
-                    <a-radio-button value="first_available">
-                        首选可用
-                        <a-tooltip title="按列表顺序选择，第一个不可用时自动切换到下一个">
+                    <a-radio-button value="request">
+                        按请求随机
+                        <a-tooltip title="每次请求等概率随机选择一个可用上游">
                             <InfoCircleOutlined class="routing-help-icon" />
                         </a-tooltip>
                     </a-radio-button>
@@ -129,6 +156,7 @@ import { createModel, updateModel } from '@/api/model';
 import { getConfig } from '@/api/config';
 import type {
     CreateModelRequest,
+    LoadBalanceStrategy,
     Model,
     ModelPrices,
     ModelRoutingMode,
@@ -169,6 +197,7 @@ function createUpstream(data?: Partial<ModelUpstreamFormValue>): ModelUpstreamFo
 const formState = reactive({
     name: '',
     routing_mode: 'single' as ModelRoutingMode,
+    load_balance_strategy: 'user' as LoadBalanceStrategy,
     upstreams: [createUpstream()] as ModelUpstreamFormValue[],
     failoverEnabled: true,
     enable: true,
@@ -223,6 +252,7 @@ function openModel(model: Model, mode: 'edit' | 'view') {
     currentId.value = model.id;
     formState.name = model.name;
     formState.routing_mode = model.routing_mode;
+    formState.load_balance_strategy = model.routing_config.load_balance_strategy ?? 'user';
     const upstreams = model.routing_config.upstreams;
     formState.upstreams = upstreams.map(upstream => createUpstream({
         vendor_id: upstream.vendor_id,
@@ -268,6 +298,9 @@ async function handleOk() {
                 enabled: upstream.enabled,
             })),
             failover: { enabled: formState.failoverEnabled },
+            ...(formState.routing_mode === 'load_balance'
+                ? { load_balance_strategy: formState.load_balance_strategy }
+                : {}),
         };
         const requestData: CreateModelRequest = {
             name: formState.name,
@@ -301,6 +334,7 @@ async function handleOk() {
 function resetForm() {
     formState.name = '';
     formState.routing_mode = 'single';
+    formState.load_balance_strategy = 'user';
     formState.upstreams = [createUpstream()];
     formState.failoverEnabled = true;
     formState.enable = true;
@@ -346,16 +380,6 @@ defineExpose({ openCreate, openEdit, openView });
 
 .model-form {
     padding-top: 12px;
-}
-
-.routing-mode-selector {
-    display: flex;
-    width: 100%;
-}
-
-.routing-mode-selector :deep(.ant-radio-button-wrapper) {
-    flex: 1;
-    text-align: center;
 }
 
 .routing-help-icon {

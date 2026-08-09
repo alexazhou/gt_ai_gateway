@@ -54,6 +54,7 @@ describe("Model multi-upstream routing", () => {
         expect(response.body.routing_config).toEqual({
             upstreams: [{ vendor_id: primaryVendorId, enabled: true }],
             failover: { enabled: true },
+            load_balance_strategy: "user",
         });
         expect(response.body).not.toHaveProperty("vendor_id");
         expect(response.body).not.toHaveProperty("vendor_model_id");

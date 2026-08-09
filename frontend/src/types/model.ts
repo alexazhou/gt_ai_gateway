@@ -2,6 +2,8 @@ import type { BaseEntity, TableQuery } from './index';
 
 export type ModelRoutingMode = 'single' | 'load_balance' | 'first_available';
 
+export type LoadBalanceStrategy = 'user' | 'request';
+
 export interface ModelUpstreamConfig {
     vendor_id: number;
     vendor_model_id?: number;
@@ -21,6 +23,7 @@ export interface ModelFailoverConfig {
 export interface ModelRoutingConfig {
     upstreams: ModelUpstreamConfig[];
     failover: ModelFailoverConfig;
+    load_balance_strategy?: LoadBalanceStrategy;
 }
 
 export interface ModelPrices {

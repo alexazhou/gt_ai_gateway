@@ -5,13 +5,12 @@ class ModelRoutingResult {
     constructor(
         readonly vendor: SgVendor | null,
         readonly vendorModelName: string | null,
-        readonly supportedFormats: ApiFormat[],
         readonly upstreamFormat: ApiFormat,
     ) {}
 
     static none(): ModelRoutingResult {
         // upstreamFormat 为占位值：none() 无上游，不会被健康过滤查询
-        return new ModelRoutingResult(null, null, [], ApiFormat.OPENAI);
+        return new ModelRoutingResult(null, null, ApiFormat.OPENAI);
     }
 
     hasUpstream(): this is ModelRoutingResult & {

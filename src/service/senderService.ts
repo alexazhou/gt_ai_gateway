@@ -11,7 +11,6 @@ import hostService from "./hostService";
 import { ConverterFactory } from "../util/protocolConverter/ConverterFactory";
 import type { BaseConverter } from "../util/protocolConverter/BaseConverter";
 import customError from "../util/customError";
-import protocolUtils from "../util/protocolUtils";
 import streamLogService from "./streamLogService";
 import responseHandlerService from "./responseHandlerService";
 import fetchUtil from "../util/fetchUtil";
@@ -296,6 +295,7 @@ async function sendRequest(
                 modelConfig,
                 clientFormat,
                 routingContext,
+                c,   // 从请求 context 读取用户，供负载均衡"按用户随机"模式做种子
             );
         } catch (e) {
             // 路由阶段异常（如配置错误无启用上游）：同样是一次失败请求，不留 init 孤儿记录
@@ -329,11 +329,10 @@ async function sendRequest(
             throw new customError.AppError("No available upstream", 503);
         }
 
-        // vendor 与上游模型已在选择阶段解析，结果直接携带，无需再查库
+        // vendor 与上游模型/最终格式已在选择阶段解析，结果直接携带，无需再查库
         const vendor = routingResult.vendor;
         const vendorModelName = routingResult.vendorModelName;
-        const supportedFormats = routingResult.supportedFormats;
-        const upstreamFormat = protocolUtils.resolveUpstreamFormat(clientFormat, supportedFormats);
+        const upstreamFormat = routingResult.upstreamFormat;
 
         await requestActivityService.append(recordId, RequestActivityStage.ROUTING, "路由选择", {
             strategy: modelConfig.routing_mode,

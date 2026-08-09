@@ -1,3 +1,4 @@
+import type { Context } from "hono";
 import { ApiFormat, ModelRoutingMode } from "../../constants";
 import { SgModel } from "../../model/sgModel";
 import { SgVendor } from "../../model/sgVendor";
@@ -95,7 +96,6 @@ async function validateConfig(
 async function resolveAvailableCandidates(
     model: SgModel,
     clientFormat: ApiFormat,
-    routingContext: RoutingContext,
 ): Promise<ModelRoutingResult[]> {
     const upstreams = model.getRoutingConfig().upstreams.filter(upstream => upstream.enabled);
     if (upstreams.length === 0) {
@@ -145,14 +145,9 @@ async function resolveAvailableCandidates(
         // 自动上游（无 vendor_model_id）同样参与冷却：key 使用模型名
         const vendorModelName = vendorModel?.model_id ?? model.name ?? "";
 
-        // 本次请求已用过的后端，跳过，避免重试循环
-        if (routingContext.hasTried(upstream.vendor_id, vendorModelName)) {
-            continue;
-        }
-
-        // 健康状态过滤已下沉到各策略类（SINGLE 忽略，其余过滤冷却上游）
+        // 健康状态与"本请求已试过"的过滤已下沉到各策略类
         candidates.push(
-            new ModelRoutingResult(vendor, vendorModelName, supportedFormats, upstreamFormat),
+            new ModelRoutingResult(vendor, vendorModelName, upstreamFormat),
         );
     }
 
@@ -164,14 +159,17 @@ async function selectUpstream(
     model: SgModel,
     clientFormat: ApiFormat,
     routingContext: RoutingContext,
+    c?: Context,
 ): Promise<ModelRoutingResult> {
     const strategy = strategies[model.routing_mode];
     if (!strategy) {
         throw new customError.AppError("Invalid routing mode");
     }
 
-    const candidates = await resolveAvailableCandidates(model, clientFormat, routingContext);
-    const selected = strategy.selectUpstream(model, candidates);
+    const candidates = await resolveAvailableCandidates(model, clientFormat);
+    // 负载均衡"按用户随机"模式的种子：从请求 context 读取用户 id，调用方无需主动传入
+    const seed = (c?.get("user") as { id?: number } | undefined)?.id;
+    const selected = strategy.selectUpstream(model, candidates, routingContext, seed);
     // 记录本次已选后端，后续重试不再选中（成功则循环立即结束，该记录无害）
     if (selected.hasUpstream()) {
         routingContext.markTried(selected.vendor.id, selected.vendorModelName);

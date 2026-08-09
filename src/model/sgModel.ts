@@ -43,10 +43,13 @@ class ModelFailoverConfig {
 class ModelRoutingConfig extends CastsAttributes {
     upstreams: ModelUpstreamConfig[] = [];
     failover: ModelFailoverConfig = new ModelFailoverConfig();
+    // 负载均衡策略：user = 按用户随机（用户 id 为种子，同用户路由稳定），request = 按请求随机
+    load_balance_strategy: "user" | "request" = "user";
 
     constructor(data?: {
         upstreams?: Array<ModelUpstreamConfig | Partial<ModelUpstreamConfig>>;
         failover?: ModelFailoverConfig | Partial<ModelFailoverConfig>;
+        load_balance_strategy?: "user" | "request";
     }) {
         super();
         if (Array.isArray(data?.upstreams)) {
@@ -61,12 +64,16 @@ class ModelRoutingConfig extends CastsAttributes {
                 ? data.failover
                 : new ModelFailoverConfig(data.failover);
         }
+        if (data?.load_balance_strategy === "user" || data?.load_balance_strategy === "request") {
+            this.load_balance_strategy = data.load_balance_strategy;
+        }
     }
 
     toJSON() {
         return {
             upstreams: this.upstreams.map(upstream => upstream.toJSON()),
             failover: this.failover.toJSON(),
+            load_balance_strategy: this.load_balance_strategy,
         };
     }
 
@@ -82,6 +89,7 @@ class ModelRoutingConfig extends CastsAttributes {
         value: ModelRoutingConfig | {
             upstreams?: Array<Partial<ModelUpstreamConfig>>;
             failover?: Partial<ModelFailoverConfig>;
+            load_balance_strategy?: "user" | "request";
         },
     ): string {
         const config = value instanceof ModelRoutingConfig

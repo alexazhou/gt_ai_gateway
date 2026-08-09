@@ -21,6 +21,7 @@ describe("model JSON custom casts", () => {
         expect(config.toJSON()).toEqual({
             upstreams: [{ vendor_id: 3, vendor_model_id: 7, enabled: true }],
             failover: { enabled: true },
+            load_balance_strategy: "user",
         });
     });
 
@@ -36,6 +37,23 @@ describe("model JSON custom casts", () => {
         expect(model.getRoutingConfig().toJSON()).toEqual({
             upstreams: [{ vendor_id: 3, enabled: true }],
             failover: { enabled: false },
+            load_balance_strategy: "user",
         });
+    });
+
+    it("parses load_balance_strategy and defaults to user", () => {
+        const explicit = new SgModel({
+            routing_config: {
+                upstreams: [{ vendor_id: 3, enabled: true }],
+                load_balance_strategy: "request",
+            },
+        });
+        expect(explicit.getRoutingConfig().load_balance_strategy).toBe("request");
+        expect(explicit.getRoutingConfig().toJSON().load_balance_strategy).toBe("request");
+
+        const defaulted = new SgModel({
+            routing_config: { upstreams: [{ vendor_id: 3, enabled: true }] },
+        });
+        expect(defaulted.getRoutingConfig().load_balance_strategy).toBe("user");
     });
 });
