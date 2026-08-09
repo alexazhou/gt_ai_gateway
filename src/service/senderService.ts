@@ -266,8 +266,8 @@ async function sendRequest(
     body: string,
 ): Promise<Response> {
     // 预检：余额为负的用户阻止请求，不向上游发起（负余额在完成时扣减产生，充值前不再放行）
-    // balance 为整数微元，负值即欠费
-    if (user.balance < 0) {
+    // balance 为整数微元，负值即欠费；但未启用计费（价格未设置或为 0）的模型不拦截
+    if (user.balance < 0 && modelConfig.hasBilling()) {
         await recordService.recordFailedRequest(
             user.id,
             modelConfig.name,

@@ -107,7 +107,7 @@ describe("Model API (Negative)", () => {
             expect(response.body.error).toContain("Price");
         });
 
-        it("should reject a zero price", async () => {
+        it("should accept a zero price (free model)", async () => {
             const modelData = {
                 ...modelFixtures.createRandomModel(existingVendorId, "zero-price-model"),
                 prices: { input: 0 },
@@ -118,8 +118,8 @@ describe("Model API (Negative)", () => {
                 adminToken,
             );
 
-            expect(response.status).toBe(400);
-            expect(response.body.error).toContain("Price");
+            expect(response.status).toBe(200);
+            expect(response.body.prices.input).toBe(0);
         });
 
         it("should accept the minimum price (0.0001)", async () => {

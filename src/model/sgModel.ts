@@ -124,7 +124,7 @@ class SgModel extends Model {
         return this.routing_config ?? new ModelRoutingConfig();
     }
 
-    // 价格单位为每百万 token；任何已填写的价格必须 >= MIN_MODEL_PRICE（留空表示不收费）
+    // 价格单位为每百万 token；价格允许 0（免费）或 >= MIN_MODEL_PRICE，其余值拒绝
     validatePrices(): void {
         const prices = this.prices;
         if (!prices) {
@@ -134,13 +134,27 @@ class SgModel extends Model {
             if (value === undefined || value === null) {
                 continue;
             }
-            if (typeof value !== "number" || !Number.isFinite(value) || value < MIN_MODEL_PRICE) {
+            if (
+                typeof value !== "number"
+                || !Number.isFinite(value)
+                || value < 0
+                || (value > 0 && value < MIN_MODEL_PRICE)
+            ) {
                 throw new customError.AppError(
-                    `Price "${key}" must be >= ${MIN_MODEL_PRICE} (per ${PRICE_UNIT_TOKENS} tokens) or left empty for free`,
+                    `Price "${key}" must be 0 (free) or >= ${MIN_MODEL_PRICE} (per ${PRICE_UNIT_TOKENS} tokens)`,
                     400,
                 );
             }
         }
+    }
+
+    // 是否启用计费：任一价格字段 > 0 视为计费；未设置或全部为 0 视为免费
+    hasBilling(): boolean {
+        const prices = this.prices;
+        if (!prices) {
+            return false;
+        }
+        return Object.values(prices).some(value => typeof value === "number" && value > 0);
     }
 
     [inspect.custom](depth: number, options: InspectOptions) {

@@ -422,5 +422,54 @@ describe("Billing API", () => {
             const failedRecord = records.body.list.find((r: any) => r.status === "failed");
             expect(failedRecord.failed_code).toBe("insufficient_balance");
         });
+
+        it("does not block negative-balance users on free (non-billing) models", async () => {
+            // 免费模型：价格未设置 → 不启用计费
+            const freeModel = await requestHelper.post(
+                "/model/create.json",
+                {
+                    ...modelFixtures.createRandomModel(openaiVendorId, "free-model-no-billing"),
+                    prices: {},
+                },
+                adminToken,
+            );
+            expect(freeModel.status).toBe(200);
+
+            const user = await requestHelper.post(
+                "/user/create.json",
+                mockHelper.generateUser(),
+                adminToken,
+            );
+
+            // 先用计费模型把余额打负
+            const paidFirst = await requestHelper.post(
+                "/llm/v1/chat/completions",
+                mockHelper.generateOpenAIChatRequest({ model: modelConfig.name, stream: false }),
+                user.body.token,
+            );
+            expect(paidFirst.status).toBe(200);
+            const userAfter = await requestHelper.get(
+                `/user/${user.body.id}`,
+                adminToken,
+            );
+            expect(userAfter.body.balance).toBeLessThan(0);
+
+            // 余额为负时，免费模型请求不被拦截
+            const freeResp = await requestHelper.post(
+                "/llm/v1/chat/completions",
+                mockHelper.generateOpenAIChatRequest({ model: freeModel.body.name, stream: false }),
+                user.body.token,
+            );
+            expect(freeResp.status).toBe(200);
+
+            // 计费模型仍被拦截
+            const paidBlocked = await requestHelper.post(
+                "/llm/v1/chat/completions",
+                mockHelper.generateOpenAIChatRequest({ model: modelConfig.name, stream: false }),
+                user.body.token,
+            );
+            expect(paidBlocked.status).toBe(400);
+            expect(paidBlocked.body.error.message).toBe("Insufficient balance");
+        });
     });
 });
