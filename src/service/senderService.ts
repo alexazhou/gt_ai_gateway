@@ -46,21 +46,19 @@ async function sendRequestToUpstream(
     modelConfig: SgModel,
     vendor: SgVendor,
     vendorModelName: string,
-    format: ApiFormat,
+    clientFormat: ApiFormat,
     upstreamFormat: ApiFormat,
     body: string,
 ): Promise<Response> {
     // 客户端格式与最终上游格式已在 sendRequest 解析好，这里直接使用
-    const needsConversion = format !== upstreamFormat;
+    const needsConversion = clientFormat !== upstreamFormat;
 
     const url = vendor.getUrlByFormat(upstreamFormat);
 
-    console.log("sendRequest: modelConfig={}, format={}, upstreamFormat={}", modelConfig, format, upstreamFormat);
+    console.log("sendRequestToUpstream: modelConfig={}, clientFormat={}, upstreamFormat={}", modelConfig, clientFormat, upstreamFormat);
 
-    // Check user balance (only for non-root users)
+    // 余额扣减在响应处理阶段完成（responseHandlerService），这里仅对非 root 用户记录余额快照
     if (user.type !== "root") {
-        // Estimate max possible cost based on model pricing
-        // We'll allow the request and deduct actual cost after completion
         console.log(`[senderService] Checking balance for user ${user.id}: ${user.balance}`);
     }
 
@@ -69,7 +67,7 @@ async function sendRequestToUpstream(
         user.id,
         modelConfig.id,
         body,
-        format,
+        clientFormat,
         upstreamFormat,
         vendor.id,
         vendorModelName
@@ -105,7 +103,7 @@ async function sendRequestToUpstream(
         const lowerKey = key.toLowerCase();
         if (
             !lowerKey.startsWith("cf-") &&
-            !lowerKey.startsWith("sec-") && // 排除浏览器 Sec-Headers
+            !lowerKey.startsWith("sec-") &&
             !EXCLUDED_HEADERS.includes(lowerKey)
         ) {
             finalHeaders.set(key, value);
@@ -141,18 +139,18 @@ async function sendRequestToUpstream(
 
     // 4. 应用插件 (转换前)
     const hostKey = await hostService.getHostKey();
-    upstreamBody = await pluginService.applyRequestPlugins(upstreamBody, format, hostKey, user.name);
+    upstreamBody = await pluginService.applyRequestPlugins(upstreamBody, clientFormat, hostKey, user.name);
 
     let converter: BaseConverter | null = null;
     if (needsConversion) {
-        converter = ConverterFactory.create(format, upstreamFormat);
+        converter = ConverterFactory.create(clientFormat, upstreamFormat);
         if (!converter) {
             throw new customError.AppError(
-                `Unsupported protocol conversion: ${format} → ${upstreamFormat}`,
+                `Unsupported protocol conversion: ${clientFormat} → ${upstreamFormat}`,
                 400,
             );
         }
-        console.log(`[senderService] Using protocol converter: ${converter.constructor.name}, client=${format}, upstream=${upstreamFormat}`);
+        console.log(`[senderService] Using protocol converter: ${converter.constructor.name}, client=${clientFormat}, upstream=${upstreamFormat}`);
         upstreamBody = converter.convertRequestBody(upstreamBody);
     }
 
@@ -212,7 +210,7 @@ async function sendRequestToUpstream(
         upstreamRes.headers.get("content-type")?.startsWith("text/event-stream");
 
     // 8. 按响应类型分发处理
-    if (format === ApiFormat.RESPONSES) {
+    if (clientFormat === ApiFormat.RESPONSES) {
         if (isStream) {
             return responseHandlerService.handleResponsesStreamResponse(c, upstreamRes, record, modelConfig, user, converter, upstreamFormat);
         } else {
@@ -221,9 +219,9 @@ async function sendRequestToUpstream(
     }
 
     if (isStream) {
-        return responseHandlerService.handleChatStreamResponse(c, upstreamRes, record, modelConfig, user, format, upstreamFormat, converter);
+        return responseHandlerService.handleChatStreamResponse(c, upstreamRes, record, modelConfig, user, clientFormat, upstreamFormat, converter);
     } else {
-        return responseHandlerService.handleChatNonStreamResponse(c, upstreamRes, record, modelConfig, user, format, upstreamFormat, converter);
+        return responseHandlerService.handleChatNonStreamResponse(c, upstreamRes, record, modelConfig, user, clientFormat, upstreamFormat, converter);
     }
 }
 
@@ -232,17 +230,19 @@ async function sendRequest(
     c: Context,
     user: SgUser,
     modelConfig: SgModel,
-    format: ApiFormat,
+    clientFormat: ApiFormat,
     body: string,
 ): Promise<Response> {
     // 每个原始请求一个路由上下文，记录已用后端，避免重试循环
     const routingContext = new RoutingContext();
+    // 失败切换开关在请求内不变，循环外取一次
+    const failoverEnabled = modelConfig.getRoutingConfig().failover.enabled;
     let lastFailure: Response | null = null;
 
     while (true) {
         const routingResult: ModelRoutingResult = await routingService.selectUpstream(
             modelConfig,
-            format,
+            clientFormat,
             routingContext,
         );
         // 无可用上游时 selectUpstream 返回上游为 null 的空结果
@@ -259,8 +259,7 @@ async function sendRequest(
         const vendor = routingResult.vendor;
         const vendorModelName = routingResult.vendorModelName;
         const supportedFormats = routingResult.supportedFormats;
-        const upstreamFormat = protocolUtils.resolveUpstreamFormat(format, supportedFormats);
-        const failoverEnabled = modelConfig.getRoutingConfig().failover.enabled;
+        const upstreamFormat = protocolUtils.resolveUpstreamFormat(clientFormat, supportedFormats);
 
         try {
             const response = await sendRequestToUpstream(
@@ -269,13 +268,13 @@ async function sendRequest(
                 modelConfig,
                 vendor,
                 vendorModelName,
-                format,
+                clientFormat,
                 upstreamFormat,
                 body,
             );
 
-            // 可重试的 HTTP 错误转成异常，统一走下面的失败处理点
-            if (!response.ok && routingService.isRetryableStatus(response.status)) {
+            // 上游返回非成功响应，转成异常统一走下面的失败处理点，尝试下一个上游
+            if (!response.ok) {
                 throw new UpstreamResponseError(response);
             }
 

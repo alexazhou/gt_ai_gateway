@@ -57,26 +57,6 @@
                         </a-form-item>
                     </template>
 
-                    <div v-if="modelInfo?.showAutoConvert && (canAutoConvert || !hasDirectUrl)" class="auto-convert-row">
-                        <div class="auto-convert-main">
-                            <a-checkbox
-                                v-model:checked="useAutoConvert"
-                                :disabled="!canAutoConvert"
-                            >
-                                自动转换
-                                <span v-if="canAutoConvert" class="convert-hint">
-                                    ({{ format.toUpperCase() }} → {{ autoConvertTo!.toUpperCase() }})
-                                </span>
-                            </a-checkbox>
-                            <span v-if="!hasDirectUrl && !canAutoConvert" class="no-url-hint">
-                                无可用转换格式
-                            </span>
-                        </div>
-                        <div v-if="noDirectUrlReason" class="convert-reason-line">
-                            {{ noDirectUrlReason }}
-                        </div>
-                    </div>
-
                     <a-button
                         type="primary"
                         :loading="loading"
@@ -150,6 +130,8 @@ import { ref, computed, watch } from 'vue';
 import { testVendor, listVendorModels } from '@/api/vendor';
 import type { VendorTestResponse } from '@/api/vendor';
 import type { Vendor, VendorModel } from '@/types/vendor';
+import { sendApiTest } from '@/api/gateway';
+import type { ApiFormat, TestMessage } from '@/types/gateway';
 import { notifyRequestError, notifySuccess, notifyWarning } from '@/utils/requestFeedback';
 import { message as antMessage } from 'ant-design-vue';
 import { CopyOutlined } from '@ant-design/icons-vue';
@@ -203,33 +185,13 @@ const hasDirectUrl = computed(() => {
     return !!mergedUrls.value[format.value];
 });
 
-const autoConvertTo = computed(() => {
-    if (hasDirectUrl.value) return null;
-    // Prefer converting to an allowed format (if restriction exists), else any available
-    const candidates = allowedFormats.value?.length
-        ? allowedFormats.value
-        : ['openai', 'anthropic'];
-    return candidates.find(f => f !== format.value && !!mergedUrls.value[f]) ?? null;
-});
-
-const canAutoConvert = computed(() => !!autoConvertTo.value);
-
-const noDirectUrlReason = computed(() => {
-    if (hasDirectUrl.value) return null;
-    const af = allowedFormats.value;
-    if (af?.length && !af.includes(format.value)) {
-        const allowed = af.map(f => f.toUpperCase()).join('、');
-        return `供应商模型仅支持 ${allowed} 协议，可通过自动转换来使用`;
-    }
-    return `供应商未配置 ${format.value.toUpperCase()} 协议的 URL，可通过自动转换来使用`;
-});
-
 const testButtonDisabled = computed(() => {
-    if (!testModel.value) return true;
-    if (!hasDirectUrl.value) {
-        // 只有模型管理模式（showAutoConvert）可以靠勾选自动转换解锁
-        return !modelInfo.value?.showAutoConvert || !useAutoConvert.value;
+    if (modelInfo.value) {
+        // 模型路由测试：走网关路由，只需网关模型名
+        return !modelInfo.value.modelName;
     }
+    if (!testModel.value) return true;
+    if (!hasDirectUrl.value) return !useAutoConvert.value;
     return false;
 });
 
@@ -361,7 +323,80 @@ function handleSearch(val: string) {
     searchValue.value = val;
 }
 
+// 模型路由测试：走网关 /llm 路由（sendRequest），让 routing_mode + failover 真实生效
+async function runRoutingTest() {
+    const modelName = modelInfo.value?.modelName;
+    if (!modelName) return;
+
+    const messages: TestMessage[] = [{ role: 'user', content: '你好' }];
+    const requestBody = {
+        model: modelName,
+        messages,
+        temperature: 0.7,
+        max_tokens: 256,
+        stream: false,
+    };
+    const endpoint = format.value === 'anthropic' ? '/llm/v1/messages' : '/llm/v1/chat/completions';
+
+    loading.value = true;
+    result.value = null;
+    const startTime = Date.now();
+
+    try {
+        await sendApiTest(
+            { ...requestBody, format: format.value as ApiFormat },
+            {
+                onRawResponse: (raw) => {
+                    result.value = {
+                        success: true,
+                        duration: Date.now() - startTime,
+                        url: endpoint,
+                        request_method: 'POST',
+                        request_body: requestBody,
+                        response: raw,
+                    };
+                },
+                onComplete: () => {
+                    loading.value = false;
+                    if (result.value?.success) {
+                        notifySuccess('测试完成，模型正常响应');
+                    }
+                },
+                onError: (error) => {
+                    loading.value = false;
+                    result.value = {
+                        success: false,
+                        duration: Date.now() - startTime,
+                        url: endpoint,
+                        request_method: 'POST',
+                        request_body: requestBody,
+                        error,
+                    };
+                    notifyWarning(`测试失败：${error}`);
+                },
+            },
+        );
+    } catch (error) {
+        loading.value = false;
+        const requestError = notifyRequestError(error, '测试请求发送失败');
+        result.value = {
+            success: false,
+            url: endpoint,
+            request_method: 'POST',
+            request_body: requestBody,
+            error: requestError.message,
+        };
+    }
+}
+
 async function handleTest() {
+    // 模型模式：走网关路由测试
+    if (modelInfo.value) {
+        await runRoutingTest();
+        return;
+    }
+
+    // 供应商模式：单供应商连通性测试
     if (!currentVendor.value || !testModel.value) return;
 
     loading.value = true;

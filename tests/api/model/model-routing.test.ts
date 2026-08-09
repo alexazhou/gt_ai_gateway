@@ -374,7 +374,7 @@ describe("Model multi-upstream routing", () => {
         ))).toHaveLength(2);
     });
 
-    it("returns a non-retryable upstream response without switching upstreams", async () => {
+    it("fails over to the next upstream on any non-success response", async () => {
         const invalidRequestVendor = await requestHelper.post(
             "/vendor/create.json",
             {
@@ -388,7 +388,7 @@ describe("Model multi-upstream routing", () => {
             "/vendor/create.json",
             {
                 ...vendorFixtures.VENDOR_FIXTURES.openai(),
-                name: "Unused fallback upstream",
+                name: "Fallback upstream",
                 urls: { openai: "http://localhost:9999/chat/completions" },
             },
             adminToken,
@@ -436,15 +436,19 @@ describe("Model multi-upstream routing", () => {
             mockHelper.generateOpenAIChatRequest({ model: model.body.name, stream: false }),
             user.body.token,
         );
-        expect(response.status).toBe(400);
-        expect(response.body.error.code).toBe("model_not_supported");
+        // 第一个上游返回 400，任何非成功响应都会切换到下一个上游
+        expect(response.status).toBe(200);
+        expect(response.body.model).toBe("unused-fallback-model");
 
         const records = await requestHelper.get(
             `/record/list.json?model_ids=${model.body.id}`,
             adminToken,
         );
-        expect(records.body.total).toBe(1);
-        expect(records.body.list[0].vendor_id).toBe(invalidRequestVendor.body.id);
+        expect(records.body.total).toBe(2);
+        expect(records.body.list[0].vendor_id).toBe(fallbackVendor.body.id);
+        expect(records.body.list[0].status).toBe("success");
+        expect(records.body.list[1].vendor_id).toBe(invalidRequestVendor.body.id);
+        expect(records.body.list[1].status).toBe("failed");
 
         const vendorModels = await requestHelper.get(
             `/vendor/${invalidRequestVendor.body.id}/model/list.json`,

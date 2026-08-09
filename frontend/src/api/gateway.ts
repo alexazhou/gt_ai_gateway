@@ -5,6 +5,7 @@ import { createHttpError, toAppRequestError } from '@/utils/requestError';
 
 interface StreamCallbacks {
     onMessage?: (content: string) => void;
+    onRawResponse?: (raw: unknown) => void;
     onComplete?: () => void;
     onError?: (error: string) => void;
 }
@@ -71,6 +72,7 @@ export async function chatCompletions(
             }
 
             const result = await response.json() as ChatCompletionResponse;
+            callbacks.onRawResponse?.(result);
             const content = result.choices?.[0]?.message?.content || '';
             callbacks.onMessage?.(content);
             callbacks.onComplete?.();
@@ -173,6 +175,7 @@ export async function anthropicMessages(
             }
 
             const result = await response.json() as AnthropicMessageResponse;
+            callbacks.onRawResponse?.(result);
             const content = result.content?.[0]?.text || '';
             callbacks.onMessage?.(content);
             callbacks.onComplete?.();

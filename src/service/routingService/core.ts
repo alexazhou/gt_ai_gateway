@@ -1,8 +1,4 @@
-import {
-    ApiFormat,
-    ModelRoutingMode,
-    RETRYABLE_UPSTREAM_STATUS_CODES,
-} from "../../constants";
+import { ApiFormat, ModelRoutingMode } from "../../constants";
 import { SgModel } from "../../model/sgModel";
 import { SgVendor } from "../../model/sgVendor";
 import { SgVendorModel } from "../../model/sgVendorModel";
@@ -197,14 +193,8 @@ async function selectUpstream(
 }
 
 
-function isRetryableStatus(status: number): boolean {
-    return RETRYABLE_UPSTREAM_STATUS_CODES.includes(status);
-}
-
-
 export { ModelRoutingResult };
 export default {
     validateConfig,
     selectUpstream,
-    isRetryableStatus,
 };

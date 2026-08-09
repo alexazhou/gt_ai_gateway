@@ -45,7 +45,7 @@ async function sendRequest(
                 c, user, modelConfig, vendor, vendorModelName, format, body, supportedFormats,
             );
 
-            if (!response.ok && modelRoutingService.isRetryableStatus(response.status)) {
+            if (!response.ok) {
                 upstreamHealthService.markFailure(routingResult.vendor.id, vendorModelName, upstreamFormat);
                 if (failoverEnabled) {
                     c.status(200);
@@ -74,7 +74,7 @@ async function sendRequest(
 
 | 路径 | 触发条件 | 失败标记 | 重试判断 | 当前失败去向 |
 |------|---------|---------|---------|-------------|
-| HTTP 错误响应 | `!response.ok && isRetryableStatus(status)` | 无条件 `markFailure` | `failoverEnabled` 才 continue | continue 时丢弃 response |
+| HTTP 错误响应 | `!response.ok`（任何非 2xx） | 无条件 `markFailure` | `failoverEnabled` 才 continue | continue 时丢弃 response |
 | 网络异常 | `sendRequestToUpstream` 抛出非 AppError 异常 | 无条件 `markFailure` | `failoverEnabled` 才 continue | continue 时丢弃异常 |
 
 `markFailure` 会把上游拉入 30s 冷却，因此循环**天然有界**：最多把每个上游试一遍，全部失败后 `selectUpstream` 返回空结果。
@@ -208,8 +208,8 @@ async function sendRequest(
                 c, user, modelConfig, vendor, vendorModelName, format, body, supportedFormats,
             );
 
-            // 可重试的 HTTP 错误转成异常，统一走下面的失败处理点
-            if (!response.ok && modelRoutingService.isRetryableStatus(response.status)) {
+            // 上游返回非成功响应，转成异常统一走下面的失败处理点，尝试下一个上游
+            if (!response.ok) {
                 throw new UpstreamResponseError(response);
             }
 
@@ -247,7 +247,7 @@ async function sendRequest(
 1. **循环防护显式化**：`RoutingContext.triedUpstreams` 按请求隔离，任何一次重试都不会再选中已用过的后端；后端数量有限，用完即止，**不可能循环**。
 2. **`markFailure` 职责收敛**：只负责"全局 30s 冷却，让后续请求跳过刚失败的上游"，不再承担本请求的循环防护，两者解耦。
 3. **`load_balance` 语义保持**：每次重试仍在"剩余健康且未用过"的上游中随机选，比"有序列表"方案更贴近现状。
-4. **失败处理收敛到一处**：可重试 HTTP 错误经 `UpstreamResponseError` 转成异常，与网络异常在 `catch` 汇合；`markFailure`、`lastFailure` 记录、回传只出现一次。
+4. **失败处理收敛到一处**：上游返回的非成功响应经 `UpstreamResponseError` 转成异常，与网络异常在 `catch` 汇合；`markFailure`、`lastFailure` 记录、回传只出现一次。
 5. **耗尽回传**：全部后端用尽时回传最后一次上游错误（HTTP 错误原样 / 网络异常 502），首次即无可用上游保持 `503 No available upstream`。
 6. HTTP 错误回传：返回 `sendRequestToUpstream` 已构建的 `Response` 对象，status + body 原样透传（与 failover 关闭时 `return response` 的既有路径一致，已验证可行）。
 
@@ -300,8 +300,9 @@ async function sendRequest(
 - [x] **引入请求级 `RoutingContext`**：记录本次请求已用后端，循环防护显式化、按请求隔离（放弃"有序列表"方案，保留"每次重试重新 selectUpstream"）
 - [x] **`markFailure` 职责收敛**：只负责全局冷却（后续请求），不承担本请求的循环防护
 - [x] **`load_balance` 语义保持**：每次重试仍在剩余健康上游中随机选
-- [x] **失败处理合并到一处**：可重试 HTTP 错误经 `UpstreamResponseError` 转成异常，与网络异常汇入同一 `catch`
-- [x] **`RoutingContext` 位置**：`src/service/routingContext.ts`，默认导出类（符合项目规范）
+- [x] **失败处理合并到一处**：上游返回的非成功响应经 `UpstreamResponseError` 转成异常，与网络异常汇入同一 `catch`
+- [x] **任何非成功响应都切换**：移除 `RETRYABLE_UPSTREAM_STATUS_CODES` / `isRetryableStatus` 门槛，`!response.ok` 即触发 failover
+- [x] **`RoutingContext` 位置**：`src/service/routingService/routingContext.ts`，默认导出类（符合项目规范）
 - [x] **502 消息不带上游名称/ID**：保持 `All upstreams failed: <msg>`（如需排查可查本次请求的失败记录）
 
 ## 9. 实现记录

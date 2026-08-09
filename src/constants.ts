@@ -31,17 +31,6 @@ export enum ModelRoutingMode {
 
 export const UPSTREAM_FAILURE_COOLDOWN_MS = 30_000;
 
-export const RETRYABLE_UPSTREAM_STATUS_CODES = [
-    401,
-    403,
-    408,
-    429,
-    500,
-    502,
-    503,
-    504,
-];
-
 export enum ClientName {
     CLAUDE_CODE = "claude-code",
     CODEX = "codex",
