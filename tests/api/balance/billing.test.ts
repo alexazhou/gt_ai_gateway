@@ -4,6 +4,7 @@ import vendorFixtures from "../../fixtures/vendorFixtures";
 import modelFixtures from "../../fixtures/modelFixtures";
 import userFixtures from "../../fixtures/userFixtures";
 import dbHelper from "../../helpers/dbHelper"
+import mockHelper from "../../helpers/mockHelper";
 import { setupAdminUser } from "../../globalSetup";
 
 /**
@@ -373,6 +374,52 @@ describe("Billing API", () => {
             // Create a record via AI endpoint (this is more of an integration test)
             // For now, we can verify that the model has the cost field by checking database schema
             // This is handled by the migration tests
+        });
+    });
+
+    describe("LLM Balance Gate", () => {
+        it("serves a request at 0 balance (deducts into negative) then blocks the next one", async () => {
+            // 新建余额为 0 的用户
+            const freshUser = await requestHelper.post(
+                "/user/create.json",
+                mockHelper.generateUser(),
+                adminToken,
+            );
+            expect(freshUser.body.balance).toBe(0);
+            const userToken = freshUser.body.token;
+
+            // 第一次请求：余额 0 未为负，预检放行，正常返回并扣成负余额
+            const first = await requestHelper.post(
+                "/llm/v1/chat/completions",
+                mockHelper.generateOpenAIChatRequest({ model: modelConfig.name, stream: false }),
+                userToken,
+            );
+            expect(first.status).toBe(200);
+
+            // 扣款后余额为负
+            const userAfter = await requestHelper.get(
+                `/user/${freshUser.body.id}`,
+                adminToken,
+            );
+            expect(userAfter.body.balance).toBeLessThan(0);
+
+            // 第二次请求：余额为负，预检阻止，不向上游发起
+            const second = await requestHelper.post(
+                "/llm/v1/chat/completions",
+                mockHelper.generateOpenAIChatRequest({ model: modelConfig.name, stream: false }),
+                userToken,
+            );
+            expect(second.status).toBe(400);
+            expect(second.body.error.message).toBe("Insufficient balance");
+
+            // 记录：第一次 success，第二次 failed（insufficient_balance）
+            const records = await requestHelper.get(
+                `/record/list.json?user_ids=${freshUser.body.id}`,
+                adminToken,
+            );
+            expect(records.body.total).toBe(2);
+            const failedRecord = records.body.list.find((r: any) => r.status === "failed");
+            expect(failedRecord.failed_code).toBe("insufficient_balance");
         });
     });
 });

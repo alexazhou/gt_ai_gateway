@@ -265,6 +265,19 @@ async function sendRequest(
     clientFormat: ApiFormat,
     body: string,
 ): Promise<Response> {
+    // 预检：余额为负的用户阻止请求，不向上游发起（负余额在完成时扣减产生，充值前不再放行）
+    if (user.balance < 0) {
+        await recordService.recordFailedRequest(
+            user.id,
+            modelConfig.name,
+            body,
+            clientFormat,
+            FailedCode.INSUFFICIENT_BALANCE,
+            modelConfig.id,
+        );
+        throw new customError.AppError("Insufficient balance", 400);
+    }
+
     // 一条用户请求 = 一条 record：进入路由循环前创建一次，跨上游尝试更新同一条记录
     const record = await recordService.create(user.id, modelConfig.id, body, clientFormat);
     const recordId = Number(record.id);

@@ -68,11 +68,8 @@ async function deductBalance(userId: number, amount: number): Promise<void> {
         throw new customError.NotFoundError("User not found");
     }
 
+    // 允许余额为负（透支）：请求完成时正常扣减，余额不足的拦截在请求发起前由预检负责
     const newBalance = user.balance - amount;
-    if (newBalance < 0) {
-        throw new customError.AppError("Insufficient balance", 400);
-    }
-
     await user.update({ balance: newBalance });
 }
 
