@@ -1,6 +1,7 @@
 import { SgModel } from "../model/sgModel";
-import { ApiFormat } from "../constants";
+import { ApiFormat, PRICE_UNIT_TOKENS } from "../constants";
 import { SgRecordUsage } from "../model/sgRecord";
+import billingUtils from "./billingUtils";
 
 export type Dict = Record<string, unknown>;
 
@@ -16,10 +17,11 @@ export function calculateCost(
     const outputPrice = prices.output ?? 0;
 
     const normalPromptTokens = Math.max(0, promptTokens - cacheReadTokens);
-    const promptCost = (normalPromptTokens / 1000) * inputPrice;
-    const cacheCost = (cacheReadTokens / 1000) * cacheReadPrice;
-    const outputCost = (outputTokens / 1000) * outputPrice;
-    return promptCost + cacheCost + outputCost;
+    // 价格单位为每百万（PRICE_UNIT_TOKENS）token；结果取整到最小扣减单位（0.000001 元）的整数倍
+    const promptCost = (normalPromptTokens / PRICE_UNIT_TOKENS) * inputPrice;
+    const cacheCost = (cacheReadTokens / PRICE_UNIT_TOKENS) * cacheReadPrice;
+    const outputCost = (outputTokens / PRICE_UNIT_TOKENS) * outputPrice;
+    return billingUtils.quantizeAmount(promptCost + cacheCost + outputCost);
 }
 
 export function normalizeUsage(format: ApiFormat, usage: Dict | null | undefined) {

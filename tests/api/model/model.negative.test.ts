@@ -91,6 +91,51 @@ describe("Model API (Negative)", () => {
 
             expect(response.status).toBeGreaterThanOrEqual(400);
         });
+
+        it("should reject a price below the minimum (0.0001)", async () => {
+            const modelData = {
+                ...modelFixtures.createRandomModel(existingVendorId, "too-cheap-model"),
+                prices: { input: 0.00001 },
+            };
+            const response = await requestHelper.post(
+                "/model/create.json",
+                modelData,
+                adminToken,
+            );
+
+            expect(response.status).toBe(400);
+            expect(response.body.error).toContain("Price");
+        });
+
+        it("should reject a zero price", async () => {
+            const modelData = {
+                ...modelFixtures.createRandomModel(existingVendorId, "zero-price-model"),
+                prices: { input: 0 },
+            };
+            const response = await requestHelper.post(
+                "/model/create.json",
+                modelData,
+                adminToken,
+            );
+
+            expect(response.status).toBe(400);
+            expect(response.body.error).toContain("Price");
+        });
+
+        it("should accept the minimum price (0.0001)", async () => {
+            const modelData = {
+                ...modelFixtures.createRandomModel(existingVendorId, "min-price-model"),
+                prices: { input: 0.0001 },
+            };
+            const response = await requestHelper.post(
+                "/model/create.json",
+                modelData,
+                adminToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.prices.input).toBe(0.0001);
+        });
     });
 
     describe("GET /model/:id", () => {

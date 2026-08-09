@@ -31,14 +31,14 @@
             <div class="settings-row">
                 <label class="settings-label">
                     输入价格
-                    <a-tooltip title="输入 token 的计费价格（元/千 tokens）">
+                    <a-tooltip title="输入 token 的计费价格（元/百万 tokens），留空表示不收费">
                         <InfoCircleOutlined class="field-help-icon" />
                     </a-tooltip>
                 </label>
                 <a-input-number
                     :value="prices.input"
                     placeholder="请输入输入价格"
-                    :min="0"
+                    :min="0.0001"
                     :precision="6"
                     style="width: 100%"
                     @update:value="updatePrice('input', $event)"
@@ -47,14 +47,14 @@
             <div class="settings-row">
                 <label class="settings-label">
                     输出价格
-                    <a-tooltip title="输出 token 的计费价格（元/千 tokens）">
+                    <a-tooltip title="输出 token 的计费价格（元/百万 tokens），留空表示不收费">
                         <InfoCircleOutlined class="field-help-icon" />
                     </a-tooltip>
                 </label>
                 <a-input-number
                     :value="prices.output"
                     placeholder="请输入输出价格"
-                    :min="0"
+                    :min="0.0001"
                     :precision="6"
                     style="width: 100%"
                     @update:value="updatePrice('output', $event)"
@@ -63,14 +63,14 @@
             <div class="settings-row">
                 <label class="settings-label">
                     缓存读取价格
-                    <a-tooltip title="缓存命中时读取 token 的计费价格（元/千 tokens）">
+                    <a-tooltip title="缓存命中时读取 token 的计费价格（元/百万 tokens），留空表示不收费">
                         <InfoCircleOutlined class="field-help-icon" />
                     </a-tooltip>
                 </label>
                 <a-input-number
                     :value="prices.cache_read"
                     placeholder="请输入缓存读取价格"
-                    :min="0"
+                    :min="0.0001"
                     :precision="6"
                     style="width: 100%"
                     @update:value="updatePrice('cache_read', $event)"

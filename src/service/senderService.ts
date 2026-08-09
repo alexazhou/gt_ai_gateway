@@ -60,7 +60,7 @@ async function sendRequestToUpstream(
 
     console.log("sendRequestToUpstream: modelConfig={}, clientFormat={}, upstreamFormat={}", modelConfig, clientFormat, upstreamFormat);
 
-    // 余额扣减在响应处理阶段完成（responseHandlerService），这里仅对非 root 用户记录余额快照
+    // 余额扣减在响应处理阶段完成（responseHandlerService），这里仅对非 root 用户记录余额快照（单位：整数微元）
     if (user.type !== "root") {
         console.log(`[senderService] Checking balance for user ${user.id}: ${user.balance}`);
     }
@@ -266,6 +266,7 @@ async function sendRequest(
     body: string,
 ): Promise<Response> {
     // 预检：余额为负的用户阻止请求，不向上游发起（负余额在完成时扣减产生，充值前不再放行）
+    // balance 为整数微元，负值即欠费
     if (user.balance < 0) {
         await recordService.recordFailedRequest(
             user.id,

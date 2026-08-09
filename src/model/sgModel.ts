@@ -1,6 +1,7 @@
 import { CastsAttributes, Model } from "sutando";
 import { inspect, InspectOptions } from "util";
-import { ModelRoutingMode } from "../constants";
+import { ModelRoutingMode, MIN_MODEL_PRICE, PRICE_UNIT_TOKENS } from "../constants";
+import customError from "../util/customError";
 
 class ModelUpstreamConfig {
     vendor_id: number = 0;
@@ -121,6 +122,25 @@ class SgModel extends Model {
 
     getRoutingConfig(): ModelRoutingConfig {
         return this.routing_config ?? new ModelRoutingConfig();
+    }
+
+    // 价格单位为每百万 token；任何已填写的价格必须 >= MIN_MODEL_PRICE（留空表示不收费）
+    validatePrices(): void {
+        const prices = this.prices;
+        if (!prices) {
+            return;
+        }
+        for (const [key, value] of Object.entries(prices)) {
+            if (value === undefined || value === null) {
+                continue;
+            }
+            if (typeof value !== "number" || !Number.isFinite(value) || value < MIN_MODEL_PRICE) {
+                throw new customError.AppError(
+                    `Price "${key}" must be >= ${MIN_MODEL_PRICE} (per ${PRICE_UNIT_TOKENS} tokens) or left empty for free`,
+                    400,
+                );
+            }
+        }
     }
 
     [inspect.custom](depth: number, options: InspectOptions) {

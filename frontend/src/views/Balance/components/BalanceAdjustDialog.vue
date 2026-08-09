@@ -12,7 +12,7 @@
                 {{ currentUser?.name }}
             </a-descriptions-item>
             <a-descriptions-item label="当前余额">
-                ¥{{ currentUser?.balance?.toFixed(2) || '0.00' }}
+                ¥{{ formatBalance(currentUser?.balance != null ? currentUser.balance / BALANCE_SCALE : null) }}
             </a-descriptions-item>
         </a-descriptions>
 
@@ -68,6 +68,7 @@ import type { FormInstance } from 'ant-design-vue/es';
 import { adjustUserBalance } from '@/api/user';
 import type { User } from '@/types/user';
 import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
+import { formatBalance, BALANCE_SCALE } from '@/utils/format';
 
 const emit = defineEmits<{
     success: [];

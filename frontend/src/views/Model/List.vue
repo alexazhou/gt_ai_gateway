@@ -49,7 +49,7 @@
                 <template v-if="column.key === 'price'">
                     <span style="display: flex; align-items: center; gap: 4px;">
                         价格
-                        <a-tooltip title="元/千tokens">
+                        <a-tooltip title="元/百万 tokens">
                             <InfoCircleOutlined style="font-size: 12px; color: #999;" />
                         </a-tooltip>
                     </span>

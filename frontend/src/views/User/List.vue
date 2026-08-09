@@ -66,7 +66,7 @@
                 <template v-if="column.key === 'balance'">
                     <a-statistic
                         :value="record.balance"
-                        :precision="2"
+                        :formatter="balanceFormatter"
                         prefix="¥"
                         :value-style="{ color: record.balance > 0 ? 'var(--accent-primary)' : record.balance < 0 ? '#ff4d4f' : 'var(--text-secondary)', fontSize: '14px' }"
                     />
@@ -119,12 +119,16 @@ import { listUsers } from '@/api/user';
 import { useResourceTable } from '@/composables/useResourceTable';
 import { useAppStore } from '@/stores/app';
 import TokenDisplay from '@/components/common/TokenDisplay.vue';
+import { formatBalance, BALANCE_SCALE } from '@/utils/format';
 import DialogCreate from './DialogCreate.vue';
 import DialogEdit from './DialogEdit.vue';
 import type { User, UserQuery } from '@/types/user';
 
 const router = useRouter();
 const appStore = useAppStore();
+
+// 后端返回整数微元，展示时换算为"元"
+const balanceFormatter = ({ value }: { value: number }) => formatBalance(value / BALANCE_SCALE);
 
 const { loading, data, pagination, searchForm, loadData, handleSearch, handleReset, handleTableChange } = useResourceTable<User, UserQuery>({
     initialSearchForm: {

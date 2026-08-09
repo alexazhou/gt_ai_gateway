@@ -48,6 +48,13 @@ export enum ModelRoutingMode {
 
 export const UPSTREAM_FAILURE_COOLDOWN_MS = 30_000;
 
+export const PRICE_UNIT_TOKENS = 1_000_000;
+export const MIN_MODEL_PRICE = 0.0001;
+// 计费/存储粒度：余额按 0.000001 元（微元）的整数倍取整与扣减
+export const MIN_DEDUCTION_UNIT = 0.000001;
+// 余额整数缩放倍数：1 元 = 1_000_000 微元（DB 存整数微元，避免浮点）
+export const BALANCE_SCALE = 1_000_000;
+
 export enum ClientName {
     CLAUDE_CODE = "claude-code",
     CODEX = "codex",

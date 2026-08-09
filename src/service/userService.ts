@@ -1,7 +1,12 @@
 import { SgUser } from "../model/sgUser";
-import { ROOT_USER_ID, UserType } from "../constants";
+import { ROOT_USER_ID, UserType, BALANCE_SCALE } from "../constants";
 import { SgRechargeRecord } from "../model/sgRechargeRecord";
 import customError from "../util/customError";
+
+// 元 → 整数微元（DB 余额存整数微元，避免浮点）
+function toUnits(yuan: number): number {
+    return Math.round(yuan * BALANCE_SCALE);
+}
 
 function isRootToken(token: string, rootToken?: string): boolean {
     if (!rootToken) {
@@ -43,14 +48,16 @@ async function adjustBalance(
         throw new customError.NotFoundError("User not found");
     }
 
-    const newBalance = user.balance + amount;
+    // amount 为元，换算成整数微元后做整数加减，避免浮点
+    const amountUnits = toUnits(amount);
+    const newBalance = user.balance + amountUnits;
     if (newBalance < 0) {
         throw new customError.AppError("Insufficient balance", 400);
     }
 
     await user.update({ balance: newBalance });
 
-    // Create recharge record
+    // Create recharge record（amount 仍以"元"记录）
     await SgRechargeRecord.query().create({
         user_id: userId,
         amount: amount,
@@ -69,8 +76,9 @@ async function deductBalance(userId: number, amount: number): Promise<void> {
     }
 
     // 允许余额为负（透支）：请求完成时正常扣减，余额不足的拦截在请求发起前由预检负责
-    const newBalance = user.balance - amount;
-    await user.update({ balance: newBalance });
+    // 扣费 amount 为元，换算成整数微元做整数减法；余额本就是整数微元，无浮点漂移
+    const amountUnits = toUnits(amount);
+    await user.update({ balance: user.balance - amountUnits });
 }
 
 async function checkBalance(userId: number, requiredAmount: number): Promise<boolean> {
@@ -79,7 +87,7 @@ async function checkBalance(userId: number, requiredAmount: number): Promise<boo
         return false;
     }
 
-    return user.balance >= requiredAmount;
+    return user.balance >= toUnits(requiredAmount);
 }
 
 export default {

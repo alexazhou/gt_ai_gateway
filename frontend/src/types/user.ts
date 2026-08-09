@@ -6,7 +6,7 @@ export interface User extends BaseEntity {
     name: string;
     token: string;
     type: UserType;
-    balance: number;
+    balance: number; // 后端返回整数微元（1 元 = 1000000 微元），展示时除以 BALANCE_SCALE
     status: 'active' | 'disabled';
 }
 

@@ -9,7 +9,7 @@ class SgUser extends Model {
     name!: string;
     token!: string;
     type!: UserType;
-    balance!: number;
+    balance!: number; // 整数微元（0.000001 元 = 1 单位）；API 返回时换算为"元"
     status!: UserStatus;
 
     created_at!: Date;

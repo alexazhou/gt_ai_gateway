@@ -177,7 +177,8 @@ describe("Billing API", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(response.body.balance).toBe(100);
+            // balance 为整数微元（1 元 = 1000000 微元）
+            expect(response.body.balance).toBe(100 * 1_000_000);
         });
 
         it("should add more balance to user", async () => {
@@ -192,7 +193,7 @@ describe("Billing API", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(response.body.balance).toBe(150);
+            expect(response.body.balance).toBe(150 * 1_000_000);
         });
 
         it("should deduct balance from user", async () => {
@@ -207,7 +208,7 @@ describe("Billing API", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(response.body.balance).toBe(120);
+            expect(response.body.balance).toBe(120 * 1_000_000);
         });
 
         it("should fail when insufficient balance", async () => {

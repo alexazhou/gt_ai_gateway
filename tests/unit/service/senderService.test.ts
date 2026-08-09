@@ -118,10 +118,8 @@ describe("buildStreamUsageAccounting", () => {
             completion_tokens: 262,
             cache_read_tokens: 52864,
         });
-        expect(accounting.cost).toBeCloseTo(
-            ((203 * 0.002) + (52864 * 0.0002) + (262 * 0.01)) / 1000,
-            12,
-        );
+        // 成本按最小扣减单位（1e-6）取整：0.0000135988 → 14e-6
+        expect(accounting.cost).toBeCloseTo(14e-6, 12);
     });
 });
 
