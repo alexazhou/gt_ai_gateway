@@ -359,6 +359,8 @@ describe("Record API", () => {
             expect(recordResponse.status).toBe(200);
             expect(recordResponse.body).toHaveProperty("usage");
             expect(recordResponse.body).toHaveProperty("first_token_latency");
+            // 非流式：首 token 时间 = 整体响应耗时，应为正数
+            expect(recordResponse.body.first_token_latency).toBeGreaterThan(0);
             expect(recordResponse.body).toHaveProperty("start_at");
             expect(recordResponse.body).toHaveProperty("end_at");
         });

@@ -236,12 +236,14 @@ export async function handleChatNonStreamResponse(
             body: responseText,
         });
 
+        // 非流式：首 token 时间 = 整体响应耗时
         await recordService.update(record.id, {
             response_data: responseText,
             status: SgRecordStatus.FAILED,
             usage: null,
             end_at: new Date(),
             cost: 0,
+            first_token_latency: Date.now() - record.created_at.getTime(),
         });
         await requestActivityService.append(record.id, RequestActivityStage.RESULT, "上游返回非成功响应", {
             status: SgRecordStatus.FAILED,
@@ -283,12 +285,15 @@ export async function handleChatNonStreamResponse(
         : 0;
 
     const recordStatus = statusCode === 200 ? SgRecordStatus.SUCCESS : SgRecordStatus.FAILED;
+    // 非流式：首 token 时间 = 整体响应耗时
+    const endedAt = Date.now();
     await recordService.update(record.id, {
         response_data: clientResponseText,
         status: recordStatus,
         usage: usageJson,
-        end_at: new Date(),
+        end_at: new Date(endedAt),
         cost: cost,
+        first_token_latency: endedAt - record.created_at.getTime(),
     });
     await requestActivityService.append(record.id, RequestActivityStage.RESULT,
         recordStatus === SgRecordStatus.SUCCESS ? "请求成功" : "请求失败",
@@ -521,12 +526,14 @@ export async function handleResponsesNonStreamResponse(
             body: responseText,
         });
 
+        // 非流式：首 token 时间 = 整体响应耗时
         await recordService.update(record.id, {
             response_data: responseText,
             status: SgRecordStatus.FAILED,
             usage: null,
             end_at: new Date(),
             cost: 0,
+            first_token_latency: Date.now() - record.created_at.getTime(),
         });
         await requestActivityService.append(record.id, RequestActivityStage.RESULT, "上游返回非成功响应", {
             status: SgRecordStatus.FAILED,
@@ -568,12 +575,15 @@ export async function handleResponsesNonStreamResponse(
         : 0;
 
     const recordStatus = statusCode === 200 ? SgRecordStatus.SUCCESS : SgRecordStatus.FAILED;
+    // 非流式：首 token 时间 = 整体响应耗时
+    const endedAt = Date.now();
     await recordService.update(record.id, {
         response_data: clientResponseText,
         status: recordStatus,
         usage: usageJson,
-        end_at: new Date(),
+        end_at: new Date(endedAt),
         cost,
+        first_token_latency: endedAt - record.created_at.getTime(),
     });
     await requestActivityService.append(record.id, RequestActivityStage.RESULT,
         recordStatus === SgRecordStatus.SUCCESS ? "请求成功" : "请求失败",
