@@ -2,8 +2,10 @@ import { Context } from "hono";
 import { SgModel } from "../model/sgModel";
 import { SgUser } from "../model/sgUser";
 import { SgVendor } from "../model/sgVendor";
+import { SgRecord } from "../model/sgRecord";
 import recordService from "./recordService";
-import { SgRecordStatus, ApiFormat, VendorAuthMode } from "../constants";
+import requestActivityService from "./requestActivityService";
+import { SgRecordStatus, ApiFormat, VendorAuthMode, FailedCode, RequestActivityStage, ActivityLevel } from "../constants";
 import pluginService from "./pluginService";
 import hostService from "./hostService";
 import { ConverterFactory } from "../util/protocolConverter/ConverterFactory";
@@ -44,6 +46,7 @@ async function sendRequestToUpstream(
     c: Context,
     user: SgUser,
     modelConfig: SgModel,
+    record: SgRecord,
     vendor: SgVendor,
     vendorModelName: string,
     clientFormat: ApiFormat,
@@ -62,19 +65,13 @@ async function sendRequestToUpstream(
         console.log(`[senderService] Checking balance for user ${user.id}: ${user.balance}`);
     }
 
-    // 1. 创建数据库记录
-    const record = await recordService.create(
-        user.id,
-        modelConfig.id,
-        body,
-        clientFormat,
-        upstreamFormat,
-        vendor.id,
-        vendorModelName
-    );
-    await recordService.update(record.id, {
+    // 1. 记录本次上游尝试：跨尝试更新同一条 record，最终保留最后一次尝试（即最终命中的上游）
+    const recordId = Number(record.id);
+    await recordService.update(recordId, {
         status: SgRecordStatus.PROCESSING,
-        start_at: new Date(),
+        vendor_id: vendor.id,
+        vendor_model_name: vendorModelName,
+        upstream_format: upstreamFormat !== clientFormat ? upstreamFormat : null,
     });
 
     // 2. 构建上游请求 headers，过滤掉 Cloudflare 注入的 cf- 前缀 header
@@ -139,7 +136,15 @@ async function sendRequestToUpstream(
 
     // 4. 应用插件 (转换前)
     const hostKey = await hostService.getHostKey();
+    const prePluginBody = upstreamBody;
     upstreamBody = await pluginService.applyRequestPlugins(upstreamBody, clientFormat, hostKey, user.name);
+    if (upstreamBody !== prePluginBody) {
+        await requestActivityService.append(recordId, RequestActivityStage.PLUGIN, "应用请求插件（转换前）", {
+            format: clientFormat,
+            body_len_before: prePluginBody.length,
+            body_len_after: upstreamBody.length,
+        });
+    }
 
     let converter: BaseConverter | null = null;
     if (needsConversion) {
@@ -152,6 +157,11 @@ async function sendRequestToUpstream(
         }
         console.log(`[senderService] Using protocol converter: ${converter.constructor.name}, client=${clientFormat}, upstream=${upstreamFormat}`);
         upstreamBody = converter.convertRequestBody(upstreamBody);
+        await requestActivityService.append(recordId, RequestActivityStage.CONVERSION, "协议转换", {
+            from: clientFormat,
+            to: upstreamFormat,
+            converter: converter.constructor.name,
+        });
     }
 
     let requestModel = "unknown";
@@ -176,12 +186,28 @@ async function sendRequestToUpstream(
 
     // 6. 应用插件 (转换后)
     if (needsConversion) {
+        const prePostPluginBody = upstreamBody;
         upstreamBody = await pluginService.applyRequestPlugins(upstreamBody, upstreamFormat, hostKey, user.name);
+        if (upstreamBody !== prePostPluginBody) {
+            await requestActivityService.append(recordId, RequestActivityStage.PLUGIN, "应用请求插件（转换后）", {
+                format: upstreamFormat,
+                body_len_before: prePostPluginBody.length,
+                body_len_after: upstreamBody.length,
+            });
+        }
     }
 
     await streamLogService.writeRequestLog(record, upstreamBody);
 
     // 7. 发起上游请求，拿到响应头后立即判断响应类型
+    await requestActivityService.append(recordId, RequestActivityStage.UPSTREAM_ATTEMPT, "发起上游请求", {
+        vendor_id: vendor.id,
+        vendor_name: vendor.name,
+        vendor_model_name: vendorModelName,
+        url,
+        upstream_format: upstreamFormat,
+    });
+
     let upstreamRes: Response;
     try {
         // 如果该 vendor 配置了跳过 TLS 验证（内网自签证书场景），注入 undici Agent
@@ -196,11 +222,17 @@ async function sendRequestToUpstream(
         });
     } catch (e: any) {
         console.error("Upstream fetch failed:", e);
-        await recordService.update(record.id, {
+        await recordService.update(recordId, {
             status: SgRecordStatus.FAILED,
             response_data: String(e),
             end_at: new Date(),
         });
+        await requestActivityService.append(recordId, RequestActivityStage.UPSTREAM_ATTEMPT, "上游请求失败", {
+            vendor_id: vendor.id,
+            vendor_name: vendor.name,
+            url,
+            error: e instanceof Error ? e.message : String(e),
+        }, ActivityLevel.ERROR);
         throw e;
     }
     console.log("upstream response status:", upstreamRes.status);
@@ -233,6 +265,10 @@ async function sendRequest(
     clientFormat: ApiFormat,
     body: string,
 ): Promise<Response> {
+    // 一条用户请求 = 一条 record：进入路由循环前创建一次，跨上游尝试更新同一条记录
+    const record = await recordService.create(user.id, modelConfig.id, body, clientFormat);
+    const recordId = Number(record.id);
+
     // 每个原始请求一个路由上下文，记录已用后端，避免重试循环
     const routingContext = new RoutingContext();
     // 失败切换开关在请求内不变，循环外取一次
@@ -240,13 +276,37 @@ async function sendRequest(
     let lastFailure: Response | null = null;
 
     while (true) {
-        const routingResult: ModelRoutingResult = await routingService.selectUpstream(
-            modelConfig,
-            clientFormat,
-            routingContext,
-        );
+        let routingResult: ModelRoutingResult;
+        try {
+            routingResult = await routingService.selectUpstream(
+                modelConfig,
+                clientFormat,
+                routingContext,
+            );
+        } catch (e) {
+            // 路由阶段异常（如配置错误无启用上游）：同样是一次失败请求，不留 init 孤儿记录
+            await recordService.update(recordId, {
+                status: SgRecordStatus.FAILED,
+                end_at: new Date(),
+            });
+            throw e;
+        }
         // 无可用上游时 selectUpstream 返回上游为 null 的空结果
         if (!routingResult.hasUpstream()) {
+            // 全部后端已用尽（lastFailure 非空）或一开始就无可用上游，都属于一次真实请求，记 FAILED
+            const exhausted = lastFailure !== null;
+            await recordService.update(recordId, {
+                status: SgRecordStatus.FAILED,
+                ...(exhausted ? {} : { failed_code: FailedCode.NO_AVAILABLE_UPSTREAM }),
+                end_at: new Date(),
+            });
+            await requestActivityService.append(
+                recordId,
+                RequestActivityStage.ROUTING,
+                exhausted ? "所有上游均已尝试，无可用上游" : "无可用上游",
+                exhausted ? undefined : { failed_code: FailedCode.NO_AVAILABLE_UPSTREAM },
+                ActivityLevel.ERROR,
+            );
             // 全部后端已用尽：统一回传最后一次失败（HTTP 错误原样 / 网络异常 502 响应）
             if (lastFailure) {
                 return lastFailure;
@@ -261,11 +321,25 @@ async function sendRequest(
         const supportedFormats = routingResult.supportedFormats;
         const upstreamFormat = protocolUtils.resolveUpstreamFormat(clientFormat, supportedFormats);
 
+        await requestActivityService.append(recordId, RequestActivityStage.ROUTING, "路由选择", {
+            strategy: modelConfig.routing_mode,
+            client: {
+                model: modelConfig.name,
+                format: clientFormat,
+            },
+            upstream: {
+                vendor: vendor.name,
+                vendor_model: vendorModelName,
+                format: upstreamFormat,
+            },
+        });
+
         try {
             const response = await sendRequestToUpstream(
                 c,
                 user,
                 modelConfig,
+                record,
                 vendor,
                 vendorModelName,
                 clientFormat,
@@ -298,6 +372,7 @@ async function sendRequest(
                 throw e;
             }
 
+            // 切换动作由时间线自然体现（上一次尝试的结果 → 下一次路由选择），不再单独记 failover 活动
             lastFailure = httpFailure
                 ? e.response
                 : buildUpstreamFailureResponse(c, e);

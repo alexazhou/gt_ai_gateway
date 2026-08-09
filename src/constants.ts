@@ -10,6 +10,22 @@ export enum FailedCode {
     UPSTREAM_DISCONNECTED = "upstream_disconnected",
     STREAM_INCOMPLETE = "stream_incomplete",
     UPSTREAM_ERROR = "upstream_error",
+    NO_AVAILABLE_UPSTREAM = "no_available_upstream",
+}
+
+export enum RequestActivityStage {
+    ROUTING = "routing",
+    UPSTREAM_ATTEMPT = "upstream_attempt",
+    FAILOVER = "failover",
+    PLUGIN = "plugin",
+    CONVERSION = "conversion",
+    RESULT = "result",
+}
+
+export enum ActivityLevel {
+    INFO = "info",
+    WARN = "warn",
+    ERROR = "error",
 }
 
 export enum VendorAuthMode {

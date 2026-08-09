@@ -1,5 +1,5 @@
 import request from '@/utils/request';
-import type { Record, RecordQuery, RecordListResponse } from '@/types/record';
+import type { Record, RecordQuery, RecordListResponse, RecordActivityResponse } from '@/types/record';
 
 export function listRecords(query?: RecordQuery): Promise<RecordListResponse> {
     return request.get('/record/list.json', { params: query });
@@ -11,6 +11,10 @@ export function latestRecords(limit?: number): Promise<Record[]> {
 
 export function getRecord(id: number): Promise<Record> {
     return request.get(`/record/${id}`);
+}
+
+export function getRecordActivity(id: number): Promise<RecordActivityResponse> {
+    return request.get(`/record/${id}/activity.json`);
 }
 
 export function deleteRecord(id: number): Promise<void> {

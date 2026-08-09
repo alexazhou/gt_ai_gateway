@@ -54,14 +54,13 @@ async function clearPayloads(): Promise<number> {
     return objectStorageService.deleteByPrefix(RECORD_PAYLOAD_PREFIX);
 }
 
+// 一条用户请求 = 一条 record：进入路由循环前创建，此时还不知道命中的上游
+// 上游信息（vendor_id / vendor_model_name / upstream_format）由后续每次上游尝试 update 覆盖
 async function create(
     userId: number,
     modelId: number | null,
     requestData: string | null,
     clientFormat: string | null = null,
-    upstreamFormat: string | null = null,
-    vendorId: number | null = null,
-    vendorModelName: string | null = null,
 ) {
     if (isLogEnabled()) {
         console.log(`[RecordService] Creating record: user=${userId}, model=${modelId}`);
@@ -73,13 +72,13 @@ async function create(
     const record = await SgRecord.query().create({
         user_id: userId,
         model_id: modelId,
-        vendor_id: vendorId,
-        vendor_model_name: vendorModelName,
+        vendor_id: null,
+        vendor_model_name: null,
         status: SgRecordStatus.INIT,
         client_format: clientFormat,
-        upstream_format: upstreamFormat !== clientFormat ? upstreamFormat : null,
+        upstream_format: null,
         first_token_latency: null,
-        start_at: null,
+        start_at: new Date(),
         end_at: null,
         cost: 0,
     });
@@ -134,18 +133,14 @@ async function recordFailedRequest(
     body: string,
     clientFormat: ApiFormat,
     failedCode: string,
-    modelId: number | null = null,
-    vendorId: number | null = null
+    modelId: number | null = null
 ) {
     try {
         const record = await create(
             userId,
             modelId,
             body,
-            clientFormat,
-            null,
-            vendorId,
-            modelName
+            clientFormat
         );
         await update(record.id, {
             status: SgRecordStatus.FAILED,

@@ -10,6 +10,7 @@ import userController from "./controller/userController";
 import vendorController from "./controller/vendorController";
 import vendorModelController from "./controller/vendorModelController";
 import recordController from "./controller/recordController";
+import recordActivityController from "./controller/recordActivityController";
 import systemController from "./controller/systemController";
 import statsController from "./controller/statsController";
 import balanceController from "./controller/balanceController";
@@ -160,6 +161,9 @@ app.get("/record/:id", authMiddleware.requireAdmin, recordController.getRecord);
 app.delete("/record/clear-payload", authMiddleware.requireAdmin, recordController.clearPayload);
 app.delete("/record/clear-all", authMiddleware.requireAdmin, recordController.clearAll);
 app.delete("/record/:id", authMiddleware.requireAdmin, recordController.deleteRecord);
+
+// Record Activity (需要管理员权限，独立控制器 recordActivityController)
+app.get("/record/:id/activity.json", authMiddleware.requireAdmin, recordActivityController.getRecordActivity);
 
 // Stats (需要管理员权限)
 app.get("/stats/dashboard.json", authMiddleware.requireAdmin, statsController.dashboardStats);

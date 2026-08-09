@@ -4,10 +4,11 @@ import { StatusCode } from "hono/utils/http-status";
 import { SgModel } from "../model/sgModel";
 import { SgUser } from "../model/sgUser";
 import { SgRecord } from "../model/sgRecord";
-import { ApiFormat, FailedCode, SgRecordStatus } from "../constants";
+import { ApiFormat, FailedCode, SgRecordStatus, RequestActivityStage, ActivityLevel } from "../constants";
 import { BaseConverter } from "../util/protocolConverter/BaseConverter";
 import { ProtocolStreamEvent } from "../util/protocolConverter/protocolTypes";
 import recordService from "./recordService";
+import requestActivityService from "./requestActivityService";
 import userService from "./userService";
 import streamLogService from "./streamLogService";
 import usageUtils, { type Dict } from "../util/usageUtils";
@@ -155,6 +156,10 @@ export async function handleChatStreamResponse(
                     end_at: new Date(),
                     cost: usageAccounting.cost,
                 });
+                await requestActivityService.append(record.id, RequestActivityStage.RESULT, "请求成功", {
+                    status: SgRecordStatus.SUCCESS,
+                    cost: usageAccounting.cost,
+                });
 
                 if (user.type !== "root") {
                     await userService.deductBalance(user.id, usageAccounting.cost);
@@ -171,6 +176,10 @@ export async function handleChatStreamResponse(
                     failed_code: failedCode,
                     end_at: new Date(),
                 });
+                await requestActivityService.append(record.id, RequestActivityStage.RESULT, "请求中断", {
+                    status: SgRecordStatus.FAILED,
+                    failed_code: failedCode,
+                }, ActivityLevel.WARN);
                 return;
             }
 
@@ -183,6 +192,10 @@ export async function handleChatStreamResponse(
                         ? JSON.stringify(errorData) : null,
                     end_at: new Date(),
                 });
+                await requestActivityService.append(record.id, RequestActivityStage.RESULT, "上游返回错误", {
+                    status: SgRecordStatus.FAILED,
+                    failed_code: FailedCode.UPSTREAM_ERROR,
+                }, ActivityLevel.ERROR);
                 return;
             }
 
@@ -191,6 +204,10 @@ export async function handleChatStreamResponse(
                 failed_code: FailedCode.STREAM_INCOMPLETE,
                 end_at: new Date(),
             });
+            await requestActivityService.append(record.id, RequestActivityStage.RESULT, "流式响应不完整", {
+                status: SgRecordStatus.FAILED,
+                failed_code: FailedCode.STREAM_INCOMPLETE,
+            }, ActivityLevel.WARN);
         });
 
         logStream?.end();
@@ -226,6 +243,11 @@ export async function handleChatNonStreamResponse(
             end_at: new Date(),
             cost: 0,
         });
+        await requestActivityService.append(record.id, RequestActivityStage.RESULT, "上游返回非成功响应", {
+            status: SgRecordStatus.FAILED,
+            upstream_status: statusCode,
+            response_body: responseText,
+        }, ActivityLevel.ERROR);
 
         c.status(statusCode);
         c.res.headers.set("Content-Type", upstreamRes.headers.get("content-type") || "application/json");
@@ -260,13 +282,23 @@ export async function handleChatNonStreamResponse(
         ? usageUtils.calculateCost(model, normalizedUsage.promptTokens, normalizedUsage.outputTokens, normalizedUsage.cacheReadTokens)
         : 0;
 
+    const recordStatus = statusCode === 200 ? SgRecordStatus.SUCCESS : SgRecordStatus.FAILED;
     await recordService.update(record.id, {
         response_data: clientResponseText,
-        status: statusCode === 200 ? SgRecordStatus.SUCCESS : SgRecordStatus.FAILED,
+        status: recordStatus,
         usage: usageJson,
         end_at: new Date(),
         cost: cost,
     });
+    await requestActivityService.append(record.id, RequestActivityStage.RESULT,
+        recordStatus === SgRecordStatus.SUCCESS ? "请求成功" : "请求失败",
+        {
+            status: recordStatus,
+            upstream_status: statusCode,
+            ...(recordStatus === SgRecordStatus.SUCCESS ? { cost } : {}),
+        },
+        recordStatus === SgRecordStatus.SUCCESS ? ActivityLevel.INFO : ActivityLevel.ERROR,
+    );
 
     if (user.type !== "root" && statusCode === 200) {
         await userService.deductBalance(user.id, cost);
@@ -411,6 +443,10 @@ export async function handleResponsesStreamResponse(
                     end_at: new Date(),
                     cost,
                 });
+                await requestActivityService.append(record.id, RequestActivityStage.RESULT, "请求成功", {
+                    status: SgRecordStatus.SUCCESS,
+                    cost,
+                });
 
                 if (user.type !== "root") {
                     await userService.deductBalance(user.id, cost);
@@ -427,6 +463,10 @@ export async function handleResponsesStreamResponse(
                     failed_code: failedCode,
                     end_at: new Date(),
                 });
+                await requestActivityService.append(record.id, RequestActivityStage.RESULT, "请求中断", {
+                    status: SgRecordStatus.FAILED,
+                    failed_code: failedCode,
+                }, ActivityLevel.WARN);
                 return;
             }
 
@@ -438,6 +478,10 @@ export async function handleResponsesStreamResponse(
                     response_data: errorData !== null ? JSON.stringify(errorData) : null,
                     end_at: new Date(),
                 });
+                await requestActivityService.append(record.id, RequestActivityStage.RESULT, "上游返回错误", {
+                    status: SgRecordStatus.FAILED,
+                    failed_code: FailedCode.UPSTREAM_ERROR,
+                }, ActivityLevel.ERROR);
                 return;
             }
 
@@ -446,6 +490,10 @@ export async function handleResponsesStreamResponse(
                 failed_code: FailedCode.STREAM_INCOMPLETE,
                 end_at: new Date(),
             });
+            await requestActivityService.append(record.id, RequestActivityStage.RESULT, "流式响应不完整", {
+                status: SgRecordStatus.FAILED,
+                failed_code: FailedCode.STREAM_INCOMPLETE,
+            }, ActivityLevel.WARN);
         });
 
         logStream?.end();
@@ -480,6 +528,11 @@ export async function handleResponsesNonStreamResponse(
             end_at: new Date(),
             cost: 0,
         });
+        await requestActivityService.append(record.id, RequestActivityStage.RESULT, "上游返回非成功响应", {
+            status: SgRecordStatus.FAILED,
+            upstream_status: statusCode,
+            response_body: responseText,
+        }, ActivityLevel.ERROR);
 
         c.status(statusCode);
         c.res.headers.set("Content-Type", upstreamRes.headers.get("content-type") || "application/json");
@@ -514,13 +567,23 @@ export async function handleResponsesNonStreamResponse(
         ? usageUtils.calculateCost(model, normalizedUsage.promptTokens, normalizedUsage.outputTokens, normalizedUsage.cacheReadTokens)
         : 0;
 
+    const recordStatus = statusCode === 200 ? SgRecordStatus.SUCCESS : SgRecordStatus.FAILED;
     await recordService.update(record.id, {
         response_data: clientResponseText,
-        status: statusCode === 200 ? SgRecordStatus.SUCCESS : SgRecordStatus.FAILED,
+        status: recordStatus,
         usage: usageJson,
         end_at: new Date(),
         cost,
     });
+    await requestActivityService.append(record.id, RequestActivityStage.RESULT,
+        recordStatus === SgRecordStatus.SUCCESS ? "请求成功" : "请求失败",
+        {
+            status: recordStatus,
+            upstream_status: statusCode,
+            ...(recordStatus === SgRecordStatus.SUCCESS ? { cost } : {}),
+        },
+        recordStatus === SgRecordStatus.SUCCESS ? ActivityLevel.INFO : ActivityLevel.ERROR,
+    );
 
     if (user.type !== "root" && statusCode === 200) {
         await userService.deductBalance(user.id, cost);

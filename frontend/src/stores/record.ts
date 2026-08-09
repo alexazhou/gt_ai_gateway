@@ -1,16 +1,17 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import { listRecords, latestRecords, getRecord } from '@/api/record';
+import { listRecords, latestRecords, getRecord, getRecordActivity } from '@/api/record';
 import { getUser, fetchUsersByIds } from '@/api/user';
 import { getModel, fetchModelsByIds } from '@/api/model';
 import { getVendor, fetchVendorsByIds } from '@/api/vendor';
-import type { Record, RecordQuery, RecordDetail } from '@/types/record';
+import type { Record, RecordQuery, RecordDetail, RecordActivityEntry } from '@/types/record';
 
 
 export const useRecordStore = defineStore('record', () => {
     // State
     const records = ref<Record[]>([]);
     const currentRecord = ref<RecordDetail | null>(null);
+    const activities = ref<RecordActivityEntry[]>([]);
     const total = ref(0);
     const loading = ref(false);
 
@@ -114,6 +115,7 @@ export const useRecordStore = defineStore('record', () => {
     async function fetchRecordDetail(id: number): Promise<void> {
         loading.value = true;
         currentRecord.value = null;
+        activities.value = [];
         try {
             const record = await getRecord(id);
 
@@ -149,7 +151,7 @@ export const useRecordStore = defineStore('record', () => {
                     })
                 );
             }
-            
+
             if (record.vendor_id) {
                 promises.push(
                     getVendor(record.vendor_id).then(vendor => {
@@ -159,6 +161,15 @@ export const useRecordStore = defineStore('record', () => {
                     })
                 );
             }
+
+            // 请求活动日志（时间线）：best-effort，失败不影响详情展示
+            promises.push(
+                getRecordActivity(id).then(res => {
+                    activities.value = res.activities || [];
+                }).catch(() => {
+                    activities.value = [];
+                })
+            );
 
             await Promise.all(promises);
             currentRecord.value = recordDetail;
@@ -172,6 +183,7 @@ export const useRecordStore = defineStore('record', () => {
 
     function clearCurrentRecord(): void {
         currentRecord.value = null;
+        activities.value = [];
     }
 
     function clearRecords(): void {
@@ -182,6 +194,7 @@ export const useRecordStore = defineStore('record', () => {
     return {
         records,
         currentRecord,
+        activities,
         total,
         loading,
         hasRecords,

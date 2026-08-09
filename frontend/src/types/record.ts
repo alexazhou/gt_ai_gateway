@@ -73,6 +73,24 @@ export interface RecordListResponse {
     total: number;
 }
 
+// ===== 请求活动日志（时间线） =====
+
+export type RequestActivityStage = 'routing' | 'upstream_attempt' | 'failover' | 'plugin' | 'conversion' | 'result';
+export type ActivityLevel = 'info' | 'warn' | 'error';
+
+export interface RecordActivityEntry {
+    stage: RequestActivityStage;
+    level: ActivityLevel;
+    message: string;
+    details?: { [key: string]: unknown };
+    ts: number;
+}
+
+export interface RecordActivityResponse {
+    record_id: number;
+    activities: RecordActivityEntry[];
+}
+
 
 // 记录详情，包含关联的名称信息
 export interface RecordDetail extends Record {

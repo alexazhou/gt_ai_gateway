@@ -275,6 +275,7 @@ describe("AI Chat API (Negative)", () => {
             });
 
             // Verify a failed record was created in the database
+            // vendor_model_name 只在命中上游后写入：模型不存在时从未发起上游请求，保持 null
             const records = dbHelper.query<any>("SELECT * FROM record ORDER BY id DESC LIMIT 1");
             const latestRecord = records[0];
             expect(latestRecord).toBeDefined();
@@ -282,7 +283,7 @@ describe("AI Chat API (Negative)", () => {
             expect(latestRecord!.failed_code).toBe("model_not_found");
             expect(latestRecord!.model_id).toBeNull();
             expect(latestRecord!.vendor_id).toBeNull();
-            expect(latestRecord!.vendor_model_name).toBe("non-existent-model");
+            expect(latestRecord!.vendor_model_name).toBeNull();
         }, 30000);
 
         it("should return 503 when no upstream is available", async () => {
@@ -417,7 +418,7 @@ describe("AI Chat API (Negative)", () => {
             expect(latestRecord!.failed_code).toBe("model_not_found");
             expect(latestRecord!.model_id).toBeNull();
             expect(latestRecord!.vendor_id).toBeNull();
-            expect(latestRecord!.vendor_model_name).toBe("non-existent-model");
+            expect(latestRecord!.vendor_model_name).toBeNull();
         }, 30000);
 
         it("should return 503 when no upstream is available", async () => {
@@ -473,7 +474,7 @@ describe("AI Chat API (Negative)", () => {
             expect(latestRecord!.failed_code).toBe("model_not_found");
             expect(latestRecord!.model_id).toBeNull();
             expect(latestRecord!.vendor_id).toBeNull();
-            expect(latestRecord!.vendor_model_name).toBe("non-existent-model");
+            expect(latestRecord!.vendor_model_name).toBeNull();
         }, 30000);
 
         it("should return 503 when no upstream is available", async () => {

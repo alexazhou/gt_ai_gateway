@@ -271,17 +271,15 @@ describe("Model multi-upstream routing", () => {
         expect(response.status).toBe(200);
         expect(response.body.model).toBe("available-model");
 
+        // 一次用户请求 = 一条 record，最终保留命中上游
         const records = await requestHelper.get(
             `/record/list.json?model_ids=${model.body.id}`,
             adminToken,
         );
-        expect(records.body.total).toBe(2);
+        expect(records.body.total).toBe(1);
         expect(records.body.list[0].status).toBe("success");
         expect(records.body.list[0].vendor_id).toBe(availableVendor.body.id);
         expect(records.body.list[0].vendor_model_name).toBe("available-model");
-        expect(records.body.list[1].status).toBe("failed");
-        expect(records.body.list[1].vendor_id).toBe(unavailableVendor.body.id);
-        expect(records.body.list[1].vendor_model_name).toBe("unavailable-model");
 
         const failedVendorModels = await requestHelper.get(
             `/vendor/${unavailableVendor.body.id}/model/list.json`,
@@ -366,10 +364,11 @@ describe("Model multi-upstream routing", () => {
             `/record/list.json?model_ids=${model.body.id}`,
             adminToken,
         );
-        expect(records.body.total).toBe(3);
+        // 每次请求一条 record：第一次请求失败切换后命中 available，第二次请求 available 未冷却直接命中
+        expect(records.body.total).toBe(2);
         expect(records.body.list.filter((record: any) => (
             record.vendor_id === unavailableVendor.body.id
-        ))).toHaveLength(1);
+        ))).toHaveLength(0);
         expect(records.body.list.filter((record: any) => (
             record.vendor_id === availableVendor.body.id
         ))).toHaveLength(2);
@@ -445,11 +444,9 @@ describe("Model multi-upstream routing", () => {
             `/record/list.json?model_ids=${model.body.id}`,
             adminToken,
         );
-        expect(records.body.total).toBe(2);
+        expect(records.body.total).toBe(1);
         expect(records.body.list[0].vendor_id).toBe(fallbackVendor.body.id);
         expect(records.body.list[0].status).toBe("success");
-        expect(records.body.list[1].vendor_id).toBe(invalidRequestVendor.body.id);
-        expect(records.body.list[1].status).toBe("failed");
 
         const vendorModels = await requestHelper.get(
             `/vendor/${invalidRequestVendor.body.id}/model/list.json`,
@@ -570,11 +567,13 @@ describe("Model multi-upstream routing", () => {
         expect(secondResponse.status).toBe(503);
         expect(secondResponse.body.error.message).toContain("No available upstream");
 
+        // 每次请求各一条 record：第一次是上游失败，第二次是无可用上游（都要记录）
         const records = await requestHelper.get(
             `/record/list.json?model_ids=${model.body.id}`,
             adminToken,
         );
-        expect(records.body.total).toBe(1);
+        expect(records.body.total).toBe(2);
+        expect(records.body.list.every((record: any) => record.status === "failed")).toBe(true);
     });
 
     it("fails over automatic upstreams (no vendor_model_id) in first_available mode", async () => {
@@ -641,9 +640,9 @@ describe("Model multi-upstream routing", () => {
             `/record/list.json?model_ids=${model.body.id}`,
             adminToken,
         );
-        expect(records.body.total).toBe(2);
+        expect(records.body.total).toBe(1);
         expect(records.body.list[0].vendor_id).toBe(backupVendor.body.id);
-        expect(records.body.list[1].vendor_id).toBe(primaryVendor.body.id);
+        expect(records.body.list[0].status).toBe("success");
     });
 
     it("returns the last upstream error when all failover attempts fail", async () => {
@@ -718,8 +717,10 @@ describe("Model multi-upstream routing", () => {
             `/record/list.json?model_ids=${model.body.id}`,
             adminToken,
         );
-        expect(records.body.total).toBe(2);
-        expect(records.body.list.every((record: any) => record.status === "failed")).toBe(true);
+        // 一次请求一条 record，vendor 保留最后一次尝试
+        expect(records.body.total).toBe(1);
+        expect(records.body.list[0].status).toBe("failed");
+        expect(records.body.list[0].vendor_id).toBe(failingVendorB.body.id);
     });
 
     it("returns 502 when all failover attempts fail with network errors", async () => {
@@ -793,6 +794,195 @@ describe("Model multi-upstream routing", () => {
             `/record/list.json?model_ids=${model.body.id}`,
             adminToken,
         );
-        expect(records.body.total).toBe(2);
+        expect(records.body.total).toBe(1);
+        expect(records.body.list[0].status).toBe("failed");
+    });
+
+    it("records the request processing timeline as activities", async () => {
+        const failVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                ...vendorFixtures.VENDOR_FIXTURES.openai(),
+                name: "Activity fail upstream",
+                urls: { openai: "http://localhost:9999/chat/completions/error" },
+            },
+            adminToken,
+        );
+        const okVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                ...vendorFixtures.VENDOR_FIXTURES.openai(),
+                name: "Activity ok upstream",
+                urls: { openai: "http://localhost:9999/chat/completions" },
+            },
+            adminToken,
+        );
+        const failModel = await requestHelper.post(
+            `/vendor/${failVendor.body.id}/model/add.json`,
+            { model_id: "activity-fail-model" },
+            adminToken,
+        );
+        const okModel = await requestHelper.post(
+            `/vendor/${okVendor.body.id}/model/add.json`,
+            { model_id: "activity-ok-model" },
+            adminToken,
+        );
+        const model = await requestHelper.post(
+            "/model/create.json",
+            {
+                name: "activity-model",
+                routing_mode: "first_available",
+                routing_config: {
+                    upstreams: [
+                        {
+                            vendor_id: failVendor.body.id,
+                            vendor_model_id: failModel.body.id,
+                            enabled: true,
+                        },
+                        {
+                            vendor_id: okVendor.body.id,
+                            vendor_model_id: okModel.body.id,
+                            enabled: true,
+                        },
+                    ],
+                },
+            },
+            adminToken,
+        );
+        expect(model.status).toBe(200);
+
+        const user = await requestHelper.post(
+            "/user/create.json",
+            mockHelper.generateUser(),
+            adminToken,
+        );
+        const response = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "activity-model", stream: false }),
+            user.body.token,
+        );
+        expect(response.status).toBe(200);
+
+        const records = await requestHelper.get(
+            `/record/list.json?model_ids=${model.body.id}`,
+            adminToken,
+        );
+        expect(records.body.total).toBe(1);
+        const recordId = records.body.list[0].id;
+
+        const activity = await requestHelper.get(
+            `/record/${recordId}/activity.json`,
+            adminToken,
+        );
+        expect(activity.status).toBe(200);
+        expect(activity.body.record_id).toBe(recordId);
+
+        const stages = activity.body.activities.map((a: any) => a.stage);
+        // 每次尝试 = 路由 → 发起请求 → 结果；切换由序列自然体现（A失败结果 → 路由B），不单独记 failover
+        expect(stages).toEqual([
+            "routing",
+            "upstream_attempt",
+            "result",
+            "routing",
+            "upstream_attempt",
+            "result",
+        ]);
+
+        // 第一条路由：策略 + 客户端（请求模型/协议）→ 上游（供应商/上游模型/协议）；A 失败结果带 400 与上游返回体；最终结果成功
+        expect(activity.body.activities[0].details.strategy).toBe("first_available");
+        expect(activity.body.activities[0].details.client.model).toBe("activity-model");
+        expect(activity.body.activities[0].details.client.format).toBe("openai");
+        expect(activity.body.activities[0].details.upstream.vendor).toBe("Activity fail upstream");
+        expect(activity.body.activities[0].details.upstream.vendor_model).toBe("activity-fail-model");
+        expect(activity.body.activities[0].details.upstream.format).toBe("openai");
+        // 发起上游请求只含上游协议，不含客户端协议
+        expect(activity.body.activities[1].details.upstream_format).toBe("openai");
+        expect(activity.body.activities[1].details.vendor_name).toBe("Activity fail upstream");
+        expect(activity.body.activities[1].details).not.toHaveProperty("client_format");
+        expect(activity.body.activities[2].details.status).toBe("failed");
+        expect(activity.body.activities[2].details.upstream_status).toBe(400);
+        expect(activity.body.activities[2].details.response_body).toContain("Not supported model");
+        expect(activity.body.activities[3].details.upstream.vendor).toBe("Activity ok upstream");
+        expect(activity.body.activities[5].level).toBe("info");
+        expect(activity.body.activities[5].details.status).toBe("success");
+        expect(activity.body.activities[5].details.cost).toBeGreaterThanOrEqual(0);
+
+        // 不存在的 record 返回 404
+        const empty = await requestHelper.get(
+            `/record/999999/activity.json`,
+            adminToken,
+        );
+        expect(empty.status).toBe(404);
+    });
+
+    it("records a no-available-upstream activity when no upstream can be selected", async () => {
+        const onlyVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                ...vendorFixtures.VENDOR_FIXTURES.openai(),
+                name: "Only failing upstream",
+                urls: { openai: "http://localhost:9999/chat/completions/unavailable" },
+            },
+            adminToken,
+        );
+        const onlyModel = await requestHelper.post(
+            `/vendor/${onlyVendor.body.id}/model/add.json`,
+            { model_id: "only-failing-model" },
+            adminToken,
+        );
+        const model = await requestHelper.post(
+            "/model/create.json",
+            {
+                name: "only-failing-model",
+                routing_mode: "first_available",
+                routing_config: {
+                    upstreams: [
+                        {
+                            vendor_id: onlyVendor.body.id,
+                            vendor_model_id: onlyModel.body.id,
+                            enabled: true,
+                        },
+                    ],
+                },
+            },
+            adminToken,
+        );
+        expect(model.status).toBe(200);
+
+        const user = await requestHelper.post(
+            "/user/create.json",
+            mockHelper.generateUser(),
+            adminToken,
+        );
+        // 第一次请求让唯一上游冷却
+        await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "only-failing-model", stream: false }),
+            user.body.token,
+        );
+        // 第二次请求无可用上游
+        const secondResponse = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "only-failing-model", stream: false }),
+            user.body.token,
+        );
+        expect(secondResponse.status).toBe(503);
+
+        const records = await requestHelper.get(
+            `/record/list.json?model_ids=${model.body.id}`,
+            adminToken,
+        );
+        const noUpstreamRecord = records.body.list.find(
+            (record: any) => record.failed_code === "no_available_upstream",
+        );
+        expect(noUpstreamRecord).toBeDefined();
+
+        const activity = await requestHelper.get(
+            `/record/${noUpstreamRecord.id}/activity.json`,
+            adminToken,
+        );
+        const routingStages = activity.body.activities.filter((a: any) => a.stage === "routing");
+        expect(routingStages[routingStages.length - 1].level).toBe("error");
+        expect(routingStages[routingStages.length - 1].message).toBe("无可用上游");
     });
 });

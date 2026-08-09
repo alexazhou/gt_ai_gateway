@@ -169,6 +169,10 @@
                             </div>
                         </a-tab-pane>
 
+                        <a-tab-pane key="activity" tab="日志">
+                            <ActivityTimeline :activities="recordStore.activities" />
+                        </a-tab-pane>
+
                         <a-tab-pane v-if="recordStore.currentRecord.status === 'failed'" key="error" tab="报错信息">
                             <div class="error-pane-content">
                                 <div v-if="recordStore.currentRecord.failed_code" class="error-type">
@@ -195,6 +199,8 @@ import { deleteRecord } from '@/api/record';
 import { formatDate } from '@/utils/format';
 import JsonDownload from '@/utils/jsonDownload';
 import JsonViewer from '@/components/common/JsonViewer.vue';
+import ActivityTimeline from '@/components/common/ActivityTimeline.vue';
+import { FAILED_CODE_LABELS } from '@/constants/record';
 import { message } from 'ant-design-vue/es';
 
 const router = useRouter();
@@ -347,14 +353,6 @@ async function handleDelete() {
 onUnmounted(() => {
     recordStore.clearCurrentRecord();
 });
-
-const FAILED_CODE_LABELS: Record<string, string> = {
-    client_disconnected: '客户端断开连接',
-    upstream_disconnected: '上游断开连接',
-    stream_incomplete: '流式响应不完整',
-    upstream_error: '上游返回错误',
-};
-
 
 function getStatusColor(status: string | null): string {
     switch (status) {
