@@ -82,6 +82,22 @@ describe("upstreamHealthService", () => {
         expect(statusAt(3, "claude-sonnet", BASE_NOW + 1000 + COOLDOWN).state).toBe(UpstreamHealthState.NORMAL);
     });
 
+    it("shouldMarkFailure returns false for client-side 4xx errors", () => {
+        for (const status of [400, 401, 403, 404, 429]) {
+            expect(upstreamHealthService.shouldMarkFailure(status)).toBe(false);
+        }
+    });
+
+    it("shouldMarkFailure returns true for server-side 5xx and 402 balance errors", () => {
+        for (const status of [402, 500, 502, 503, 504]) {
+            expect(upstreamHealthService.shouldMarkFailure(status)).toBe(true);
+        }
+    });
+
+    it("shouldMarkFailure returns true for network errors (no http status)", () => {
+        expect(upstreamHealthService.shouldMarkFailure(null)).toBe(true);
+    });
+
     it("pruneExpired removes only expired upstream health entries", () => {
         upstreamHealthService.markFailure(3, "claude-sonnet", format(), new Date(BASE_NOW));
         upstreamHealthService.markFailure(8, "claude-opus", format(), new Date(BASE_NOW));

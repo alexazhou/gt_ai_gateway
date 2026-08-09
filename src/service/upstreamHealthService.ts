@@ -44,6 +44,17 @@ function markFailure(
 }
 
 
+// 判定某次失败是否应记录为上游健康问题（触发全局冷却）
+// 仅"上游自身故障"需要记录：5xx 服务端错误、402 余额不足、网络不可达（无 HTTP 状态码）
+// 4xx 属于请求侧/配置侧错误（400/401/403/404/429 等），上游本身健康，不应被冷却
+function shouldMarkFailure(status: number | null): boolean {
+    if (status === null) {
+        return true;
+    }
+    return status >= 500 || status === 402;
+}
+
+
 function getHealthStatus(
     vendorId: number,
     vendorModelName: string,
@@ -91,6 +102,7 @@ export { UpstreamHealthState, UpstreamHealthStatus };
 export default {
     markFailure,
     getHealthStatus,
+    shouldMarkFailure,
     pruneExpired,
     clear,
 };

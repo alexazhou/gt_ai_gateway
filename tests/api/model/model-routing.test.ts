@@ -985,4 +985,177 @@ describe("Model multi-upstream routing", () => {
         expect(routingStages[routingStages.length - 1].level).toBe("error");
         expect(routingStages[routingStages.length - 1].message).toBe("无可用上游");
     });
+
+    it("does not cool down the upstream after a 4xx client error", async () => {
+        const clientErrorVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                ...vendorFixtures.VENDOR_FIXTURES.openai(),
+                name: "Client error upstream",
+                urls: { openai: "http://localhost:9999/chat/completions/error" },
+            },
+            adminToken,
+        );
+        const clientErrorModel = await requestHelper.post(
+            `/vendor/${clientErrorVendor.body.id}/model/add.json`,
+            { model_id: "no-cool-client-error-model" },
+            adminToken,
+        );
+        const model = await requestHelper.post(
+            "/model/create.json",
+            {
+                name: "no-cool-client-error-model",
+                routing_mode: "first_available",
+                routing_config: {
+                    upstreams: [
+                        {
+                            vendor_id: clientErrorVendor.body.id,
+                            vendor_model_id: clientErrorModel.body.id,
+                            enabled: true,
+                        },
+                    ],
+                    failover: { enabled: false },
+                },
+            },
+            adminToken,
+        );
+        expect(model.status).toBe(200);
+
+        const user = await requestHelper.post(
+            "/user/create.json",
+            mockHelper.generateUser(),
+            adminToken,
+        );
+        // 4xx 属于请求侧错误，不标记健康状态：第二次请求仍会尝试该上游（而非"无可用上游"）
+        const firstResponse = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "no-cool-client-error-model", stream: false }),
+            user.body.token,
+        );
+        expect(firstResponse.status).toBe(400);
+
+        const secondResponse = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "no-cool-client-error-model", stream: false }),
+            user.body.token,
+        );
+        expect(secondResponse.status).toBe(400);
+        expect(secondResponse.body.error.message).not.toContain("No available upstream");
+    });
+
+    it("cools down the upstream after a 402 balance error", async () => {
+        const balanceVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                ...vendorFixtures.VENDOR_FIXTURES.openai(),
+                name: "Balance insufficient upstream",
+                urls: { openai: "http://localhost:9999/chat/completions/balance" },
+            },
+            adminToken,
+        );
+        const balanceModel = await requestHelper.post(
+            `/vendor/${balanceVendor.body.id}/model/add.json`,
+            { model_id: "cool-balance-model" },
+            adminToken,
+        );
+        const model = await requestHelper.post(
+            "/model/create.json",
+            {
+                name: "cool-balance-model",
+                routing_mode: "first_available",
+                routing_config: {
+                    upstreams: [
+                        {
+                            vendor_id: balanceVendor.body.id,
+                            vendor_model_id: balanceModel.body.id,
+                            enabled: true,
+                        },
+                    ],
+                    failover: { enabled: false },
+                },
+            },
+            adminToken,
+        );
+        expect(model.status).toBe(200);
+
+        const user = await requestHelper.post(
+            "/user/create.json",
+            mockHelper.generateUser(),
+            adminToken,
+        );
+        // 402 余额不足视为上游故障：第一次请求后冷却，第二次请求直接无可用上游
+        const firstResponse = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "cool-balance-model", stream: false }),
+            user.body.token,
+        );
+        expect(firstResponse.status).toBe(402);
+
+        const secondResponse = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "cool-balance-model", stream: false }),
+            user.body.token,
+        );
+        expect(secondResponse.status).toBe(503);
+        expect(secondResponse.body.error.message).toContain("No available upstream");
+    });
+
+    it("ignores health status and always returns the fixed upstream in single mode", async () => {
+        const singleVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                ...vendorFixtures.VENDOR_FIXTURES.openai(),
+                name: "Single mode cooling upstream",
+                urls: { openai: "http://localhost:9999/chat/completions/unavailable" },
+            },
+            adminToken,
+        );
+        const singleModel = await requestHelper.post(
+            `/vendor/${singleVendor.body.id}/model/add.json`,
+            { model_id: "single-ignore-health-model" },
+            adminToken,
+        );
+        const model = await requestHelper.post(
+            "/model/create.json",
+            {
+                name: "single-ignore-health-model",
+                routing_mode: "single",
+                routing_config: {
+                    upstreams: [
+                        {
+                            vendor_id: singleVendor.body.id,
+                            vendor_model_id: singleModel.body.id,
+                            enabled: true,
+                        },
+                    ],
+                },
+            },
+            adminToken,
+        );
+        expect(model.status).toBe(200);
+
+        const user = await requestHelper.post(
+            "/user/create.json",
+            mockHelper.generateUser(),
+            adminToken,
+        );
+        // 第一次请求失败会标记上游冷却（503 视为上游故障）
+        const firstResponse = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "single-ignore-health-model", stream: false }),
+            user.body.token,
+        );
+        expect(firstResponse.status).toBe(503);
+        expect(firstResponse.body.error.message).toBe("Mock upstream unavailable");
+
+        // SINGLE 模式忽略健康状态：第二次请求仍会尝试固定上游，而不是"无可用上游"
+        const secondResponse = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: "single-ignore-health-model", stream: false }),
+            user.body.token,
+        );
+        expect(secondResponse.status).toBe(503);
+        expect(secondResponse.body.error.message).toBe("Mock upstream unavailable");
+        expect(secondResponse.body.error.message).not.toContain("No available upstream");
+    });
 });

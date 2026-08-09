@@ -7,7 +7,8 @@ class FirstAvailableRoutingStrategy extends BaseRoutingStrategy {
         _model: SgModel,
         candidates: ModelRoutingResult[],
     ): ModelRoutingResult {
-        return candidates[0] ?? ModelRoutingResult.none();
+        // 过滤掉冷却中的上游，取配置顺序第一个可用
+        return this.filterDownUpstreams(candidates)[0] ?? ModelRoutingResult.none();
     }
 }
 

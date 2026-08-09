@@ -4,7 +4,6 @@ import { SgVendor } from "../../model/sgVendor";
 import { SgVendorModel } from "../../model/sgVendorModel";
 import customError from "../../util/customError";
 import protocolUtils from "../../util/protocolUtils";
-import upstreamHealthService, { UpstreamHealthState } from "../upstreamHealthService";
 import RoutingContext from "./routingContext";
 import { ModelRoutingResult } from "./types";
 import BaseRoutingStrategy from "./routingStrategy/baseRoutingStrategy";
@@ -97,7 +96,6 @@ async function resolveAvailableCandidates(
     model: SgModel,
     clientFormat: ApiFormat,
     routingContext: RoutingContext,
-    now: number,
 ): Promise<ModelRoutingResult[]> {
     const upstreams = model.getRoutingConfig().upstreams.filter(upstream => upstream.enabled);
     if (upstreams.length === 0) {
@@ -152,18 +150,9 @@ async function resolveAvailableCandidates(
             continue;
         }
 
-        const healthStatus = upstreamHealthService.getHealthStatus(
-            upstream.vendor_id,
-            vendorModelName,
-            upstreamFormat,
-            now,
-        );
-        if (healthStatus.state === UpstreamHealthState.DOWN) {
-            continue;
-        }
-
+        // 健康状态过滤已下沉到各策略类（SINGLE 忽略，其余过滤冷却上游）
         candidates.push(
-            new ModelRoutingResult(vendor, vendorModelName, supportedFormats),
+            new ModelRoutingResult(vendor, vendorModelName, supportedFormats, upstreamFormat),
         );
     }
 
@@ -175,14 +164,13 @@ async function selectUpstream(
     model: SgModel,
     clientFormat: ApiFormat,
     routingContext: RoutingContext,
-    now: number = Date.now(),
 ): Promise<ModelRoutingResult> {
     const strategy = strategies[model.routing_mode];
     if (!strategy) {
         throw new customError.AppError("Invalid routing mode");
     }
 
-    const candidates = await resolveAvailableCandidates(model, clientFormat, routingContext, now);
+    const candidates = await resolveAvailableCandidates(model, clientFormat, routingContext);
     const selected = strategy.selectUpstream(model, candidates);
     // 记录本次已选后端，后续重试不再选中（成功则循环立即结束，该记录无害）
     if (selected.hasUpstream()) {

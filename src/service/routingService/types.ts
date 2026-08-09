@@ -1,4 +1,4 @@
-import type { ApiFormat } from "../../constants";
+import { ApiFormat } from "../../constants";
 import type { SgVendor } from "../../model/sgVendor";
 
 class ModelRoutingResult {
@@ -6,10 +6,12 @@ class ModelRoutingResult {
         readonly vendor: SgVendor | null,
         readonly vendorModelName: string | null,
         readonly supportedFormats: ApiFormat[],
+        readonly upstreamFormat: ApiFormat,
     ) {}
 
     static none(): ModelRoutingResult {
-        return new ModelRoutingResult(null, null, []);
+        // upstreamFormat 为占位值：none() 无上游，不会被健康过滤查询
+        return new ModelRoutingResult(null, null, [], ApiFormat.OPENAI);
     }
 
     hasUpstream(): this is ModelRoutingResult & {

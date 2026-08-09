@@ -361,8 +361,12 @@ async function sendRequest(
             // 唯一的失败处理点：HTTP 错误与网络异常在这里汇合
             const httpFailure = e instanceof UpstreamResponseError;
 
-            // 全局冷却：标记失败，让后续请求跳过（本请求的循环防护由 routingContext 承担）
-            upstreamHealthService.markFailure(vendor.id, vendorModelName, upstreamFormat);
+            // 全局冷却：仅上游自身故障才标记（5xx、402 余额不足、网络不可达），
+            // 4xx 请求侧错误不惩罚上游，避免健康上游被无辜跳过（本请求的循环防护由 routingContext 承担）
+            const failureStatus = httpFailure ? e.response.status : null;
+            if (upstreamHealthService.shouldMarkFailure(failureStatus)) {
+                upstreamHealthService.markFailure(vendor.id, vendorModelName, upstreamFormat);
+            }
 
             // failover 关闭：HTTP 错误直接回传响应，网络异常抛原始异常，不继续尝试
             if (!failoverEnabled) {

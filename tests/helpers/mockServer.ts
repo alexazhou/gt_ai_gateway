@@ -235,6 +235,8 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleOpenAIChatError(req, res);
     } else if (url.includes("/chat/completions/unavailable")) {
         handleOpenAIChatUnavailable(req, res);
+    } else if (url.includes("/chat/completions/balance")) {
+        handleOpenAIChatBalance(req, res);
     } else if (url.includes("/chat/completions")) {
         handleOpenAIChat(req, res);
     } else if (url.includes("/responses/incomplete")) {
@@ -303,6 +305,13 @@ function handleOpenAIChatUnavailable(req: IncomingMessage, res: ServerResponse):
     req.resume();
     res.writeHead(503, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: { message: "Mock upstream unavailable" } }));
+}
+
+
+function handleOpenAIChatBalance(req: IncomingMessage, res: ServerResponse): void {
+    req.resume();
+    res.writeHead(402, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: { message: "Insufficient upstream balance" } }));
 }
 
 

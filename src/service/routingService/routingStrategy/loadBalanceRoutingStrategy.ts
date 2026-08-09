@@ -7,11 +7,12 @@ class LoadBalanceRoutingStrategy extends BaseRoutingStrategy {
         _model: SgModel,
         candidates: ModelRoutingResult[],
     ): ModelRoutingResult {
-        if (candidates.length === 0) {
+        const available = this.filterDownUpstreams(candidates);
+        if (available.length === 0) {
             return ModelRoutingResult.none();
         }
 
-        return candidates[Math.floor(Math.random() * candidates.length)];
+        return available[Math.floor(Math.random() * available.length)];
     }
 }
 
