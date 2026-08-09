@@ -10,7 +10,7 @@ import modelFixtures from "../../fixtures/modelFixtures";
  * Tests for admin-only API endpoints
  */
 
-let adminToken = "admin-token-123";
+let adminToken = userFixtures.ADMIN_TOKEN;
 let normalToken = "normal-token-123";
 let disabledToken = "disabled-token-123";
 let invalidToken = "invalid-token-123";

@@ -3,8 +3,9 @@ import requestHelper from "../../helpers/requestHelper";
 import dbHelper from "../../helpers/dbHelper";
 import { setupAdminUser } from "../../globalSetup";
 import modelFixtures from "../../fixtures/modelFixtures";
+import userFixtures from "../../fixtures/userFixtures";
 
-const adminToken = "admin-token-123";
+const adminToken = userFixtures.ADMIN_TOKEN;
 const normalToken = "models-user-token";
 
 describe("GET /llm/v1/models", () => {

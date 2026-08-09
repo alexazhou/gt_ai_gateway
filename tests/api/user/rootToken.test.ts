@@ -5,6 +5,7 @@ import { setupAdminUser } from "../../globalSetup";
 import userService from "../../../src/service/userService";
 import { ROOT_USER_ID } from "../../../src/constants";
 import modelFixtures from "../../fixtures/modelFixtures";
+import userFixtures from "../../fixtures/userFixtures";
 
 /**
  * Root Token Tests
@@ -13,7 +14,7 @@ import modelFixtures from "../../fixtures/modelFixtures";
 
 const ROOT_TOKEN = "root-token-123";
 const INVALID_ROOT_TOKEN = "invalid-root-token";
-let adminToken = "admin-token-123";
+let adminToken = userFixtures.ADMIN_TOKEN;
 
 describe("Root Token Tests", () => {
     beforeAll(async () => {

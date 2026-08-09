@@ -10,7 +10,7 @@ import { setupAdminUser } from "../../globalSetup";
  * Billing API Tests
  */
 
-const adminToken = "admin-token-123";
+const adminToken = userFixtures.ADMIN_TOKEN;
 let openaiVendorId: number;
 let testUserId: number;
 let testUserToken: string;

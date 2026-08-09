@@ -4,12 +4,13 @@ import vendorFixtures from "../../fixtures/vendorFixtures";
 import modelFixtures from "../../fixtures/modelFixtures";
 import dbHelper from "../../helpers/dbHelper"
 import { setupAdminUser } from "../../globalSetup";
+import userFixtures from "../../fixtures/userFixtures";
 
 /**
  * Model Endpoint Positive Tests
  */
 
-const adminToken = "admin-token-123";
+const adminToken = userFixtures.ADMIN_TOKEN;
 let openaiVendorId: number;
 let anthropicVendorId: number;
 let createdModelId: number;

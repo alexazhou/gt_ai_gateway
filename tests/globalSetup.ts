@@ -7,6 +7,7 @@ import mockServer from "./helpers/mockServer";
 import mockProxy from "./helpers/mockProxyServer";
 import mockSocks from "./helpers/mockSocksServer";
 import requestHelper from "./helpers/requestHelper";
+import userFixtures from "./fixtures/userFixtures";
 
 // Worker mode configuration
 const TEST_WRANGLER_CONFIG = "wrangler.test.toml";
@@ -47,7 +48,7 @@ process.on("SIGTERM", globalCleanup);
  */
 async function setupAdminUser(): Promise<string> {
     const rootToken = "root-token-123";
-    const adminToken = "admin-token-123";
+    const adminToken = userFixtures.ADMIN_TOKEN;
     const adminUser = { name: "Admin User", token: adminToken, type: "admin" };
     console.log("Creating admin user:", adminUser);
 

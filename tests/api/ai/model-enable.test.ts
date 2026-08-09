@@ -5,12 +5,13 @@ import vendorFixtures from "../../fixtures/vendorFixtures";
 import modelFixtures from "../../fixtures/modelFixtures";
 import dbHelper from "../../helpers/dbHelper"
 import { setupAdminUser } from "../../globalSetup";
+import userFixtures from "../../fixtures/userFixtures";
 
 /**
  * Gateway - Model Enable Filter Tests
  */
 
-const adminToken = "admin-token-123";
+const adminToken = userFixtures.ADMIN_TOKEN;
 const normalToken = "normal-token-123";
 let openaiVendorId: number;
 let disabledModelId: number;

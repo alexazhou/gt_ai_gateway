@@ -4,8 +4,9 @@ import dbHelper from "../../helpers/dbHelper";
 import requestHelper from "../../helpers/requestHelper";
 import mockHelper from "../../helpers/mockHelper";
 import vendorFixtures from "../../fixtures/vendorFixtures";
+import userFixtures from "../../fixtures/userFixtures";
 
-const adminToken = "admin-token-123";
+const adminToken = userFixtures.ADMIN_TOKEN;
 let primaryVendorId: number;
 let secondaryVendorId: number;
 

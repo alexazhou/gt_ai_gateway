@@ -10,7 +10,7 @@ import userFixtures from "../../fixtures/userFixtures";
  * 主要验证并发请求不会导致后端报错（如数据库连接竞态条件）。
  */
 
-const ADMIN_TOKEN = userFixtures.USER_FIXTURES.admin.token;
+const ADMIN_TOKEN = userFixtures.ADMIN_TOKEN;
 
 describe("Concurrent Requests", () => {
     beforeAll(async () => {

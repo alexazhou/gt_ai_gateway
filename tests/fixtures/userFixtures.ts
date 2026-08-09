@@ -4,6 +4,9 @@ import { randomUUID } from "crypto";
  * User Test Data Fixtures
  */
 
+// 测试环境预设的管理员 Token（唯一来源，各处统一引用，避免重复定义导致不一致）
+const ADMIN_TOKEN = "admin-token-for-test";
+
 const USER_FIXTURES = {
     basic: {
         name: "Test User",
@@ -11,7 +14,7 @@ const USER_FIXTURES = {
     },
     admin: {
         name: "Admin User",
-        token: "admin-token-123",
+        token: ADMIN_TOKEN,
         type: "admin",
     },
     withCustomToken: {
@@ -47,4 +50,5 @@ function createRandomUser(name?: string, token?: string) {
 export default {
     USER_FIXTURES,
     createRandomUser,
+    ADMIN_TOKEN,
 };
