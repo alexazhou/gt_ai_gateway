@@ -4,8 +4,8 @@ import { inspect, InspectOptions } from "util";
 
 class SgRequestActivity extends Model {
     table = "request_activity";
-    // record_id 是主键，且与 record 只是逻辑关联（无外键）；created_at / updated_at 由 ORM 自动维护
-    primaryKey = "record_id";
+    // id 为自增主键；record_id 与 record 只是逻辑关联（无外键），建有唯一索引；created_at / updated_at 由 ORM 自动维护
+    id!: number;
 
     record_id!: number;
     activities!: string;

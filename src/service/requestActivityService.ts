@@ -20,7 +20,7 @@ async function append(
     level: ActivityLevel = ActivityLevel.INFO,
 ): Promise<void> {
     try {
-        const row = await SgRequestActivity.query().find(recordId);
+        const row = await SgRequestActivity.query().where("record_id", recordId).first();
         let activities: RequestActivityEntry[] = [];
         if (row) {
             try {
@@ -61,7 +61,7 @@ async function append(
 
 
 async function getByRecordId(recordId: number): Promise<RequestActivityEntry[]> {
-    const row = await SgRequestActivity.query().find(recordId);
+    const row = await SgRequestActivity.query().where("record_id", recordId).first();
     if (!row) {
         return [];
     }
