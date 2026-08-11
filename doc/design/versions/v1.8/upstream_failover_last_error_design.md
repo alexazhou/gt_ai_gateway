@@ -1,6 +1,6 @@
 # 失败重试耗尽时回传最后一个上游错误 — 设计文档
 
-> 状态：已按此方案实现（待提交）
+> 状态：已实现（v1.8）
 >
 > 涉及文件：`src/service/routingService/`（`core.ts`、`types.ts`、`routingContext.ts`、`routingStrategy/`）、`src/service/senderService.ts`、`tests/unit/service/routingService.test.ts`、`tests/unit/service/routingContext.test.ts`、`tests/api/model/model-routing.test.ts`
 >

@@ -1,6 +1,6 @@
 # 请求记录与活动日志重构 — 设计文档
 
-> 状态：设计中，尚未编码
+> 状态：已实现（v1.8）
 >
 > 关联：[upstream_failover_last_error_design.md](./upstream_failover_last_error_design.md)、[model_multi_upstream_routing_design.md](./model_multi_upstream_routing_design.md)
 
