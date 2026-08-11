@@ -15,8 +15,10 @@
 | **doc/OpenAiProtocol.md** | OpenAI 协议说明文档 |
 | **doc/AnthropicProtocol.md** | Anthropic 协议说明文档 |
 | **doc/StreamLogging.md** | 流式日志相关说明 |
-| **doc/design/Frontend_Product_Documentation.md** | 前端产品文档 |
-| **doc/design/Frontend_Roadmap.md** | 前端路线图 |
+| **doc/design/versions/版本文档规范.md** | 版本文档规范：版本管理、文档命名规范、新增版本流程 |
+| **doc/design/versions/ROADMAP.md** | 实施路线图，按发布版本（前两位）概述各版本里程碑能力 |
+| **doc/design/versions/v1.0/ … v1.8/** | 各版本开发文档（product 产品 / technical 技术 / tasks 任务） |
+| **doc/design/versions/_planning/** | 规划中的设计稿（尚未实施） |
 | **doc/tech/concurrent_request_fix.md** | 并发请求问题修复记录 |
 | **doc/tech/record_timestamp_serialization_fix.md** | 请求记录时间字段序列化修复说明 |
 | **doc/tech/release_process.md** | 新版本发布流程，包含版本号修改、提交流程、tag 和 push 步骤 |

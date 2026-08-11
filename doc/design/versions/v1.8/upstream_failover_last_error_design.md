@@ -4,7 +4,7 @@
 >
 > 涉及文件：`src/service/routingService/`（`core.ts`、`types.ts`、`routingContext.ts`、`routingStrategy/`）、`src/service/senderService.ts`、`tests/unit/service/routingService.test.ts`、`tests/unit/service/routingContext.test.ts`、`tests/api/model/model-routing.test.ts`
 >
-> 关联：`doc/design/model_multi_upstream_routing_design.md`
+> 关联：[model_multi_upstream_routing_design.md](./model_multi_upstream_routing_design.md)
 
 ## 1. 背景与问题
 

@@ -18,15 +18,10 @@
 | **doc/protocol/OpenAiResponsesProtocol.md** | OpenAI Responses API 协议说明文档 |
 | **doc/protocol/AnthropicProtocol.md** | Anthropic 协议说明文档 |
 | **doc/StreamLogging.md** | 流式日志相关说明 |
-| **doc/design/frontend/Frontend_Product_Documentation.md** | 前端产品文档总览 |
-| **doc/design/frontend/Frontend_Roadmap.md** | 前端路线图 |
-| **doc/design/frontend/v1/** | v1.0/v1.1 前端文档（产品、技术方案、任务清单） |
-| **doc/design/frontend/v2/** | v2.0/v2.1 前端文档（产品、技术方案、任务清单） |
-| **doc/design/frontend/v4_billing_product.md** | v4.0 计费管理前端产品文档 |
-| **doc/design/backend/v1_product.md** | v1.0/v1.1 后端产品文档 |
-| **doc/design/backend/v2_product.md** | v2.0/v2.1 后端产品文档 |
-| **doc/design/backend/v4_billing_product.md** | v4.0 计费管理后端产品文档 |
-| **doc/design/backend/v4_billing_technical.md** | v4.0 计费管理后端技术文档 |
+| **doc/design/versions/版本文档规范.md** | 版本文档规范：版本管理、文档命名规范、新增版本流程 |
+| **doc/design/versions/ROADMAP.md** | 实施路线图，按发布版本（前两位）概述各版本里程碑能力 |
+| **doc/design/versions/v1.0/ … v1.8/** | 各版本开发文档（product 产品 / technical 技术 / tasks 任务）与落地功能的专项设计，按实际发布版本组织 |
+| **doc/design/versions/_planning/** | 规划中的设计稿（如 service/manager 分层重构分析），尚未实施 |
 | **doc/tech/concurrent_request_fix.md** | 并发请求问题修复记录 |
 | **doc/tech/record_timestamp_serialization_fix.md** | 请求记录时间字段序列化修复说明 |
 | **doc/tech/release_process.md** | 新版本发布流程，包含版本号修改、提交流程、tag 和 push 步骤 |

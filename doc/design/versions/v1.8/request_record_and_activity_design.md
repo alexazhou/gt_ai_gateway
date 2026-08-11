@@ -2,7 +2,7 @@
 
 > 状态：设计中，尚未编码
 >
-> 关联：`doc/design/upstream_failover_last_error_design.md`、`doc/design/model_multi_upstream_routing_design.md`
+> 关联：[upstream_failover_last_error_design.md](./upstream_failover_last_error_design.md)、[model_multi_upstream_routing_design.md](./model_multi_upstream_routing_design.md)
 
 ## 1. 背景与问题
 
