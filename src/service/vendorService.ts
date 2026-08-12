@@ -65,6 +65,23 @@ async function updateVendor(
     return await SgVendor.query().find(vendorId);
 }
 
+/**
+ * 将 vendor 配置的 URL 归一化为 base（去掉协议特定路径后缀），
+ * 使前缀匹配对 base 与完整路径两种配置形态都生效
+ */
+function normalizeVendorUrlBase(url: string, protocol: ApiFormat): string {
+    if (protocol === ApiFormat.OPENAI || protocol === ApiFormat.RESPONSES) {
+        return url
+            .replace(/\/responses$/, "")
+            .replace(/\/chat\/completions$/, "")
+            .replace(/\/$/, "");
+    }
+    if (protocol === ApiFormat.ANTHROPIC) {
+        return url.replace(/\/v1\/messages$/, "").replace(/\/$/, "");
+    }
+    return url;
+}
+
 async function findVendorByUrl(gatewayUrl: string, protocol: ApiFormat): Promise<number | null> {
     if (!gatewayUrl) return null;
 
@@ -79,8 +96,11 @@ async function findVendorByUrl(gatewayUrl: string, protocol: ApiFormat): Promise
             vendorUrl = mergedUrls[protocol];
         }
 
-        if (vendorUrl && gatewayUrl.startsWith(vendorUrl)) {
-            return Number(vendor.id);
+        if (vendorUrl) {
+            const baseUrl = normalizeVendorUrlBase(vendorUrl, protocol);
+            if (gatewayUrl.startsWith(baseUrl)) {
+                return Number(vendor.id);
+            }
         }
     }
 
