@@ -14,7 +14,7 @@ export interface TestVendorResult {
     success: boolean;
     status?: number;
     duration?: number;
-    url: string;
+    url: string | null;
     converted_from?: string;
     converted_to?: string;
     proxy?: { type: string; url: string };
@@ -126,6 +126,18 @@ export async function testVendorConnectivity(
     try {
         requestBodyDisplay = JSON.parse(body);
     } catch {}
+
+    if (url === null) {
+        return {
+            success: false,
+            error: `vendor does not have url for ${requestFormat} format`,
+            url: null,
+            proxy: proxyInfo,
+            request_method: "POST",
+            request_headers: sanitizeHeaders(headers),
+            request_body: requestBodyDisplay,
+        };
+    }
 
     try {
         const proxyLog = proxyInfo ? ` via ${proxyInfo.type} proxy ${proxyInfo.url}` : "";

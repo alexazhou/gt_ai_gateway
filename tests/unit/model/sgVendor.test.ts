@@ -115,7 +115,7 @@ describe("SgVendor.getUrlByFormat — URL merge & resolution", () => {
 
             const url = v.getUrlByFormat(ApiFormat.OPENAI);
             expect(url).toBe("https://my-api.com/v1/chat/completions");
-            expect(url.match(/chat\/completions/g)).toHaveLength(1);
+            expect(url!.match(/chat\/completions/g)).toHaveLength(1);
         });
 
         it("appends /v1/messages to anthropic URL that lacks it", () => {
@@ -134,7 +134,7 @@ describe("SgVendor.getUrlByFormat — URL merge & resolution", () => {
 
             const url = v.getUrlByFormat(ApiFormat.ANTHROPIC);
             expect(url).toBe("https://my-api.com/v1/messages");
-            expect(url.match(/v1\/messages/g)).toHaveLength(1);
+            expect(url!.match(/v1\/messages/g)).toHaveLength(1);
         });
 
         it("strips trailing slash before appending path", () => {
@@ -166,31 +166,33 @@ describe("SgVendor.getUrlByFormat — URL merge & resolution", () => {
         });
     });
 
-    describe("error cases", () => {
-        it("throws when vendor type has no preset and no custom URL", () => {
+    describe("unresolvable URLs return null", () => {
+        it("returns null when vendor type has no preset and no custom URL", () => {
             const v = makeVendor("other");  // no custom URL, no preset
 
-            expect(() => v.getUrlByFormat(ApiFormat.OPENAI)).toThrow(
-                "vendor does not have url for openai format",
-            );
+            expect(v.getUrlByFormat(ApiFormat.OPENAI)).toBeNull();
         });
 
-        it("throws when requesting anthropic format for vendor with only openai URL", () => {
+        it("returns null when requesting anthropic format for vendor with only openai URL", () => {
             const v = makeVendor("other", {
                 openai: "https://my-api.com/v1/chat/completions",
             });
 
-            expect(() => v.getUrlByFormat(ApiFormat.ANTHROPIC)).toThrow(
-                "vendor does not have url for anthropic format",
-            );
+            expect(v.getUrlByFormat(ApiFormat.ANTHROPIC)).toBeNull();
         });
 
-        it("throws for google vendor requesting anthropic format", () => {
+        it("returns null for google vendor requesting anthropic format", () => {
             const v = makeVendor("google");  // google only has openai preset
 
-            expect(() => v.getUrlByFormat(ApiFormat.ANTHROPIC)).toThrow(
-                "vendor does not have url for anthropic format",
-            );
+            expect(v.getUrlByFormat(ApiFormat.ANTHROPIC)).toBeNull();
+        });
+
+        it("returns null when openai URL is non-standard and cannot derive a responses URL", () => {
+            const v = makeVendor("other", {
+                openai: "https://my-api.com/chat/completions/v2",
+            });
+
+            expect(v.getUrlByFormat(ApiFormat.RESPONSES)).toBeNull();
         });
     });
 

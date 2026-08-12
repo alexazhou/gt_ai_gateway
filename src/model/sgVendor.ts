@@ -3,7 +3,6 @@ import { CastsAttributes } from "sutando";
 import { inspect, InspectOptions } from "util";
 import { ApiFormat, VendorAuthMode } from "../constants";
 import vendorDefaultUrls from "../service/vendorDefaultUrls";
-import customError from "../util/customError";
 import urlUtil from "../util/urlUtil";
 
 
@@ -88,39 +87,42 @@ class SgVendor extends Model {
     /**
      * 根据 API 格式获取对应的 URL
      * @param format - API 格式（openai, anthropic, responses）
-     * @returns 完整的 URL 字符串
+     * @returns 完整的 URL 字符串；无法解析（缺 URL 或无法派生）时返回 null，由调用方处理
      */
-    getUrlByFormat(format: ApiFormat): string {
+    getUrlByFormat(format: ApiFormat): string | null {
         const urls = this.getMergedUrls();
-        let url: string | undefined;
 
         if (format === ApiFormat.RESPONSES) {
             // Responses 格式：优先使用 urls[RESPONSES]
-            if (urls[ApiFormat.RESPONSES]) {
-                url = urls[ApiFormat.RESPONSES];
-                return url.includes("/responses") ? url : url.replace(/\/$/, "") + "/responses";
+            const responsesUrl = urls[ApiFormat.RESPONSES];
+            if (responsesUrl) {
+                return responsesUrl.includes("/responses") ? responsesUrl : responsesUrl.replace(/\/$/, "") + "/responses";
             }
-            // 没有 urls[RESPONSES]，获取 OPENAI URL 并转换为 RESPONSES 格式
-            return urlUtil.convertOpenaiToResponses(this.getUrlByFormat(ApiFormat.OPENAI));
+            // 没有 urls[RESPONSES]，从 OPENAI URL 派生；非标准 openai URL 无法派生时返回 null
+            const openaiUrl = this.getUrlByFormat(ApiFormat.OPENAI);
+            if (openaiUrl === null) {
+                return null;
+            }
+            return urlUtil.convertOpenaiToResponses(openaiUrl);
         }
 
         if (format === ApiFormat.ANTHROPIC) {
             // Anthropic 格式：使用 urls[ANTHROPIC]
-            url = urls[ApiFormat.ANTHROPIC];
-            if (url) {
-                return url.includes("/v1/messages") ? url : url.replace(/\/$/, "") + "/v1/messages";
+            const anthropicUrl = urls[ApiFormat.ANTHROPIC];
+            if (anthropicUrl) {
+                return anthropicUrl.includes("/v1/messages") ? anthropicUrl : anthropicUrl.replace(/\/$/, "") + "/v1/messages";
             }
         }
 
         if (format === ApiFormat.OPENAI) {
             // OpenAI 格式：使用 urls[OPENAI]
-            url = urls[ApiFormat.OPENAI];
-            if (url) {
-                return url.includes("/chat/completions") ? url : url.replace(/\/$/, "") + "/chat/completions";
+            const openaiUrl = urls[ApiFormat.OPENAI];
+            if (openaiUrl) {
+                return openaiUrl.includes("/chat/completions") ? openaiUrl : openaiUrl.replace(/\/$/, "") + "/chat/completions";
             }
         }
 
-        throw new customError.AppError(`vendor does not have url for ${format} format`, 400);
+        return null;
     }
 
     /**

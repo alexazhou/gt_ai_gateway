@@ -123,6 +123,9 @@ function isLlmModel(modelId: string): boolean {
  */
 export async function fetchUpstreamModels(vendor: SgVendor): Promise<string[]> {
     const openaiUrl = vendor.getUrlByFormat(ApiFormat.OPENAI);
+    if (openaiUrl === null) {
+        throw new customError.AppError("vendor does not have url for openai format", 400);
+    }
     const baseUrl = openaiUrl.replace(/\/chat\/completions$/, "");
     const modelsUrl = `${baseUrl}/models`;
 

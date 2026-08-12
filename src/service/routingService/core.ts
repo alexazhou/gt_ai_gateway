@@ -137,7 +137,10 @@ async function resolveAvailableCandidates(
         try {
             supportedFormats = vendorModel?.getSupportedFormats() ?? vendor.getSupportedFormats();
             upstreamFormat = protocolUtils.resolveUpstreamFormat(clientFormat, supportedFormats);
-            vendor.getUrlByFormat(upstreamFormat);
+            // 解析不出该格式的 URL（缺 URL 或无法派生）时，该候选不可用
+            if (vendor.getUrlByFormat(upstreamFormat) === null) {
+                continue;
+            }
         } catch {
             continue;
         }

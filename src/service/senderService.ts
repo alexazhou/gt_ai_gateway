@@ -56,6 +56,9 @@ async function sendRequestToUpstream(
     const needsConversion = clientFormat !== upstreamFormat;
 
     const url = vendor.getUrlByFormat(upstreamFormat);
+    if (url === null) {
+        throw new customError.AppError(`vendor does not have url for ${upstreamFormat} format`, 400);
+    }
 
     console.log("sendRequestToUpstream: modelConfig={}, clientFormat={}, upstreamFormat={}", modelConfig, clientFormat, upstreamFormat);
 
