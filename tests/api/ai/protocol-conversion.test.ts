@@ -299,7 +299,10 @@ describe("AI Protocol Conversion API", () => {
             adminToken,
         );
 
-        // 2. Create a vendor_model with allowed_formats = ["openai"] only
+        // 2. Create a vendor_model with allowed_formats = ["anthropic"] only
+        // 用 anthropic 是因为 fallback 优先级为 Responses -> [OpenAI, Anthropic]，
+        // 若 allowed_formats 未生效（bug）会回退 vendor 的 [openai, anthropic] 并选中
+        // OpenAI（优先级更高），与期望的 anthropic 不同，测试仍能区分
         const vendorModelResponse = await requestHelper.post(
             `/vendor/${dualFormatVendor.body.id}/model/add.json`,
             { model_id: "restricted-model" },
@@ -307,7 +310,7 @@ describe("AI Protocol Conversion API", () => {
         );
         await requestHelper.put(
             `/vendor/${dualFormatVendor.body.id}/model/${vendorModelResponse.body.id}.json`,
-            { allowed_formats: ["openai"] },
+            { allowed_formats: ["anthropic"] },
             adminToken,
         );
 
@@ -321,11 +324,11 @@ describe("AI Protocol Conversion API", () => {
         );
 
         // 4. Send a Responses format request
-        // According to the fallback priority: Responses -> [Anthropic, OpenAI]
-        // If vendor_model's allowed_formats is properly used, it should pick OpenAI
-        // (because allowed_formats = ["openai"])
+        // According to the fallback priority: Responses -> [OpenAI, Anthropic]
+        // If vendor_model's allowed_formats is properly used, it should pick Anthropic
+        // (because allowed_formats = ["anthropic"])
         // If NOT properly used (bug), it falls back to vendor's full format list
-        // and picks Anthropic first (higher priority in fallback list)
+        // and picks OpenAI (first in the fallback priority list)
         const responsesRequest = mockHelper.generateOpenAIChatRequest({
             model: autoModelName,
             stream: false,
@@ -352,8 +355,63 @@ describe("AI Protocol Conversion API", () => {
         const recordsResponse = await requestHelper.get("/record/latest.json?limit=1", adminToken);
         const record = recordsResponse.body[0];
 
-        // The upstream_format should be "openai" (from vendor_model's allowed_formats)
-        // NOT "anthropic" (which would be chosen from vendor's full format list)
+        // The upstream_format should be "anthropic" (from vendor_model's allowed_formats)
+        // NOT "openai" (which would be chosen from vendor's full format list)
+        expect(record.upstream_format).toBe("anthropic");
+    }, 30000);
+
+
+    it("routes a Responses client to OpenAI upstream (not Anthropic) when the vendor supports openai+anthropic but not responses", async () => {
+        // 复现用户反馈场景：vendor 只配了 openai（base URL，不含 /chat/completions，不派生 responses）
+        // + anthropic，未配 responses；模型为空 allowed_formats（自动上游），回退 vendor 能力 [openai, anthropic]
+        const mockBaseUrl = config.UPSTREAM_CONFIG.mock.url;
+        const vendorResponse = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                type: "other",
+                name: "Mock Responses Priority Vendor",
+                token: "responses-priority-token",
+                urls: {
+                    openai: `${mockBaseUrl}/v1`,
+                    anthropic: `${mockBaseUrl}/messages`,
+                },
+            },
+            adminToken,
+        );
+
+        const modelName = `responses-priority-model-${Date.now()}`;
+        const modelResponse = await requestHelper.post(
+            "/model/create.json",
+            modelFixtures.createRandomModel(vendorResponse.body.id, modelName),
+            adminToken,
+        );
+
+        // responses 客户端请求（无 reasoning 配置，转换到 openai 后不引入额外参数）
+        const response = await requestHelper.post(
+            "/llm/v1/responses",
+            {
+                model: modelName,
+                input: [
+                    {
+                        type: "message",
+                        role: "user",
+                        content: [{ type: "input_text", text: "Hello" }],
+                    },
+                ],
+                stream: false,
+            },
+            testUserToken,
+        );
+        expect(response.status).toBe(200);
+        expect(response.body.object).toBe("response");
+
+        // 修复后：responses 客户端回退时优先选 openai（reasoning 映射为 reasoning_effort），
+        // 而不是 anthropic；若优先级回退会选中 anthropic，此断言即失败
+        const recordsResponse = await requestHelper.get(
+            `/record/list.json?model_ids=${modelResponse.body.id}`,
+            adminToken,
+        );
+        const record = recordsResponse.body.list[0];
         expect(record.upstream_format).toBe("openai");
     }, 30000);
 });

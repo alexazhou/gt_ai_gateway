@@ -131,9 +131,19 @@ class SgVendor extends Model {
         const urls = this.getMergedUrls();
         const formats: ApiFormat[] = [];
 
-        if (urls[ApiFormat.OPENAI]) formats.push(ApiFormat.OPENAI);
+        if (urls[ApiFormat.OPENAI]) {
+            formats.push(ApiFormat.OPENAI);
+            // responses 可从 openai URL 自动派生，但仅当 openai 地址为标准
+            // /chat/completions 结尾（与 convertOpenaiToResponses 口径一致）时才计入支持
+            if (/\/chat\/completions$/.test(urls[ApiFormat.OPENAI])) {
+                formats.push(ApiFormat.RESPONSES);
+            }
+        }
         if (urls[ApiFormat.ANTHROPIC]) formats.push(ApiFormat.ANTHROPIC);
-        if (urls[ApiFormat.RESPONSES]) formats.push(ApiFormat.RESPONSES);
+        // 显式配置的 responses 始终支持；但派生分支可能已计入，避免重复 push
+        if (urls[ApiFormat.RESPONSES] && !formats.includes(ApiFormat.RESPONSES)) {
+            formats.push(ApiFormat.RESPONSES);
+        }
 
         return formats;
     }

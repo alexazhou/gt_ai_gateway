@@ -21,7 +21,9 @@ export function resolveUpstreamFormat(
     const supportedAlternativeFormats: Partial<Record<ApiFormat, ApiFormat[]>> = {
         [ApiFormat.OPENAI]: [ApiFormat.ANTHROPIC],
         [ApiFormat.ANTHROPIC]: [ApiFormat.OPENAI, ApiFormat.RESPONSES],
-        [ApiFormat.RESPONSES]: [ApiFormat.ANTHROPIC, ApiFormat.OPENAI],
+        // RESPONSES 客户端回退优先 OPENAI：Responses 为 OpenAI 原生协议，
+        // 转 openai 更贴近原始请求语义（reasoning 映射为 reasoning_effort）
+        [ApiFormat.RESPONSES]: [ApiFormat.OPENAI, ApiFormat.ANTHROPIC],
     };
 
     for (const fmt of supportedAlternativeFormats[clientFormat] ?? []) {

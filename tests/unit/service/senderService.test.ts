@@ -54,13 +54,24 @@ describe("resolveUpstreamFormat", () => {
         expect(upstreamFormat).toBe(ApiFormat.OPENAI);
     });
 
-    it("converts Responses to ANTHROPIC when vendor supports ANTHROPIC", () => {
+    it("converts Responses to ANTHROPIC when vendor only supports ANTHROPIC", () => {
         const upstreamFormat = protocolUtils.resolveUpstreamFormat(
             ApiFormat.RESPONSES,
             [ApiFormat.ANTHROPIC],
         );
 
         expect(upstreamFormat).toBe(ApiFormat.ANTHROPIC);
+    });
+
+    it("prefers OPENAI over ANTHROPIC when converting Responses to a fallback", () => {
+        // Responses 为 OpenAI 原生协议，回退时转 openai 更贴近原始请求语义
+        // （reasoning 映射为 reasoning_effort）
+        const upstreamFormat = protocolUtils.resolveUpstreamFormat(
+            ApiFormat.RESPONSES,
+            [ApiFormat.OPENAI, ApiFormat.ANTHROPIC],
+        );
+
+        expect(upstreamFormat).toBe(ApiFormat.OPENAI);
     });
 
     it("converts ANTHROPIC to OPENAI when vendor only supports OPENAI", () => {

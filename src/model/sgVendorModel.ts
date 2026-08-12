@@ -20,7 +20,9 @@ class SgVendorModel extends Model {
 
     /**
      * 获取当前 vendorModel 支持的格式列表
-     * @returns 支持的格式数组，未配置时返回 null 表示无限制
+     * 语义：allowed_formats 为 null/空时表示未指定，路由层回退到 vendor 按 URL 自动判断；
+     *       非空时作为硬限制白名单，只允许列表内的格式。
+     * @returns 支持的格式数组，未配置时返回 null
      */
     getSupportedFormats(): ApiFormat[] | null {
         return this.getAllowedFormats();

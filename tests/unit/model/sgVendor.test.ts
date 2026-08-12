@@ -264,6 +264,32 @@ describe("SgVendor.getUrlByFormat — URL merge & resolution", () => {
             const v = makeVendor("other");
             expect(v.getSupportedFormats()).toEqual([]);
         });
+
+        it("derives responses from a /chat/completions openai URL", () => {
+            const v = makeVendor("other", { openai: "https://a.com/v1/chat/completions" });
+            expect(v.getSupportedFormats()).toEqual([ApiFormat.OPENAI, ApiFormat.RESPONSES]);
+        });
+
+        it("does not derive responses from a base openai URL without /chat/completions", () => {
+            const v = makeVendor("other", { openai: "https://a.com/v1" });
+            expect(v.getSupportedFormats()).toEqual([ApiFormat.OPENAI]);
+        });
+
+        it("always supports responses when explicitly configured, regardless of openai URL shape", () => {
+            const v = makeVendor("other", {
+                openai: "https://a.com/v1",
+                responses: "https://a.com/v1/responses",
+            });
+            expect(v.getSupportedFormats()).toEqual([ApiFormat.OPENAI, ApiFormat.RESPONSES]);
+        });
+
+        it("does not duplicate responses when derived and explicitly configured", () => {
+            const v = makeVendor("other", {
+                openai: "https://a.com/v1/chat/completions",
+                responses: "https://a.com/v1/responses",
+            });
+            expect(v.getSupportedFormats()).toEqual([ApiFormat.OPENAI, ApiFormat.RESPONSES]);
+        });
     });
 
     describe("config (SgVendorConfig cast)", () => {
