@@ -1,10 +1,10 @@
 import { Context } from "hono";
 import ormService from "../service/ormService";
 import configService from "../service/configService";
-import { SgUser } from "../model/sgUser";
-import { SgVendor } from "../model/sgVendor";
-import { SgModel } from "../model/sgModel";
-import { SgRecord } from "../model/sgRecord";
+import userManager from "../manager/userManager";
+import vendorManager from "../manager/vendorManager";
+import modelManager from "../manager/modelManager";
+import recordManager from "../manager/recordManager";
 import packageJson from "../../package.json";
 import hostService from "../service/hostService";
 import { RunMode, ConfigKey } from "../constants";
@@ -90,10 +90,10 @@ function welcome(c: Context) {
 
 async function status(c: Context) {
     try {
-        const userCount = Number(await SgUser.query().count() || 0);
-        const vendorCount = Number(await SgVendor.query().count() || 0);
-        const modelCount = Number(await SgModel.query().count() || 0);
-        const recordCount = Number(await SgRecord.query().count() || 0);
+        const userCount = await userManager.count();
+        const vendorCount = await vendorManager.count();
+        const modelCount = await modelManager.count();
+        const recordCount = await recordManager.count();
 
         const startTime = getInstanceStartTime();
 

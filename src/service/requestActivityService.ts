@@ -1,5 +1,5 @@
-import { SgRequestActivity } from "../model/sgRequestActivity";
 import { RequestActivityStage, ActivityLevel } from "../constants";
+import requestActivityManager from "../manager/requestActivityManager";
 
 
 export interface RequestActivityEntry {
@@ -20,7 +20,7 @@ async function append(
     level: ActivityLevel = ActivityLevel.INFO,
 ): Promise<void> {
     try {
-        const row = await SgRequestActivity.query().where("record_id", recordId).first();
+        const row = await requestActivityManager.findByRecordId(recordId);
         let activities: RequestActivityEntry[] = [];
         if (row) {
             try {
@@ -44,14 +44,9 @@ async function append(
 
         // created_at / updated_at 由 ORM 自动维护（与其他模型一致）
         if (row) {
-            await SgRequestActivity.query().where("record_id", recordId).update({
-                activities: activitiesJson,
-            });
+            await requestActivityManager.updateActivities(recordId, activitiesJson);
         } else {
-            await SgRequestActivity.query().create({
-                record_id: recordId,
-                activities: activitiesJson,
-            });
+            await requestActivityManager.createActivity(recordId, activitiesJson);
         }
     } catch (e) {
         // 活动日志写入必须是 best-effort：失败绝不能导致请求失败
@@ -61,7 +56,7 @@ async function append(
 
 
 async function getByRecordId(recordId: number): Promise<RequestActivityEntry[]> {
-    const row = await SgRequestActivity.query().where("record_id", recordId).first();
+    const row = await requestActivityManager.findByRecordId(recordId);
     if (!row) {
         return [];
     }

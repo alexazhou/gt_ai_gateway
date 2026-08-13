@@ -1,6 +1,6 @@
 import { Context } from "hono";
-import { SgRecord } from "../model/sgRecord";
 import { SgRecordStatus } from "../constants";
+import recordManager from "../manager/recordManager";
 import ormService from "../service/ormService";
 import { parsePaginationQuery } from "../util/pagination";
 
@@ -57,10 +57,7 @@ async function recentRecords(c: Context) {
     const query = c.req.query();
     const { pageSize } = parsePaginationQuery(query, 10);
 
-    const records = await SgRecord.query()
-        .orderBy('id', 'desc')
-        .limit(pageSize)
-        .get();
+    const records = await recordManager.recent(pageSize);
 
     // 简化返回数据
     const simplified = records.map(r => ({

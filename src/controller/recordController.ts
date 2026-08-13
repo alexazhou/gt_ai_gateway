@@ -1,5 +1,6 @@
 import { Context } from "hono";
-import { SgRecord, RECORD_SUMMARY_COLUMNS } from "../model/sgRecord";
+import { SgRecord } from "../model/sgRecord";
+import recordManager from "../manager/recordManager";
 import recordService from "../service/recordService";
 import { parsePaginationQuery } from "../util/pagination";
 
@@ -35,26 +36,16 @@ async function listRecords(c: Context) {
     const userIds = query.user_ids ? query.user_ids.split(",").map(Number).filter(Boolean) : null;
     const modelIds = query.model_ids ? query.model_ids.split(",").map(Number).filter(Boolean) : null;
 
-    const q = SgRecord.query();
-
-    if (status) {
-        q.where("status", status);
-    }
-    if (start_time) {
-        q.where("created_at", ">=", start_time);
-    }
-    if (end_time) {
-        q.where("created_at", "<=", end_time);
-    }
-    if (userIds && userIds.length > 0) {
-        q.whereIn("user_id", userIds);
-    }
-    if (modelIds && modelIds.length > 0) {
-        q.whereIn("model_id", modelIds);
-    }
-
-    const total = Number(await q.clone().count() || 0);
-    const records = await q.select(RECORD_SUMMARY_COLUMNS).orderBy("id", "desc").limit(pageSize).offset(offset).get();
+    const { list: records, total } = await recordManager.list({
+        status,
+        startTime: start_time,
+        endTime: end_time,
+        userIds,
+        modelIds,
+        pageSize,
+        offset,
+        summaryOnly: true,
+    });
 
     return c.json({
         list: records.map(serializeRecord),
@@ -78,7 +69,7 @@ async function getRecord(c: Context) {
         return c.json({ error: "Invalid ID format" }, 400);
     }
 
-    const record = await SgRecord.query().find(recordId);
+    const record = await recordManager.findById(recordId);
 
     if (!record) {
         return c.json({ error: "Record not found" }, 404);
@@ -95,12 +86,11 @@ async function deleteRecord(c: Context) {
         return c.json({ error: "Invalid ID" }, 400);
     }
 
-    const record = await SgRecord.query().find(id);
-    if (!record) {
+    const deleted = await recordManager.deleteById(id);
+    if (!deleted) {
         return c.json({ error: "Record not found" }, 404);
     }
 
-    await SgRecord.query().where("id", id).delete();
     return c.json({ success: true });
 }
 
@@ -110,8 +100,8 @@ async function clearPayload(c: Context) {
 }
 
 async function clearAll(c: Context) {
-    const count = Number(await SgRecord.query().count() || 0);
-    await SgRecord.query().delete();
+    const count = await recordManager.count();
+    await recordManager.deleteAll();
     return c.json({ success: true, deleted: count });
 }
 

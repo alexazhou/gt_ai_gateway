@@ -36,8 +36,7 @@ describe("Frontend-Backend API Coexistence", () => {
             type: "other",
             name: "Test Vendor",
             token: "test-token",
-            url: "http://localhost:9999",
-            api_format: "openai",
+            urls: { openai: "http://localhost:9999" },
         };
 
         const response = await requestHelper.post(

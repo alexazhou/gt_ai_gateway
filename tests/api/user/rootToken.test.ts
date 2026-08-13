@@ -128,9 +128,8 @@ describe("Root Token Tests", () => {
                 {
                     name: "Test Vendor",
                     type: "other",
-                    url: "http://localhost:9999/chat/completions",
+                    urls: { openai: "http://localhost:9999/chat/completions" },
                     token: "test-vendor-token",
-                    api_format: "openai",
                 },
                 ROOT_TOKEN,
             );
@@ -164,9 +163,8 @@ describe("Root Token Tests", () => {
                     {
                         name: "Another Vendor",
                         type: "other",
-                        url: "http://localhost:9999/chat/completions",
+                        urls: { openai: "http://localhost:9999/chat/completions" },
                         token: "another-vendor-token",
-                        api_format: "openai",
                     },
                     ROOT_TOKEN,
                 );

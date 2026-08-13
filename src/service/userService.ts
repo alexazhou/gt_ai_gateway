@@ -1,6 +1,7 @@
 import { SgUser } from "../model/sgUser";
 import { ROOT_USER_ID, UserType, BALANCE_SCALE } from "../constants";
-import { SgRechargeRecord } from "../model/sgRechargeRecord";
+import userManager from "../manager/userManager";
+import rechargeRecordManager from "../manager/rechargeRecordManager";
 import customError from "../util/customError";
 
 // 元 → 整数微元（DB 余额存整数微元，避免浮点）
@@ -15,13 +16,6 @@ function isRootToken(token: string, rootToken?: string): boolean {
     return token === rootToken;
 }
 
-async function getUser(token: string): Promise<SgUser | null> {
-    console.log("getUser", token);
-    if (token == null) return null;
-
-    return await SgUser.query().where("token", token).first();
-}
-
 async function getUserByToken(token: string, rootToken?: string): Promise<SgUser | null> {
     if (isRootToken(token, rootToken)) {
         const user = new SgUser();
@@ -33,7 +27,7 @@ async function getUserByToken(token: string, rootToken?: string): Promise<SgUser
         return user;
     }
 
-    return await getUser(token);
+    return await userManager.findByToken(token);
 }
 
 async function adjustBalance(
@@ -43,7 +37,7 @@ async function adjustBalance(
     remark: string | null = null,
     operator: string | null = null,
 ): Promise<SgUser> {
-    const user = await SgUser.query().find(userId);
+    const user = await userManager.findById(userId);
     if (!user) {
         throw new customError.NotFoundError("User not found");
     }
@@ -55,10 +49,15 @@ async function adjustBalance(
         throw new customError.AppError("Insufficient balance", 400);
     }
 
-    await user.update({ balance: newBalance });
+    // 两步写操作（扣/加余额 + 写充值记录）分属 userManager.updateBalance 与
+    // rechargeRecordManager.create，非原子（见 service_manager_split_design §6 方案 C）：
+    // Worker 模式下 D1 不支持多语句事务（ormService 已绕过连接池），故维持原行为、
+    // 不做事务包裹，仅把查询部分（findById）下沉到 manager。充值记录写入失败时
+    // 余额已更新但不留记录，与拆分前行为一致。
+    await userManager.updateBalance(userId, newBalance);
 
     // Create recharge record（amount 仍以"元"记录）
-    await SgRechargeRecord.query().create({
+    await rechargeRecordManager.create({
         user_id: userId,
         amount: amount,
         type: type,
@@ -66,11 +65,12 @@ async function adjustBalance(
         operator: operator,
     });
 
-    return user;
+    // 返回更新后的用户（updateBalance 走 query-builder，不回写内存实例，需重新读取）
+    return (await userManager.findById(userId))!;
 }
 
 async function deductBalance(userId: number, amount: number): Promise<void> {
-    const user = await SgUser.query().find(userId);
+    const user = await userManager.findById(userId);
     if (!user) {
         throw new customError.NotFoundError("User not found");
     }
@@ -78,11 +78,11 @@ async function deductBalance(userId: number, amount: number): Promise<void> {
     // 允许余额为负（透支）：请求完成时正常扣减，余额不足的拦截在请求发起前由预检负责
     // 扣费 amount 为元，换算成整数微元做整数减法；余额本就是整数微元，无浮点漂移
     const amountUnits = toUnits(amount);
-    await user.update({ balance: user.balance - amountUnits });
+    await userManager.updateBalance(userId, user.balance - amountUnits);
 }
 
 async function checkBalance(userId: number, requiredAmount: number): Promise<boolean> {
-    const user = await SgUser.query().find(userId);
+    const user = await userManager.findById(userId);
     if (!user) {
         return false;
     }
@@ -91,7 +91,6 @@ async function checkBalance(userId: number, requiredAmount: number): Promise<boo
 }
 
 export default {
-    getUser,
     isRootToken,
     getUserByToken,
     adjustBalance,

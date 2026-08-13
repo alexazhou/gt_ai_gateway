@@ -1,4 +1,4 @@
-import { SgUser } from "../../model/sgUser";
+import userManager from "../../manager/userManager";
 import type { ConfigAdapter, FileSystemApi, GatewayUserInfo, AdapterConfigStatus } from "./types";
 import fsUtil from "../../util/fsUtil";
 
@@ -28,9 +28,9 @@ async function findGatewayUserByToken(token: string): Promise<GatewayUserInfo | 
     }
 
     const normalizedToken = token.replace(/^Bearer\s+/i, "");
-    let user: SgUser | null = null;
+    let user;
     try {
-        user = await SgUser.query().where("token", normalizedToken).first();
+        user = await userManager.findByToken(normalizedToken);
     } catch {
         return null;
     }

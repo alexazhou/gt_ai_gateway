@@ -57,9 +57,8 @@ describe("Auth API Tests", () => {
             {
                 name: "Test Vendor",
                 type: "other",
-                url: "http://localhost:9999/chat/completions",
+                urls: { openai: "http://localhost:9999/chat/completions" },
                 token: "test-vendor-token",
-                api_format: "openai",
             },
             adminToken,
         );
@@ -79,9 +78,8 @@ describe("Auth API Tests", () => {
             {
                 name: "Test Anthropic Vendor",
                 type: "other",
-                url: "http://localhost:9999/messages",
+                urls: { anthropic: "http://localhost:9999/messages" },
                 token: "test-anthropic-token",
-                api_format: "anthropic",
             },
             adminToken,
         );
@@ -182,9 +180,8 @@ describe("Auth API Tests", () => {
                     {
                         name: "New Vendor",
                         type: "other",
-                        url: "http://localhost:9999/chat/completions",
+                        urls: { openai: "http://localhost:9999/chat/completions" },
                         token: "test-vendor-token",
-                        api_format: "openai",
                     },
                 );
 
@@ -197,9 +194,8 @@ describe("Auth API Tests", () => {
                     {
                         name: "New Vendor",
                         type: "other",
-                        url: "http://localhost:9999/chat/completions",
+                        urls: { openai: "http://localhost:9999/chat/completions" },
                         token: "test-vendor-token",
-                        api_format: "openai",
                     },
                     normalToken,
                 );
@@ -213,9 +209,8 @@ describe("Auth API Tests", () => {
                     {
                         name: "New Vendor",
                         type: "other",
-                        url: "http://localhost:9999/chat/completions",
+                        urls: { openai: "http://localhost:9999/chat/completions" },
                         token: "test-vendor-token",
-                        api_format: "openai",
                     },
                     adminToken,
                 );

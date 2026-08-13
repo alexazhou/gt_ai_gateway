@@ -73,6 +73,15 @@ class SgVendor extends Model {
     created_at!: Date;
     updated_at!: Date;
 
+    constructor(attributes: Record<string, unknown> = {}) {
+        super();
+        this.fill({
+            urls: {},
+            config: new SgVendorConfig(),
+            ...attributes,
+        });
+    }
+
     /**
      * Merge preset URLs and DB-stored custom URLs.
      * Custom URLs override presets with the same format key.
