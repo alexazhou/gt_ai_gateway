@@ -27,13 +27,32 @@ interface AnthropicMessageResponse {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 async function parseErrorResponse(response: Response): Promise<unknown> {
-    return response.json().catch(() => undefined);
+    // 优先解析 JSON；若响应体不是 JSON（如 text/plain 或 HTML），回退读取文本内容
+    try {
+        const text = await response.text();
+        if (!text) return undefined;
+        try {
+            return JSON.parse(text);
+        } catch {
+            return text;
+        }
+    } catch {
+        return undefined;
+    }
 }
 
 async function ensureOk(response: Response, fallback: string = '请求失败'): Promise<void> {
     if (!response.ok) {
         throw createHttpError(response.status, await parseErrorResponse(response), fallback);
     }
+}
+
+/**
+ * 构建 HTTP 错误的兜底提示：优先透出响应体中的具体错误；
+ * 当响应体为空或无法解析时，补充说明以避免只显示状态码。
+ */
+function httpErrorFallback(status: number): string {
+    return `HTTP ${status}（无错误详情）`;
 }
 
 /**
@@ -68,7 +87,7 @@ export async function chatCompletions(
             });
 
             if (!response.ok) {
-                throw createHttpError(response.status, await parseErrorResponse(response), `HTTP ${response.status}`);
+                throw createHttpError(response.status, await parseErrorResponse(response), httpErrorFallback(response.status));
             }
 
             const result = await response.json() as ChatCompletionResponse;
@@ -94,7 +113,7 @@ export async function chatCompletions(
             },
             body: JSON.stringify(requestBody),
             async onopen(response) {
-                await ensureOk(response, `HTTP ${response.status}`);
+                await ensureOk(response, httpErrorFallback(response.status));
                 return Promise.resolve();
             },
             onmessage(msg) {
@@ -171,7 +190,7 @@ export async function anthropicMessages(
             });
 
             if (!response.ok) {
-                throw createHttpError(response.status, await parseErrorResponse(response), `HTTP ${response.status}`);
+                throw createHttpError(response.status, await parseErrorResponse(response), httpErrorFallback(response.status));
             }
 
             const result = await response.json() as AnthropicMessageResponse;
@@ -197,7 +216,7 @@ export async function anthropicMessages(
             },
             body: JSON.stringify(requestBody),
             async onopen(response) {
-                await ensureOk(response, `HTTP ${response.status}`);
+                await ensureOk(response, httpErrorFallback(response.status));
                 return Promise.resolve();
             },
             onmessage(msg) {

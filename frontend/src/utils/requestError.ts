@@ -20,10 +20,11 @@ export class AppRequestError extends Error {
     }
 }
 
-function getObjectValue(record: Record<string, unknown>, key: string): unknown {
-    return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
-}
-
+/**
+ * 从后端返回的错误响应中提取展示内容。
+ * 策略保持简单直接：字符串原样返回，JSON 对象直接序列化展示，
+ * 确保页面能看到上游返回的具体错误内容，而不是只显示 HTTP 状态码。
+ */
 export function extractErrorMessage(data: unknown, fallback: string = '请求失败'): string {
     if (typeof data === 'string' && data.trim()) {
         return data;
@@ -33,23 +34,13 @@ export function extractErrorMessage(data: unknown, fallback: string = '请求失
         return fallback;
     }
 
-    const record = data as Record<string, unknown>;
-    const errorValue = getObjectValue(record, 'error');
-    const messageValue = getObjectValue(record, 'message');
-
-    if (typeof errorValue === 'string' && errorValue.trim()) {
-        return errorValue;
-    }
-
-    if (typeof errorValue === 'object' && errorValue !== null) {
-        const nestedMessage = getObjectValue(errorValue as Record<string, unknown>, 'message');
-        if (typeof nestedMessage === 'string' && nestedMessage.trim()) {
-            return nestedMessage;
+    try {
+        const serialized = JSON.stringify(data, null, 2);
+        if (serialized) {
+            return serialized;
         }
-    }
-
-    if (typeof messageValue === 'string' && messageValue.trim()) {
-        return messageValue;
+    } catch {
+        // 忽略序列化错误，继续走 fallback
     }
 
     return fallback;
