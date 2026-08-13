@@ -75,6 +75,11 @@ describe("normalizeBytes", () => {
         expect(normalizeBytes({ type: "Buffer", data: [1, 2, 3] })).toEqual(new Uint8Array([1, 2, 3]));
     });
 
+    it("ignores serialized object with non-Buffer type", () => {
+        // type !== "Buffer" 时跳过 Buffer 反序列化分支，继续走后续分支并最终抛错
+        expect(() => normalizeBytes({ type: "NotBuffer", data: [1, 2, 3] })).toThrow();
+    });
+
     it("handles duck-typed buffer-like object", () => {
         const buf = new ArrayBuffer(2);
         expect(normalizeBytes({ buffer: buf, byteOffset: 0, byteLength: 2 })).toEqual(new Uint8Array(2));

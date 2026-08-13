@@ -14,6 +14,9 @@ describe("requestActivityManager (node, real db)", () => {
     });
 
     it("createActivity + findByRecordId + updateActivities", async () => {
+        // 不存在的 record_id 返回 null
+        expect(await requestActivityManager.findByRecordId(99999)).toBeNull();
+
         await requestActivityManager.createActivity(1, "[]");
 
         const row = await requestActivityManager.findByRecordId(1);

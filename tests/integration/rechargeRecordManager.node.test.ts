@@ -50,4 +50,16 @@ describe("rechargeRecordManager (node, real db)", () => {
         expect(recharge.total).toBe(1);
         expect(recharge.list[0].amount).toBe(10);
     });
+
+    it("listRechargeRecords with empty query returns all records", async () => {
+        const user1 = await createTestUser();
+        const user2 = await createTestUser();
+        await rechargeRecordManager.create({ user_id: user1.id, amount: 10, type: "recharge" });
+        await rechargeRecordManager.create({ user_id: user2.id, amount: -5, type: "adjustment" });
+
+        // 不传任何过滤条件：user_id / type 分支均跳过，返回全部
+        const { list, total } = await rechargeRecordManager.listRechargeRecords({});
+        expect(total).toBe(2);
+        expect(list.length).toBe(2);
+    });
 });

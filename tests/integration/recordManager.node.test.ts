@@ -129,6 +129,9 @@ describe("recordManager (node, real db)", () => {
         expect((await recordManager.list({ userIds: [999999], pageSize: 10, offset: 0 })).total).toBe(0);
         expect((await recordManager.list({ modelIds: [model.id], pageSize: 10, offset: 0 })).total).toBe(1);
         expect((await recordManager.list({ modelIds: [999999], pageSize: 10, offset: 0 })).total).toBe(0);
+        // 空数组：跳过 whereIn 过滤，返回全部
+        expect((await recordManager.list({ userIds: [], pageSize: 10, offset: 0 })).total).toBe(1);
+        expect((await recordManager.list({ modelIds: [], pageSize: 10, offset: 0 })).total).toBe(1);
     });
 
     it("list with summaryOnly + recent + deleteAll", async () => {
