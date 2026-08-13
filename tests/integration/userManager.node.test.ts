@@ -85,4 +85,11 @@ describe("userManager (node, real db)", () => {
         await createUser();
         expect(await userManager.count()).toBe(1);
     });
+
+    it("list on empty table returns total 0", async () => {
+        // 空表：count() 返回 0，走 `|| 0` 兜底分支
+        const { list, total } = await userManager.list({ pageSize: 10, offset: 0 });
+        expect(total).toBe(0);
+        expect(list.length).toBe(0);
+    });
 });

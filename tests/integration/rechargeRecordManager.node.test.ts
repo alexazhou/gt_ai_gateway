@@ -62,4 +62,11 @@ describe("rechargeRecordManager (node, real db)", () => {
         expect(total).toBe(2);
         expect(list.length).toBe(2);
     });
+
+    it("listRechargeRecords on empty table returns total 0", async () => {
+        // 空表：count() 返回 0，走 `|| 0` 兜底分支
+        const { list, total } = await rechargeRecordManager.listRechargeRecords({});
+        expect(total).toBe(0);
+        expect(list.length).toBe(0);
+    });
 });

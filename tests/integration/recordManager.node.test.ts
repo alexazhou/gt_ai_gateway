@@ -96,6 +96,12 @@ describe("recordManager (node, real db)", () => {
         expect(rows.length).toBe(1);
     });
 
+    it("latest without summaryOnly uses full columns", async () => {
+        await createRecord();
+        const rows = await recordManager.latest(10);
+        expect(rows.length).toBe(1);
+    });
+
     it("list filters by status / time / userIds / modelIds", async () => {
         const user = await createTestUser();
         const model = await modelManager.save(buildModel("m-filter"));

@@ -85,4 +85,12 @@ describe("vendorManager (node, real db)", () => {
         await createVendor();
         expect(await vendorManager.count()).toBe(1);
     });
+
+    it("list on empty table returns total 0 and empty modelCounts", async () => {
+        // 空表：count() 返回 0（`|| 0` 兜底），且 vendorIds 为空列表跳过聚合查询
+        const { list, total, modelCounts } = await vendorManager.list({ pageSize: 10, offset: 0 });
+        expect(total).toBe(0);
+        expect(list.length).toBe(0);
+        expect(Object.keys(modelCounts).length).toBe(0);
+    });
 });

@@ -1,5 +1,6 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import storageManager, { normalizeBytes, toDatabaseBytes } from "../../src/manager/storageManager";
+import { SgStorageRecord } from "../../src/model/sgStorageRecord";
 import dbHelper from "../helpers/dbHelper";
 import ormTestHelper from "../helpers/ormTestHelper";
 
@@ -49,6 +50,30 @@ describe("storageManager (node, real db)", () => {
 
     it("deleteFromTableByPrefix with no matches returns 0", async () => {
         expect(await storageManager.deleteFromTableByPrefix("nope-")).toBe(0);
+    });
+
+    it("getFromTable handles null size_bytes via ?? 0 fallback", async () => {
+        // size_bytes 列有 NOT NULL 约束，无法通过真实 DB 插入 NULL；
+        // 通过 mock 查询结果模拟旧数据/异常行，覆盖 `size_bytes ?? 0` 兜底分支
+        const firstMock = vi.fn().mockResolvedValue({
+            object_key: "null-size",
+            size_bytes: null,
+            created_at: new Date(),
+            updated_at: new Date(),
+            data: new Uint8Array([1, 2]),
+        });
+        const querySpy = vi.spyOn(SgStorageRecord, "query").mockReturnValue({
+            where: vi.fn().mockReturnThis(),
+            first: firstMock,
+        } as any);
+
+        try {
+            const obj = await storageManager.getFromTable("null-size");
+            expect(obj?.size_bytes).toBe(0);
+            expect(Array.from(obj!.data)).toEqual([1, 2]);
+        } finally {
+            querySpy.mockRestore();
+        }
     });
 });
 

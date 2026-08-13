@@ -63,6 +63,15 @@ describe("vendorModelManager (node, real db)", () => {
         expect(synced[0].model_id).toBe("claude-3-5-sonnet");
     });
 
+    it("syncByVendor with empty array clears all models", async () => {
+        const vendor = await createVendor();
+        await vendorModelManager.create(vendor.id, "gpt-4o");
+        await vendorModelManager.create(vendor.id, "gpt-4o-mini");
+
+        const synced = await vendorModelManager.syncByVendor(vendor.id, []);
+        expect(synced.length).toBe(0);
+    });
+
     it("findById + findByVendorAndModel + create", async () => {
         const vendor = await createVendor();
         const vm = await vendorModelManager.create(vendor.id, "gpt-4o");
