@@ -10,7 +10,7 @@ interface StoredObject {
 }
 
 
-function normalizeBytes(data: unknown): Uint8Array {
+export function normalizeBytes(data: unknown): Uint8Array {
     // 1. 标准 Uint8Array
     if (data instanceof Uint8Array) {
         return new Uint8Array(data);
@@ -64,7 +64,7 @@ function normalizeBytes(data: unknown): Uint8Array {
 }
 
 
-function toDatabaseBytes(data: Uint8Array): Uint8Array {
+export function toDatabaseBytes(data: Uint8Array): Uint8Array {
     if (typeof Buffer !== "undefined") {
         return Buffer.from(data);
     }
