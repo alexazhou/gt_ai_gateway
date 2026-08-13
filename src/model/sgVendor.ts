@@ -127,23 +127,20 @@ class SgVendor extends Model {
 
     /**
      * 获取当前 vendor 支持的格式列表
+     * 口径与 getUrlByFormat 完全一致：能拿到某格式的 URL（含自动补全后缀后的派生）即视为支持，
+     * 避免「getUrlByFormat 能解析但 getSupportedFormats 不认可」的不一致。
      * @returns 支持的格式数组
      */
     getSupportedFormats(): ApiFormat[] {
-        const urls = this.getMergedUrls();
         const formats: ApiFormat[] = [];
 
-        if (urls[ApiFormat.OPENAI]) {
+        if (this.getUrlByFormat(ApiFormat.OPENAI) !== null) {
             formats.push(ApiFormat.OPENAI);
-            // responses 可从 openai URL 自动派生，但仅当 openai 地址为标准
-            // /chat/completions 结尾（与 convertOpenaiToResponses 口径一致）时才计入支持
-            if (/\/chat\/completions$/.test(urls[ApiFormat.OPENAI])) {
-                formats.push(ApiFormat.RESPONSES);
-            }
         }
-        if (urls[ApiFormat.ANTHROPIC]) formats.push(ApiFormat.ANTHROPIC);
-        // 显式配置的 responses 始终支持；但派生分支可能已计入，避免重复 push
-        if (urls[ApiFormat.RESPONSES] && !formats.includes(ApiFormat.RESPONSES)) {
+        if (this.getUrlByFormat(ApiFormat.ANTHROPIC) !== null) {
+            formats.push(ApiFormat.ANTHROPIC);
+        }
+        if (this.getUrlByFormat(ApiFormat.RESPONSES) !== null) {
             formats.push(ApiFormat.RESPONSES);
         }
 

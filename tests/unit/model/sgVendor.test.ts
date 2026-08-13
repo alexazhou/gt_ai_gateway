@@ -272,9 +272,9 @@ describe("SgVendor.getUrlByFormat — URL merge & resolution", () => {
             expect(v.getSupportedFormats()).toEqual([ApiFormat.OPENAI, ApiFormat.RESPONSES]);
         });
 
-        it("does not derive responses from a base openai URL without /chat/completions", () => {
+        it("derives responses from a base openai URL (suffix auto-completed)", () => {
             const v = makeVendor("other", { openai: "https://a.com/v1" });
-            expect(v.getSupportedFormats()).toEqual([ApiFormat.OPENAI]);
+            expect(v.getSupportedFormats()).toEqual([ApiFormat.OPENAI, ApiFormat.RESPONSES]);
         });
 
         it("always supports responses when explicitly configured, regardless of openai URL shape", () => {

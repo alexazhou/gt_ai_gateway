@@ -361,9 +361,10 @@ describe("AI Protocol Conversion API", () => {
     }, 30000);
 
 
-    it("routes a Responses client to OpenAI upstream (not Anthropic) when the vendor supports openai+anthropic but not responses", async () => {
-        // 复现用户反馈场景：vendor 只配了 openai（base URL，不含 /chat/completions，不派生 responses）
-        // + anthropic，未配 responses；模型为空 allowed_formats（自动上游），回退 vendor 能力 [openai, anthropic]
+    it("routes a Responses client directly to the responses upstream derived from a base openai URL", async () => {
+        // vendor 配了 openai（base URL，getUrlByFormat 会自动补全 /chat/completions 后缀 → 可派生 responses）
+        // + anthropic；getSupportedFormats 与 getUrlByFormat 口径统一后，responses 应直接路由到 responses 上游，
+        // 既不是回退 openai 转换，也不是错误回退到 anthropic
         const mockBaseUrl = config.UPSTREAM_CONFIG.mock.url;
         const vendorResponse = await requestHelper.post(
             "/vendor/create.json",
@@ -386,7 +387,7 @@ describe("AI Protocol Conversion API", () => {
             adminToken,
         );
 
-        // responses 客户端请求（无 reasoning 配置，转换到 openai 后不引入额外参数）
+        // responses 客户端请求（base openai URL 派生 responses，直接走 responses 上游，无协议转换）
         const response = await requestHelper.post(
             "/llm/v1/responses",
             {
@@ -405,13 +406,13 @@ describe("AI Protocol Conversion API", () => {
         expect(response.status).toBe(200);
         expect(response.body.object).toBe("response");
 
-        // 修复后：responses 客户端回退时优先选 openai（reasoning 映射为 reasoning_effort），
-        // 而不是 anthropic；若优先级回退会选中 anthropic，此断言即失败
+        // 上游格式与客户端格式一致（均为 responses）时，record.upstream_format 记录为 null，
+        // 表示直接路由到 responses 而非转换到 openai / 回退到 anthropic
         const recordsResponse = await requestHelper.get(
             `/record/list.json?model_ids=${modelResponse.body.id}`,
             adminToken,
         );
         const record = recordsResponse.body.list[0];
-        expect(record.upstream_format).toBe("openai");
+        expect(record.upstream_format).toBeNull();
     }, 30000);
 });

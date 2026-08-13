@@ -32,6 +32,7 @@ class SgRecord extends Model {
     status!: SgRecordStatus | null;
     failed_code!: string | null;
     client_format!: string | null;
+    /** 上游实际使用的协议格式：null 表示与 client_format 一致（直接路由，未发生协议转换）；非 null 为网关转换后实际请求上游的格式（如 responses 回退到 openai 时记录为 "openai"） */
     upstream_format!: string | null;
 
     usage!: string | null;
