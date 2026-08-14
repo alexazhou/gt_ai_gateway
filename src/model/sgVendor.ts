@@ -2,7 +2,7 @@ import { Model } from "sutando";
 import { CastsAttributes } from "sutando";
 import { inspect, InspectOptions } from "util";
 import { ApiFormat, VendorAuthMode } from "../constants";
-import vendorDefaultUrls from "../service/vendorDefaultUrls";
+import vendorDefaultUrls from "../util/vendorDefaultUrlsUtil";
 import urlUtil from "../util/urlUtil";
 
 

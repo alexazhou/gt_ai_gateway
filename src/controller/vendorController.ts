@@ -2,7 +2,7 @@ import { Context } from "hono";
 import { SgVendor } from "../model/sgVendor";
 import vendorManager from "../manager/vendorManager";
 import vendorService from "../service/vendorService";
-import vendorDefaultUrls from "../service/vendorDefaultUrls";
+import vendorDefaultUrls from "../util/vendorDefaultUrlsUtil";
 import vendorTestService from "../service/vendorTestService";
 import modelManager from "../manager/modelManager";
 import customError from "../util/customError";
