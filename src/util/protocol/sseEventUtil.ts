@@ -1,4 +1,4 @@
-import type { ProtocolStreamEvent } from "./protocolConverter/protocolTypes";
+import type { ProtocolStreamEvent } from "../protocolConverter/protocolTypes";
 
 interface ParsedSSEEvent extends ProtocolStreamEvent {}
 

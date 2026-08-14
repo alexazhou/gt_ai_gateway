@@ -2,7 +2,7 @@ import { SgUser } from "../model/sgUser";
 import { ROOT_USER_ID, UserType, BALANCE_SCALE } from "../constants";
 import userManager from "../manager/userManager";
 import rechargeRecordManager from "../manager/rechargeRecordManager";
-import customError from "../util/customError";
+import customError from "../util/customErrorUtil";
 
 // 元 → 整数微元（DB 余额存整数微元，避免浮点）
 function toUnits(yuan: number): number {

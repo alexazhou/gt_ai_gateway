@@ -1,6 +1,6 @@
 import { sutando } from "sutando";
-import { DatabaseAdapter, D1Adapter, SQLiteAdapter } from "./dbAdapter";
-import customError from "../util/customError";
+import { DatabaseAdapter, D1Adapter, SQLiteAdapter } from "../util/dbAdapterUtil";
+import customError from "../util/customErrorUtil";
 import dbScript from "../../script/db";
 import { RunMode } from "../constants";
 

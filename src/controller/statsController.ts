@@ -2,7 +2,7 @@ import { Context } from "hono";
 import { SgRecordStatus } from "../constants";
 import recordManager from "../manager/recordManager";
 import ormService from "../service/ormService";
-import { parsePaginationQuery } from "../util/pagination";
+import { parsePaginationQuery } from "../util/paginationUtil";
 
 function toSafeNumber(value: unknown): number {
     const parsed = Number(value);

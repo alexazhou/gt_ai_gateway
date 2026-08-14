@@ -2,8 +2,8 @@ import { Context } from "hono";
 import { SgModel } from "../model/sgModel";
 import modelManager from "../manager/modelManager";
 import modelService from "../service/modelService";
-import customError from "../util/customError";
-import { createListResponse, parsePaginationQuery } from "../util/pagination";
+import customError from "../util/customErrorUtil";
+import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
 
 
 function createModelFromRequest(body: unknown): SgModel {

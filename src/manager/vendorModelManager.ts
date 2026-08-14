@@ -1,5 +1,5 @@
 import { SgVendorModel } from "../model/sgVendorModel";
-import customError from "../util/customError";
+import customError from "../util/customErrorUtil";
 
 async function listByVendor(vendorId: number): Promise<SgVendorModel[]> {
     return (await SgVendorModel.query()

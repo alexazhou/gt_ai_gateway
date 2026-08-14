@@ -1,6 +1,6 @@
 import { Context } from "hono";
 import rechargeRecordManager from "../manager/rechargeRecordManager";
-import { parsePaginationQuery } from "../util/pagination";
+import { parsePaginationQuery } from "../util/paginationUtil";
 
 async function listRechargeRecords(c: Context) {
     const query = c.req.query();

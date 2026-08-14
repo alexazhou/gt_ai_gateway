@@ -2,7 +2,7 @@ import { Context } from "hono";
 import { SgRecord } from "../model/sgRecord";
 import recordManager from "../manager/recordManager";
 import recordService from "../service/recordService";
-import { parsePaginationQuery } from "../util/pagination";
+import { parsePaginationQuery } from "../util/paginationUtil";
 
 function normalizeTimestampField(value: unknown): string | number | null {
     if (value === null || value === undefined) {

@@ -1,4 +1,4 @@
-import customError from "../customError";
+import customError from "../customErrorUtil";
 import type { ProtocolStreamEvent } from "./protocolTypes";
 
 export abstract class BaseConverter {

@@ -1,5 +1,5 @@
 import { SgStorageRecord } from "../model/sgStorageRecord";
-import customError from "../util/customError";
+import customError from "../util/customErrorUtil";
 
 interface StoredObject {
     object_key: string;

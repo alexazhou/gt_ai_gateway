@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { runInBackground } from "../../../src/util/runInBackground";
+import { runInBackground } from "../../../src/util/runInBackgroundUtil";
 import { Context } from "hono";
 
-describe("runInBackground", () => {
+describe("runInBackgroundUtil", () => {
     let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {

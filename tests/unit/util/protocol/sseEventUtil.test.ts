@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import sseEvent from "../../../src/util/sseEvent";
+import sseEvent from "../../../../src/util/protocol/sseEventUtil";
 
-describe("sseEvent", () => {
+describe("sseEventUtil", () => {
     it("should split complete events and preserve remaining buffer", () => {
         const result = sseEvent.splitEvents(
             "event: one\ndata: 1\n\nevent: two\ndata: 2\n\ndata: partial",

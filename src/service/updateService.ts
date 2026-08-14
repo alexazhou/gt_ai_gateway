@@ -1,5 +1,5 @@
 import packageJson from "../../package.json";
-import { getLogger } from "../util/logger";
+import { getLogger } from "../util/loggerUtil";
 
 interface GitHubRelease {
     tag_name: string;

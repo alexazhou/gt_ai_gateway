@@ -3,7 +3,7 @@ import { SgVendorModel } from "../model/sgVendorModel";
 import vendorManager from "../manager/vendorManager";
 import vendorModelManager from "../manager/vendorModelManager";
 import vendorService from "../service/vendorService";
-import customError from "../util/customError";
+import customError from "../util/customErrorUtil";
 import { ApiFormat } from "../constants";
 
 

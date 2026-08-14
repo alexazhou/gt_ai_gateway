@@ -2,7 +2,7 @@ import { Context } from "hono";
 import { UserType } from "../constants";
 import userManager from "../manager/userManager";
 import userService from "../service/userService";
-import { createListResponse, parsePaginationQuery } from "../util/pagination";
+import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
 
 async function listUsers(c: Context) {
     const query = c.req.query();

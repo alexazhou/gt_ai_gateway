@@ -1,4 +1,4 @@
-import { ApiFormat } from "../constants";
+import { ApiFormat } from "../../constants";
 
 /**
  * 解析上游支持的格式
