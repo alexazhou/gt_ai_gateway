@@ -7,7 +7,7 @@ import ormService from "./service/ormService";
 import recordService from "./service/recordService";
 import hostService from "./service/hostService";
 import app, { Env } from "./routes";
-import initLogger, { Logger } from "./util/logger";
+import initLogger, { Logger } from "./util/loggerUtil";
 import { RunMode } from "./constants";
 
 // --api-only: 跳过前端静态文件服务，仅提供 API（桌面 sidecar 模式使用）

@@ -101,6 +101,15 @@
 - **部署**：Cloudflare 自动部署完善、自定义 ROOT_TOKEN、R2 bucket 自动创建
 - **开源合规**：许可证由 GPL v2 改为 MIT + 署名条款
 
+### V1.9: Service / Manager 分层重构 (已完成 / 进行中)
+
+- **manager 层落地**：新增 `src/manager/` 独立目录，按「每个 model 一个 manager」建立 10 个 manager（user / model / record / requestActivity / rechargeRecord / vendor / vendorModel / config / storage / clientConfig），纯 DAL 原语从 service 下沉
+- **service 层瘦身**：rechargeRecordService 整体搬移为 manager；model / record / user / vendor / requestActivity / config / objectStorage / clientConfig / routing 做函数级拆分，service 只保留校验、组合、事务、容错等业务逻辑
+- **controller 收编**：vendorModelController（15 处）等 7 个 controller 的 ORM 裸查询全部收编到 manager，纯 CRUD 接口直接 controller → manager
+- **依赖层级**：`controller → service → manager → model`，manager 不反向依赖 service（eslint `no-restricted-imports` 约束）
+- **事务原子性**：`adjustBalance` 两步写操作拆分后的事务保障
+- **非目标**：不改业务行为、不引入新功能；statsController 的 raw SQL 聚合重构与前端联动，另立专项
+
 ---
 
 ## 技术栈
@@ -121,6 +130,6 @@
 ## 相关文档
 
 - [文档索引](../../../GEMINI.md) — 项目文档总览
-- [设计文档](../) — 路由、计费、客户端管理、协议等专项设计
+- [设计文档](../) — 路由、计费、客户端管理、协议、分层重构等专项设计
 - [版本规范](./版本文档规范.md) — 版本管理与文档命名规范
 - [发布流程](../../tech/release_process.md) — 新版本发布流程

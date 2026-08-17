@@ -1,7 +1,7 @@
 import { ApiFormat } from "../constants";
 import { SgModel } from "../model/sgModel";
-import customError from "../util/customError";
-import modelService from "./modelService";
+import customError from "../util/customErrorUtil";
+import modelManager from "../manager/modelManager";
 import recordService from "./recordService";
 
 
@@ -16,7 +16,7 @@ async function resolveContext(
     body: string,
     format: ApiFormat,
 ): Promise<LlmRequestContext> {
-    const modelConfig = await modelService.getModel(modelName, true);
+    const modelConfig = await modelManager.getModel(modelName, true);
     if (modelConfig == null) {
         await recordService.recordFailedRequest(userId, modelName, body, format, "model_not_found");
         throw new customError.NotFoundError("model not found");

@@ -1,8 +1,9 @@
 import ormService from "../ormService";
 import SgClientConfig from "../../model/sgClientConfig";
-import { SgVendor } from "../../model/sgVendor";
-import { SgUser } from "../../model/sgUser";
 import vendorService from "../vendorService";
+import clientConfigManager from "../../manager/clientConfigManager";
+import vendorManager from "../../manager/vendorManager";
+import userManager from "../../manager/userManager";
 import { ClientName, ConnectionMode } from "../../constants";
 import type {
     ApplyClientConfigParams,
@@ -51,25 +52,6 @@ async function getAdapter(client: ClientName): Promise<ConfigAdapter> {
 
     return adapter;
 }
-
-
-async function formatUniqueBackupName(client: ClientName, baseName: string): Promise<string> {
-    const records = await SgClientConfig.query()
-        .where("client", client)
-        .get();
-    const existingNames = new Set(normalizeBackupRecords(records).map(record => String(record.name)));
-    if (!existingNames.has(baseName)) {
-        return baseName;
-    }
-
-    let index = 1;
-    while (existingNames.has(`${baseName}${index}`)) {
-        index += 1;
-    }
-
-    return `${baseName}${index}`;
-}
-
 
 
 function isEnabled(value: unknown): boolean {
@@ -149,20 +131,14 @@ function normalizeBackupRecords(records: any): any[] {
 
 
 async function getBackups(client: ClientName, adapter: ConfigAdapter): Promise<ClientConfigBackupInfo[]> {
-    const records = await SgClientConfig.query()
-        .where("client", client)
-        .orderBy("id", "asc")
-        .get();
+    const records = await clientConfigManager.listByClient(client);
 
-    return await Promise.all(normalizeBackupRecords(records).map(record => toBackupInfo(record, adapter)));
+    return await Promise.all(records.map(record => toBackupInfo(record, adapter)));
 }
 
 
 async function enrichStatus(adapterStatus: AdapterConfigStatus, adapter: ConfigAdapter): Promise<ClientConfigStatus> {
-    const records = await SgClientConfig.query()
-        .where("client", adapterStatus.client)
-        .orderBy("id", "asc")
-        .get();
+    const records = await clientConfigManager.listByClient(adapterStatus.client);
 
     const backupRecords = normalizeBackupRecords(records);
     const backups = await Promise.all(backupRecords.map(record => toBackupInfo(record, adapter)));
@@ -241,11 +217,11 @@ async function getStatus(): Promise<ClientConfigStatusResponse> {
 
 async function resolveApiKey(connectionMode?: ConnectionMode, vendorId?: number, userId?: number): Promise<string> {
     if (connectionMode === ConnectionMode.VENDOR && vendorId) {
-        const vendor = await SgVendor.query().where('id', vendorId).first();
+        const vendor = await vendorManager.findById(vendorId);
         if (vendor?.token) return vendor.token;
     }
     if (connectionMode === ConnectionMode.GATEWAY && userId) {
-        const user = await SgUser.query().where('id', userId).first();
+        const user = await userManager.findById(userId);
         if (user?.token) return user.token;
     }
     return '';
@@ -323,9 +299,9 @@ async function createConfig(params: CreateClientConfigParams): Promise<ClientCon
         authJson,
     };
     
-    await SgClientConfig.query().create({
+    await clientConfigManager.create({
         client: params.client,
-        name: await formatUniqueBackupName(params.client, "未命名配置"),
+        name: await clientConfigManager.formatUniqueName(params.client, "未命名配置"),
         configContent: fields,
         enabled: false,
     });
@@ -349,9 +325,9 @@ async function createBackup(params: CreateClientConfigBackupParams): Promise<Cli
         const apiKey = await resolveApiKey(fields.connectionMode, fields.vendorId, fields.userId);
         if (apiKey) fields.apiKey = apiKey;
     }
-    const record = await SgClientConfig.query().create({
+    const record = await clientConfigManager.create({
         client: params.client,
-        name: params.name?.trim() || await formatUniqueBackupName(params.client, "未命名配置"),
+        name: params.name?.trim() || await clientConfigManager.formatUniqueName(params.client, "未命名配置"),
         configContent: fields,
         enabled: false,
     });
@@ -374,16 +350,13 @@ async function renameBackup(params: RenameClientConfigBackupParams): Promise<Cli
         throw new Error("Backup name is required");
     }
 
-    const backup = await SgClientConfig.query()
-        .where("id", params.backupId)
-        .where("client", params.client)
-        .first();
+    const backup = await clientConfigManager.findByIdAndClient(params.backupId, params.client);
 
     if (!backup) {
         throw new Error("Backup not found");
     }
 
-    await backup.update({ name });
+    await clientConfigManager.update(backup, { name });
     backup.name = name;
     return await toBackupInfo(backup, await getAdapter(params.client));
 }
@@ -414,10 +387,7 @@ async function updateBackupConfig(params: UpdateClientConfigBackupParams): Promi
     }
 
     const adapter = await getAdapter(params.client);
-    const backup = await SgClientConfig.query()
-        .where("id", params.backupId)
-        .where("client", params.client)
-        .first();
+    const backup = await clientConfigManager.findByIdAndClient(params.backupId, params.client);
 
     if (!backup) {
         throw new Error("Backup not found");
@@ -434,7 +404,7 @@ async function updateBackupConfig(params: UpdateClientConfigBackupParams): Promi
         effortLevel: params.effortLevel?.trim(),
     };
 
-    await backup.update({ configContent: fields });
+    await clientConfigManager.update(backup, { configContent: fields });
     backup.configContent = fields as any;
 
     if (backup.enabled) {
@@ -455,16 +425,13 @@ async function syncFromLocal(params: { client: ClientName; backupId: number }): 
         throw new Error("客户端管理需要读写本机配置文件，请本地安装后使用。");
     }
     const adapter = await getAdapter(params.client);
-    const backup = await SgClientConfig.query()
-        .where("id", params.backupId)
-        .where("client", params.client)
-        .first();
+    const backup = await clientConfigManager.findByIdAndClient(params.backupId, params.client);
     if (!backup) {
         throw new Error("Backup not found");
     }
     const configContent = await adapter.readConfig();
     const fields = adapter.parseConfigFileContent(configContent) || { version: "v1", connectionMode: ConnectionMode.OFFICIAL, gatewayUrl: "", apiKey: "", model: "" };
-    await backup.update({ configContent: fields });
+    await clientConfigManager.update(backup, { configContent: fields });
     const adapterStatus = await configAdapterUtils.buildClientStatus(adapter);
     return await enrichStatus(adapterStatus, adapter);
 }
@@ -476,26 +443,21 @@ async function deleteBackup(params: DeleteClientConfigBackupParams): Promise<Cli
     }
 
     const adapter = await getAdapter(params.client);
-    const backup = await SgClientConfig.query()
-        .where("id", params.backupId)
-        .where("client", params.client)
-        .first();
+    const backup = await clientConfigManager.findByIdAndClient(params.backupId, params.client);
 
     if (!backup) {
         throw new Error("Backup not found");
     }
 
-    await backup.delete();
+    await clientConfigManager.remove(backup);
     const adapterStatus = await configAdapterUtils.buildClientStatus(adapter);
     return await enrichStatus(adapterStatus, adapter);
 }
 
 
 async function enableBackup(client: ClientName, backup: SgClientConfig): Promise<void> {
-    await SgClientConfig.query()
-        .where("client", client)
-        .update({ enabled: false });
-    await backup.update({ enabled: true });
+    await clientConfigManager.disableAllByClient(client);
+    await clientConfigManager.update(backup, { enabled: true });
     backup.enabled = true;
 }
 
@@ -520,10 +482,7 @@ async function applyConfig(params: ApplyClientConfigParams): Promise<ClientConfi
     }
 
     const adapter = await getAdapter(params.client);
-    const backup = await SgClientConfig.query()
-        .where("id", params.backupId)
-        .where("client", params.client)
-        .first();
+    const backup = await clientConfigManager.findByIdAndClient(params.backupId, params.client);
 
     if (!backup) {
         throw new Error("Backup not found");

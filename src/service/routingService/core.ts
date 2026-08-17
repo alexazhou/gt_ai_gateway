@@ -1,10 +1,10 @@
 import type { Context } from "hono";
 import { ApiFormat, ModelRoutingMode } from "../../constants";
 import { SgModel } from "../../model/sgModel";
-import { SgVendor } from "../../model/sgVendor";
-import { SgVendorModel } from "../../model/sgVendorModel";
-import customError from "../../util/customError";
-import protocolUtils from "../../util/protocolUtils";
+import vendorManager from "../../manager/vendorManager";
+import vendorModelManager from "../../manager/vendorModelManager";
+import customError from "../../util/customErrorUtil";
+import protocolUtils from "../../util/protocol/protocolUtil";
 import RoutingContext from "./routingContext";
 import { ModelRoutingResult } from "./types";
 import BaseRoutingStrategy from "./routingStrategy/baseRoutingStrategy";
@@ -65,13 +65,13 @@ async function validateConfig(
     }
 
     for (const upstream of upstreams) {
-        const vendor = await SgVendor.query().find(upstream.vendor_id);
+        const vendor = await vendorManager.findById(upstream.vendor_id);
         if (!vendor) {
             throw new customError.NotFoundError("Vendor not found");
         }
 
         if (upstream.vendor_model_id) {
-            const vendorModel = await SgVendorModel.query().find(upstream.vendor_model_id);
+            const vendorModel = await vendorModelManager.findById(upstream.vendor_model_id);
             if (!vendorModel) {
                 throw new customError.NotFoundError("Vendor model not found");
             }
@@ -79,10 +79,7 @@ async function validateConfig(
                 throw new customError.AppError("Vendor model does not belong to the selected vendor");
             }
         } else if (mode === ModelRoutingMode.FIRST_AVAILABLE && upstream.enabled) {
-            const vendorModel = await SgVendorModel.query()
-                .where("vendor_id", upstream.vendor_id)
-                .where("model_id", model.name)
-                .first();
+            const vendorModel = await vendorModelManager.findByVendorAndModel(upstream.vendor_id, model.name);
             if (!vendorModel) {
                 throw new customError.AppError(
                     `Vendor ${upstream.vendor_id} does not have model ${model.name}`,
@@ -104,32 +101,26 @@ async function resolveAvailableCandidates(
 
     const candidates: ModelRoutingResult[] = [];
     for (const upstream of upstreams) {
-        const vendor = await SgVendor.query().find(upstream.vendor_id);
+        const vendor = await vendorManager.findById(upstream.vendor_id);
         if (!vendor) {
             continue;
         }
 
         let vendorModel = upstream.vendor_model_id
-            ? await SgVendorModel.query().find(upstream.vendor_model_id)
+            ? await vendorModelManager.findById(upstream.vendor_model_id)
             : null;
         if (upstream.vendor_model_id && !vendorModel) {
             continue;
         }
         if (!upstream.vendor_model_id && model.routing_mode !== ModelRoutingMode.LOAD_BALANCE) {
-            vendorModel = await SgVendorModel.query()
-                .where("vendor_id", upstream.vendor_id)
-                .where("model_id", model.name)
-                .first();
+            vendorModel = await vendorModelManager.findByVendorAndModel(upstream.vendor_id, model.name);
         }
         if (vendorModel && vendorModel.vendor_id !== upstream.vendor_id) {
             continue;
         }
 
         if (!vendorModel && !upstream.vendor_model_id && model.routing_mode !== ModelRoutingMode.LOAD_BALANCE && model.name) {
-            vendorModel = await SgVendorModel.query().create({
-                vendor_id: upstream.vendor_id,
-                model_id: model.name,
-            });
+            vendorModel = await vendorModelManager.create(upstream.vendor_id, model.name);
         }
 
         let supportedFormats: ApiFormat[];

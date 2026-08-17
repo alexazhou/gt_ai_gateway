@@ -1,14 +1,12 @@
 import { Context } from "hono";
 import { SgVendor } from "../model/sgVendor";
+import vendorManager from "../manager/vendorManager";
 import vendorService from "../service/vendorService";
-import vendorDefaultUrls from "../service/vendorDefaultUrls";
+import vendorDefaultUrls from "../util/vendorDefaultUrlsUtil";
 import vendorTestService from "../service/vendorTestService";
-import modelService from "../service/modelService";
-import ormService from "../service/ormService";
-import senderService from "../service/senderService";
-import customError from "../util/customError";
-import { ApiFormat } from "../constants";
-import { createListResponse, parsePaginationQuery } from "../util/pagination";
+import modelManager from "../manager/modelManager";
+import customError from "../util/customErrorUtil";
+import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
 
 
 /**
@@ -32,35 +30,16 @@ function formatVendor(vendor: SgVendor, modelCount = 0) {
 async function listVendors(c: Context) {
     const query = c.req.query();
     const { pageSize, offset } = parsePaginationQuery(query);
-    const dbQuery = SgVendor.query().orderBy("id", "desc");
 
-    if (query.type) {
-        dbQuery.where("type", query.type);
-    }
+    const { list: vendors, total, modelCounts } = await vendorManager.list({
+        type: query.type,
+        keyword: query.keyword,
+        pageSize,
+        offset,
+    });
 
-    if (query.keyword) {
-        dbQuery.where("name", "like", `%${query.keyword}%`);
-    }
-
-    const total = Number(await dbQuery.clone().count() || 0);
-    const vendors = await dbQuery.limit(pageSize).offset(offset).get();
-
-    // Single GROUP BY COUNT query for this page's vendor IDs
-    const vendorIds: number[] = (vendors as any).all().map((v: SgVendor) => v.id);
-    const countMap = new Map<number, number>();
-    if (vendorIds.length > 0) {
-        const knex = ormService.getKnex();
-        const rows: { vendor_id: number; cnt: number }[] = await knex("vendor_model")
-            .select(["vendor_id", knex.raw("count(*) as cnt")])
-            .whereIn("vendor_id", vendorIds)
-            .groupBy("vendor_id");
-        rows.forEach(row => {
-            countMap.set(Number(row.vendor_id), Number(row.cnt));
-        });
-    }
-
-    const formattedVendors = vendors.map(v => formatVendor(v, countMap.get(v.id) ?? 0));
-    return c.json(createListResponse(formattedVendors.toArray(), total));
+    const formattedVendors = vendors.map(v => formatVendor(v, modelCounts[v.id] ?? 0));
+    return c.json(createListResponse(formattedVendors, total));
 }
 
 
@@ -72,7 +51,7 @@ async function getVendor(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const vendor = await SgVendor.query().find(vendorId);
+    const vendor = await vendorManager.findById(vendorId);
 
     if (!vendor) {
         throw new customError.NotFoundError("Vendor not found");
@@ -94,7 +73,7 @@ async function getVendorsByIds(c: Context) {
         return c.json([]);
     }
 
-    const vendors = await SgVendor.query().whereIn("id", idList).get();
+    const vendors = await vendorManager.getByIds(idList);
     const formattedVendors = vendors.map(formatVendor);
     return c.json(formattedVendors);
 }
@@ -102,23 +81,16 @@ async function getVendorsByIds(c: Context) {
 
 async function createVendor(c: Context) {
     const body = await c.req.json();
-    const { type, name, token, urls, config } = body;
+    const vendor = new SgVendor(body);
 
     // Validation - 不验证 urls，允许为空
-    if (!type || !name || !token) {
+    if (!vendor.type || !vendor.name || !vendor.token) {
         throw new customError.AppError("Missing required fields");
     }
 
-    const finalConfig = config || {};
-    vendorService.validateProxyConfig(finalConfig);
+    vendorService.validateProxyConfig(vendor.config);
 
-    const instance = await SgVendor.query().create({
-        type,
-        name,
-        token,
-        urls: urls || {},
-        config: finalConfig,
-    });
+    const instance = await vendorManager.create(vendor);
 
     return c.json(formatVendor(instance));
 }
@@ -159,17 +131,20 @@ async function deleteVendor(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const vendor = await SgVendor.query().find(vendorId);
+    const vendor = await vendorManager.findById(vendorId);
 
     if (!vendor) {
         throw new customError.NotFoundError("Vendor not found");
     }
 
-    if (await modelService.hasModelsUsingVendor(vendorId)) {
+    if (await modelManager.hasModelsUsingVendor(vendorId)) {
         throw new customError.AppError("Cannot delete vendor with associated models");
     }
 
-    await SgVendor.query().where("id", vendorId).delete();
+    const deleted = await vendorManager.deleteById(vendorId);
+    if (!deleted) {
+        throw new customError.NotFoundError("Vendor not found");
+    }
 
     return c.json({ success: true });
 }
@@ -182,7 +157,7 @@ async function testVendor(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const vendor = await SgVendor.query().find(vendorId);
+    const vendor = await vendorManager.findById(vendorId);
     if (!vendor) {
         throw new customError.NotFoundError("Vendor not found");
     }

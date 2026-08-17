@@ -1,5 +1,5 @@
 import { Context } from "hono";
-import { SgRecord } from "../model/sgRecord";
+import recordManager from "../manager/recordManager";
 import requestActivityService from "../service/requestActivityService";
 
 
@@ -9,7 +9,7 @@ async function getRecordActivity(c: Context) {
         return c.json({ error: "Invalid ID format" }, 400);
     }
 
-    const record = await SgRecord.query().find(recordId);
+    const record = await recordManager.findById(recordId);
     if (!record) {
         return c.json({ error: "Record not found" }, 404);
     }

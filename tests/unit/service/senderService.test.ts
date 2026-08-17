@@ -7,11 +7,11 @@
 
 import { describe, it, expect } from "vitest";
 import senderService from "../../../src/service/senderService";
-import usageUtils from "../../../src/util/usageUtils";
-import protocolUtils from "../../../src/util/protocolUtils";
+import usageUtils from "../../../src/util/protocol/usageUtil";
+import protocolUtils from "../../../src/util/protocol/protocolUtil";
 import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterFactory";
 import { ApiFormat } from "../../../src/constants";
-import customError from "../../../src/util/customError";
+import customError from "../../../src/util/customErrorUtil";
 
 function convertRequestBody(body: string, clientFormat: ApiFormat, upstreamFormat: ApiFormat): string {
     if (clientFormat !== upstreamFormat && (clientFormat === ApiFormat.RESPONSES || upstreamFormat === ApiFormat.RESPONSES)) {

@@ -1,8 +1,9 @@
 import { Context } from "hono";
 import { SgModel } from "../model/sgModel";
+import modelManager from "../manager/modelManager";
 import modelService from "../service/modelService";
-import customError from "../util/customError";
-import { createListResponse, parsePaginationQuery } from "../util/pagination";
+import customError from "../util/customErrorUtil";
+import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
 
 
 function createModelFromRequest(body: unknown): SgModel {
@@ -34,7 +35,7 @@ async function listModels(c: Context) {
     const query = c.req.query();
     const { pageSize, offset } = parsePaginationQuery(query);
     const vendorId = query.vendor_id ? parseInt(query.vendor_id, 10) : undefined;
-    const result = await modelService.listModels({
+    const result = await modelManager.listModels({
         vendorId: vendorId && !isNaN(vendorId) ? vendorId : undefined,
         keyword: query.keyword,
         pageSize,
@@ -45,7 +46,7 @@ async function listModels(c: Context) {
 
 
 async function listLlmModels(c: Context) {
-    const models = await modelService.listEnabledModels();
+    const models = await modelManager.listEnabledModels();
     return c.json({
         object: "list",
         data: models,
@@ -61,7 +62,7 @@ async function getModel(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const model = await SgModel.query().find(modelId);
+    const model = await modelManager.findById(modelId);
 
     if (!model) {
         throw new customError.NotFoundError("Model not found");
@@ -83,7 +84,7 @@ async function getModelsByIds(c: Context) {
         return c.json([]);
     }
 
-    const models = await SgModel.query().whereIn("id", idList).get();
+    const models = await modelManager.getByIds(idList);
     return c.json(models);
 }
 
@@ -119,7 +120,7 @@ async function deleteModel(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const deleted = await modelService.deleteModel(modelId);
+    const deleted = await modelManager.deleteModel(modelId);
 
     if (!deleted) {
         throw new customError.NotFoundError("Model not found");

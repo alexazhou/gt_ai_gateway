@@ -1,7 +1,7 @@
 import { createWriteStream, WriteStream } from "fs";
 import fs from "fs/promises";
 import { join } from "path";
-import { getLogDir } from "../util/logger";
+import { getLogDir } from "../util/loggerUtil";
 import ormService from "./ormService";
 import configService from "./configService";
 import { ConfigKey } from "../constants";

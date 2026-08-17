@@ -1,6 +1,7 @@
 import { SgVendor } from "../model/sgVendor";
 import { ApiFormat } from "../constants";
-import customError from "../util/customError";
+import customError from "../util/customErrorUtil";
+import vendorManager from "../manager/vendorManager";
 
 
 /**
@@ -22,22 +23,13 @@ function validateProxyConfig(config?: Record<string, any>): void {
 }
 
 
-async function getVendorByName(name: string): Promise<SgVendor | null> {
-    if (name == null) {
-        return null;
-    }
-
-    return await SgVendor.query().where("name", name).first();
-}
-
-
 async function updateVendor(
     vendorId: number,
     data: { type?: string; name?: string; token?: string; urls?: Record<string, string>; config?: Record<string, any> },
 ): Promise<SgVendor | null> {
     validateProxyConfig(data.config);
 
-    const vendor = await SgVendor.query().find(vendorId);
+    const vendor = await vendorManager.findById(vendorId);
 
     if (!vendor) {
         return null;
@@ -58,17 +50,13 @@ async function updateVendor(
         updateData.config = JSON.stringify(data.config);
     }
 
-    await SgVendor.query()
-        .where("id", vendorId)
-        .update(updateData);
-
-    return await SgVendor.query().find(vendorId);
+    return await vendorManager.update(vendorId, updateData);
 }
 
 async function findVendorByUrl(gatewayUrl: string, protocol: ApiFormat): Promise<number | null> {
     if (!gatewayUrl) return null;
 
-    const vendors = await SgVendor.query().get();
+    const vendors = await vendorManager.listAll();
     for (const vendor of vendors) {
         const mergedUrls = vendor.getMergedUrls();
         let vendorUrl: string | undefined;
@@ -164,7 +152,6 @@ export async function fetchUpstreamModels(vendor: SgVendor): Promise<string[]> {
 
 
 export default {
-    getVendorByName,
     updateVendor,
     findVendorByUrl,
     fetchUpstreamModels,

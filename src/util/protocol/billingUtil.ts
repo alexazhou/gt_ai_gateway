@@ -1,4 +1,4 @@
-import { MIN_DEDUCTION_UNIT } from "../constants";
+import { MIN_DEDUCTION_UNIT } from "../../constants";
 
 
 // 金额取整到最小扣减单位（0.000001 元）的整数倍；

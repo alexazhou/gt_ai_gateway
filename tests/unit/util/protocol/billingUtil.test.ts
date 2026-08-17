@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import billingUtils from "../../../src/util/billingUtils";
+import billingUtils from "../../../../src/util/protocol/billingUtil";
 
 const UNIT = 0.000001;
 
-describe("billingUtils", () => {
+describe("billingUtil", () => {
     it("quantizeAmount keeps zero as free", () => {
         expect(billingUtils.quantizeAmount(0)).toBe(0);
         expect(billingUtils.quantizeAmount(-1)).toBe(0);

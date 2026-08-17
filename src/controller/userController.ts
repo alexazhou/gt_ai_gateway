@@ -1,26 +1,20 @@
 import { Context } from "hono";
-import { SgUser } from "../model/sgUser";
-import { UserType, UserStatus } from "../constants";
+import { UserType } from "../constants";
+import userManager from "../manager/userManager";
 import userService from "../service/userService";
-import { createListResponse, parsePaginationQuery } from "../util/pagination";
+import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
 
 async function listUsers(c: Context) {
     const query = c.req.query();
     const { pageSize, offset } = parsePaginationQuery(query);
 
-    const dbQuery = SgUser.query().orderBy("id", "desc");
-
-    if (query.type) {
-        dbQuery.where("type", query.type);
-    }
-
-    if (query.keyword) {
-        dbQuery.where("name", "like", `%${query.keyword}%`);
-    }
-
-    const total = Number(await dbQuery.clone().count() || 0);
-    const users = await dbQuery.limit(pageSize).offset(offset).get();
-    return c.json(createListResponse(users.toArray(), total));
+    const { list: users, total } = await userManager.list({
+        type: query.type,
+        keyword: query.keyword,
+        pageSize,
+        offset,
+    });
+    return c.json(createListResponse(users, total));
 }
 
 async function getUser(c: Context) {
@@ -31,7 +25,7 @@ async function getUser(c: Context) {
         return c.json({ error: "Invalid ID format" }, 400);
     }
 
-    const user = await SgUser.query().find(userId);
+    const user = await userManager.findById(userId);
 
     if (!user) {
         return c.json({ error: "User not found" }, 404);
@@ -53,7 +47,7 @@ async function getUsersByIds(c: Context) {
         return c.json([]);
     }
 
-    const users = await SgUser.query().whereIn("id", idList).get();
+    const users = await userManager.getByIds(idList);
     return c.json(users);
 }
 
@@ -68,12 +62,10 @@ async function createUser(c: Context) {
 
         console.log("[userController] Creating user:", { name, token, type });
 
-        const instance = await SgUser.query().create({
+        const instance = await userManager.create({
             name,
             token,
             type: type || UserType.NORMAL,
-            balance: 0,
-            status: UserStatus.ACTIVE,
         });
 
         console.log("[userController] User created successfully:", instance);
@@ -95,7 +87,7 @@ async function updateUser(c: Context) {
         return c.json({ error: "Invalid ID format" }, 400);
     }
 
-    const user = await SgUser.query().find(userId);
+    const user = await userManager.findById(userId);
 
     if (!user) {
         return c.json({ error: "User not found" }, 404);
@@ -119,9 +111,7 @@ async function updateUser(c: Context) {
         return c.json(user);
     }
 
-    await user.update(updateData);
-
-    const updatedUser = await SgUser.query().find(userId);
+    const updatedUser = await userManager.update(userId, updateData);
     return c.json(updatedUser);
 }
 

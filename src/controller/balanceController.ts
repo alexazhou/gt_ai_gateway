@@ -1,6 +1,6 @@
 import { Context } from "hono";
-import rechargeRecordService from "../service/rechargeRecordService";
-import { parsePaginationQuery } from "../util/pagination";
+import rechargeRecordManager from "../manager/rechargeRecordManager";
+import { parsePaginationQuery } from "../util/paginationUtil";
 
 async function listRechargeRecords(c: Context) {
     const query = c.req.query();
@@ -9,7 +9,7 @@ async function listRechargeRecords(c: Context) {
     const { pageSize, offset } = parsePaginationQuery(query, 10);
 
     try {
-        const records = await rechargeRecordService.listRechargeRecords({
+        const records = await rechargeRecordManager.listRechargeRecords({
             user_id: userId,
             type,
             limit: pageSize,
@@ -34,7 +34,7 @@ async function getRechargeRecord(c: Context) {
     }
 
     try {
-        const record = await rechargeRecordService.getRechargeRecord(recordId);
+        const record = await rechargeRecordManager.getRechargeRecord(recordId);
         if (!record) {
             return c.json({ error: "Recharge record not found" }, 404);
         }

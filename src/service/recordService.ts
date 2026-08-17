@@ -1,5 +1,6 @@
-import { SgRecord, RECORD_SUMMARY_COLUMNS } from "../model/sgRecord";
+import { SgRecord } from "../model/sgRecord";
 import { SgRecordStatus, ApiFormat, ConfigKey } from "../constants";
+import recordManager from "../manager/recordManager";
 import objectStorageService from "./objectStorageService";
 import configService from "./configService";
 
@@ -69,7 +70,7 @@ async function create(
         }
     }
 
-    const record = await SgRecord.query().create({
+    const record = await recordManager.create({
         user_id: userId,
         model_id: modelId,
         vendor_id: null,
@@ -98,28 +99,20 @@ async function update(recordId: number, data: Partial<SgRecord>) {
         console.log(`[RecordService] Updating record ${recordId}:`, JSON.stringify(data, null, 2));
     }
 
+    // response_data 存在对象存储，写入表前先落存储
     if (Object.prototype.hasOwnProperty.call(data, "response_data")) {
         if (await isPayloadRecordingEnabled()) {
             const payload = await readPayload(recordId);
             payload.response = (data as any).response_data ?? null;
             await writePayload(recordId, payload);
         }
-
-        // response_data is never a record-table column (it lives in object storage),
-        // so it must always be stripped before updating the table.
-        const { response_data: _omit, ...tableData } = data as any;
-        return SgRecord.query().where("id", recordId).update(tableData);
     }
 
-    return SgRecord.query().where("id", recordId).update(data);
+    return recordManager.update(recordId, data);
 }
 
 async function latest(limit: number = 10, summaryOnly: boolean = false) {
-    const q = SgRecord.query().orderBy("id", "desc").limit(limit);
-    if (summaryOnly) {
-        q.select(RECORD_SUMMARY_COLUMNS);
-    }
-    const records = await q.get();
+    const records = await recordManager.latest(limit, summaryOnly);
 
     if (!summaryOnly) {
         await Promise.all(records.map((r: SgRecord) => attachPayload(r)));

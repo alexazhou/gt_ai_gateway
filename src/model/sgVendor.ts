@@ -2,8 +2,8 @@ import { Model } from "sutando";
 import { CastsAttributes } from "sutando";
 import { inspect, InspectOptions } from "util";
 import { ApiFormat, VendorAuthMode } from "../constants";
-import vendorDefaultUrls from "../service/vendorDefaultUrls";
-import urlUtil from "../util/urlUtil";
+import vendorDefaultUrls from "../util/vendorDefaultUrlsUtil";
+import urlUtil from "../util/protocol/urlUtil";
 
 
 /**
@@ -72,6 +72,15 @@ class SgVendor extends Model {
 
     created_at!: Date;
     updated_at!: Date;
+
+    constructor(attributes: Record<string, unknown> = {}) {
+        super();
+        this.fill({
+            urls: {},
+            config: new SgVendorConfig(),
+            ...attributes,
+        });
+    }
 
     /**
      * Merge preset URLs and DB-stored custom URLs.

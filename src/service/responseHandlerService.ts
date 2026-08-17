@@ -11,13 +11,13 @@ import recordService from "./recordService";
 import requestActivityService from "./requestActivityService";
 import userService from "./userService";
 import streamLogService from "./streamLogService";
-import usageUtils, { type Dict } from "../util/usageUtils";
+import usageUtils, { type Dict } from "../util/protocol/usageUtil";
 import openaiChatAccumulator from "../util/accumulator/openaiChatAccumulator";
 import anthropicAccumulator from "../util/accumulator/anthropicAccumulator";
 import responsesAccumulator from "../util/accumulator/responsesAccumulator";
-import sseEvent from "../util/sseEvent";
-import { runInBackground } from "../util/runInBackground";
-import customError from "../util/customError";
+import sseEvent from "../util/protocol/sseEventUtil";
+import { runInBackground } from "../util/runInBackgroundUtil";
+import customError from "../util/customErrorUtil";
 
 export async function handleChatStreamResponse(
     c: Context,

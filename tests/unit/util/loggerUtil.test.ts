@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { existsSync, unlinkSync, readFileSync, mkdirSync, rmSync, readdirSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
-import initLogger, { Logger, resetLogger, getLogger } from "../../../src/util/logger";
+import initLogger, { Logger, resetLogger, getLogger } from "../../../src/util/loggerUtil";
 
 describe("Logger", () => {
     const testLogDir = join(process.cwd(), "test-log");
