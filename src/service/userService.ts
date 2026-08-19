@@ -9,15 +9,34 @@ function toUnits(yuan: number): number {
     return Math.round(yuan * BALANCE_SCALE);
 }
 
-function isRootToken(token: string, rootToken?: string): boolean {
+// 恒定时间比较：先 SHA-256 到固定长度（32 字节），再逐字节 XOR-OR，
+// 避免字符串 === 在首个差异字节处提前返回导致的时序侧信道。
+function constantTimeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
+    if (a.length !== b.length) {
+        return false;
+    }
+    let result = 0;
+    for (let i = 0; i < a.length; i++) {
+        result |= a[i] ^ b[i];
+    }
+    return result === 0;
+}
+
+async function sha256(input: string): Promise<Uint8Array> {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+    return new Uint8Array(digest);
+}
+
+async function isRootToken(token: string, rootToken?: string): Promise<boolean> {
     if (!rootToken) {
         return false;
     }
-    return token === rootToken;
+    const [tokenHash, rootHash] = await Promise.all([sha256(token), sha256(rootToken)]);
+    return constantTimeEqualBytes(tokenHash, rootHash);
 }
 
 async function getUserByToken(token: string, rootToken?: string): Promise<SgUser | null> {
-    if (isRootToken(token, rootToken)) {
+    if (await isRootToken(token, rootToken)) {
         const user = new SgUser();
         user.id = ROOT_USER_ID;
         user.name = "Root";

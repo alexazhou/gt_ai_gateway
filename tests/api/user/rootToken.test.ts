@@ -33,24 +33,24 @@ describe("Root Token Tests", () => {
     });
 
     describe("userService.isRootToken", () => {
-        it("should return true when token matches root token", () => {
-            expect(userService.isRootToken(ROOT_TOKEN, ROOT_TOKEN)).toBe(true);
+        it("should return true when token matches root token", async () => {
+            expect(await userService.isRootToken(ROOT_TOKEN, ROOT_TOKEN)).toBe(true);
         });
 
-        it("should return false when token does not match root token", () => {
-            expect(userService.isRootToken("some-other-token", ROOT_TOKEN)).toBe(false);
+        it("should return false when token does not match root token", async () => {
+            expect(await userService.isRootToken("some-other-token", ROOT_TOKEN)).toBe(false);
         });
 
-        it("should return false when root token is undefined", () => {
-            expect(userService.isRootToken(ROOT_TOKEN, undefined)).toBe(false);
+        it("should return false when root token is undefined", async () => {
+            expect(await userService.isRootToken(ROOT_TOKEN, undefined)).toBe(false);
         });
 
-        it("should return false when root token is empty string", () => {
-            expect(userService.isRootToken(ROOT_TOKEN, "")).toBe(false);
+        it("should return false when root token is empty string", async () => {
+            expect(await userService.isRootToken(ROOT_TOKEN, "")).toBe(false);
         });
 
-        it("should return false when root token is null", () => {
-            expect(userService.isRootToken(ROOT_TOKEN, null as any)).toBe(false);
+        it("should return false when root token is null", async () => {
+            expect(await userService.isRootToken(ROOT_TOKEN, null as any)).toBe(false);
         });
     });
 
