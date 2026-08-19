@@ -16,6 +16,7 @@ const CONFIG_DEFAULTS: Record<string, string> = {
     [ConfigKey.RECORD_PAYLOAD_STORAGE]: "auto",
     [ConfigKey.MODULE_BILLING_ENABLED]: "true",
     [ConfigKey.MODULE_API_PLAYGROUND_ENABLED]: "true",
+    [ConfigKey.MODULE_CLIENT_CONFIG_ENABLED]: "true",
 };
 
 function getDefault(name: string): string {

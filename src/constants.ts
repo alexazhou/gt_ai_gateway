@@ -102,4 +102,5 @@ export enum ConfigKey {
     RECORD_PAYLOAD_STORAGE = "record_payload_storage",
     MODULE_BILLING_ENABLED = "module_billing_enabled",
     MODULE_API_PLAYGROUND_ENABLED = "module_api_playground_enabled",
+    MODULE_CLIENT_CONFIG_ENABLED = "module_client_config_enabled",
 }

@@ -39,7 +39,7 @@
                     <ApiOutlined />
                     <span>接入配置</span>
                 </a-menu-item>
-                <a-menu-item key="/client-manager">
+                <a-menu-item v-if="appStore.moduleClientConfigEnabled" key="/client-manager">
                     <RobotOutlined />
                     <span>客户端管理</span>
                 </a-menu-item>

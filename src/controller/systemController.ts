@@ -99,6 +99,7 @@ async function status(c: Context) {
 
         const moduleBilling = (await configService.getConfig(ConfigKey.MODULE_BILLING_ENABLED)).getBoolean();
         const moduleApiPlayground = (await configService.getConfig(ConfigKey.MODULE_API_PLAYGROUND_ENABLED)).getBoolean();
+        const moduleClientConfig = (await configService.getConfig(ConfigKey.MODULE_CLIENT_CONFIG_ENABLED)).getBoolean();
 
         return c.json({
             status: "ok",
@@ -120,6 +121,7 @@ async function status(c: Context) {
             modules: {
                 billing: moduleBilling,
                 api_playground: moduleApiPlayground,
+                client_config: moduleClientConfig,
             },
             storage: getStorageStatus(c),
             timestamp: new Date().toISOString(),

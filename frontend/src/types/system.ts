@@ -38,6 +38,7 @@ export interface StatusResponse {
     modules?: {
         billing?: boolean;
         api_playground?: boolean;
+        client_config?: boolean;
     };
     storage?: StorageStatus;
     timestamp?: string;
