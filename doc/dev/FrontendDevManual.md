@@ -88,7 +88,6 @@ npm run frontend:dev
 | `npm run frontend:dev` | 启动开发服务器（带热更新） |
 | `npm run frontend:build` | 构建生产版本 |
 | `npm run frontend:build:dev` | 构建开发版本 |
-| `npm run frontend:dev:dev` | 开发模式（开发环境） |
 
 ### 后端地址配置
 

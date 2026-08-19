@@ -5,7 +5,6 @@
     "frontend:build": "cd frontend && npm run build",
     "frontend:build:dev": "cd frontend && npm run build -- --mode development",
     "frontend:dev": "cd frontend && npm run dev",
-    "frontend:dev:dev": "cd frontend && npm run dev -- --mode development",
     "backend:dev": "wrangler dev --port 8720",
     "backend:dev:local": "npx tsx watch src/local.ts",
     "backend:start": "npx tsx src/local.ts",

@@ -13,7 +13,7 @@
    ```bash
    git checkout -b feature/your-feature-name
    ```
-4. **提交代码**：完成修改后，提交你的代码。请确保提交信息清晰明了。
+4. **提交代码**：完成修改后，提交你的代码。请确保提交信息清晰明了，**并使用英文撰写提交信息（subject 和 body 均用英文）**。
 5. **推送到远端**：将你的分支推送到你 Fork 的仓库。
    ```bash
    git push origin feature/your-feature-name
