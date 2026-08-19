@@ -860,7 +860,8 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
 
         expect(finishEvents.map((event) => event.event)).toEqual(["content_block_stop"]);
 
-        const usageEvents = converter.convertStreamEvent(JSON.stringify({
+        // 尾随的纯 usage chunk 只累积,message_delta/message_stop 统一在 [DONE] 时聚合发出
+        converter.convertStreamEvent(JSON.stringify({
             id: "chatcmpl-123",
             object: "chat.completion.chunk",
             created: 1677652288,
@@ -869,11 +870,13 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
             usage: { prompt_tokens: 15, completion_tokens: 5, total_tokens: 20 },
         }));
 
-        expect(usageEvents.map((event) => event.event)).toEqual(["message_delta", "message_stop"]);
-        expect(parseStreamEventData(usageEvents, 0).type).toBe("message_delta");
-        expect(parseStreamEventData(usageEvents, 0).usage.input_tokens).toBe(15);
-        expect(parseStreamEventData(usageEvents, 0).usage.output_tokens).toBe(5);
-        expect(parseStreamEventData(usageEvents, 1).type).toBe("message_stop");
+        const doneEvents = converter.convertStreamEvent("[DONE]");
+
+        expect(doneEvents.map((event) => event.event)).toEqual(["message_delta", "message_stop"]);
+        expect(parseStreamEventData(doneEvents, 0).type).toBe("message_delta");
+        expect(parseStreamEventData(doneEvents, 0).usage.input_tokens).toBe(15);
+        expect(parseStreamEventData(doneEvents, 0).usage.output_tokens).toBe(5);
+        expect(parseStreamEventData(doneEvents, 1).type).toBe("message_stop");
     });
 
     it("should normalize input_tokens to non-cached in deferred usage chunk", () => {
@@ -886,7 +889,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
             id: "chatcmpl-123", object: "chat.completion.chunk", created: 1677652288, model: "gpt-4",
             choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
         }));
-        const usageEvents2 = converter2.convertStreamEvent(JSON.stringify({
+        converter2.convertStreamEvent(JSON.stringify({
             id: "chatcmpl-123", object: "chat.completion.chunk", created: 1677652288, model: "gpt-4",
             choices: [],
             usage: {
@@ -894,7 +897,8 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
                 prompt_tokens_details: { cached_tokens: 900 },
             },
         }));
-        const usageDelta = parseStreamEventData(usageEvents2, 0);
+        const doneEvents2 = converter2.convertStreamEvent("[DONE]");
+        const usageDelta = parseStreamEventData(doneEvents2, 0);
         expect(usageDelta.usage.input_tokens).toBe(100);
         expect(usageDelta.usage.output_tokens).toBe(50);
         expect(usageDelta.usage.cache_read_input_tokens).toBe(900);
@@ -909,7 +913,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
             choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
         }));
 
-        const events = converter.convertStreamEvent(JSON.stringify({
+        converter.convertStreamEvent(JSON.stringify({
             id: "chatcmpl-123",
             object: "chat.completion.chunk",
             created: 1677652288,
@@ -918,6 +922,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
             usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
         }));
 
+        const events = converter.convertStreamEvent("[DONE]");
         const messageDelta = parseStreamEventData(events, 0);
         expect(events.map((event) => event.event)).toEqual(["message_delta", "message_stop"]);
         expect(messageDelta.delta.stop_reason).toBe("tool_use");
@@ -930,7 +935,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
             id: "chatcmpl-123", object: "chat.completion.chunk", created: 1677652288, model: "gpt-4",
             choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
         }));
-        const events = converter2.convertStreamEvent(JSON.stringify({
+        converter2.convertStreamEvent(JSON.stringify({
             id: "chatcmpl-123", object: "chat.completion.chunk", created: 1677652288, model: "gpt-4",
             choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
             usage: {
@@ -938,10 +943,60 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
                 prompt_tokens_details: { cached_tokens: 480 },
             },
         }));
+        const events = converter2.convertStreamEvent("[DONE]");
         const messageDelta = parseStreamEventData(events, 0);
         expect(messageDelta.usage.input_tokens).toBe(20);
         expect(messageDelta.usage.output_tokens).toBe(30);
         expect(messageDelta.usage.cache_read_input_tokens).toBe(480);
+    });
+
+    it("should capture cached_tokens from trailing usage-only chunk even when finish chunk already carried usage (record 14495 reproduction)", () => {
+        // 复现 14495:deepseek 把 usage 拆成两段。
+        // 第一段:带 finish_reason 的 chunk,usage 已给(prompt_tokens_details 为空、cache 缺失);
+        // 第二段:尾随的 choices:[] 纯 usage chunk,缓存命中信息(cached_tokens)才在这里出现。
+        const converter = new AnthropicToOpenAIConverter();
+
+        converter.convertStreamEvent(JSON.stringify({
+            id: "chatcmpl-RwgCtG6t7ebdsy2iISLWGGfg",
+            object: "chat.completion.chunk",
+            created: 1787160056,
+            model: "deepseek-v4-flash",
+            choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+        }));
+
+        // 第一段:finish_reason="tool_calls" 且带 usage,但 prompt_tokens_details 为空
+        converter.convertStreamEvent(JSON.stringify({
+            id: "chatcmpl-RwgCtG6t7ebdsy2iISLWGGfg",
+            object: "chat.completion.chunk",
+            created: 1787160056,
+            model: "deepseek-v4-flash",
+            choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+            usage: { prompt_tokens: 71617, completion_tokens: 128, total_tokens: 71745, prompt_tokens_details: {} },
+        }));
+
+        // 第二段:choices=[] 的尾随 chunk,cache 命中信息在这里
+        converter.convertStreamEvent(JSON.stringify({
+            id: "chatcmpl-RwgCtG6t7ebdsy2iISLWGGfg",
+            object: "chat.completion.chunk",
+            created: 1787160055,
+            model: "deepseek-v4-flash",
+            choices: [],
+            usage: {
+                prompt_tokens: 71617,
+                completion_tokens: 128,
+                total_tokens: 71745,
+                prompt_tokens_details: { cached_tokens: 71168, cache_write_tokens: null },
+            },
+        }));
+
+        // 统一的聚合点:[DONE] 时所有 usage chunk 都已到齐,才发出最终 message_delta
+        const doneEvents = converter.convertStreamEvent("[DONE]");
+        const deltaEvent = doneEvents.find((e) => e.event === "message_delta")!;
+        expect(deltaEvent).toBeDefined();
+        const deltaData = JSON.parse(deltaEvent.data);
+        expect(deltaData.usage.cache_read_input_tokens).toBe(71168);
+        // input_tokens 应被归一化为非缓存部分:71617 - 71168 = 449
+        expect(deltaData.usage.input_tokens).toBe(449);
     });
 
     it("should pass through error stream events", () => {
