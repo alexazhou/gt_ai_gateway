@@ -61,20 +61,17 @@ async function adjustBalance(
         throw new customError.NotFoundError("User not found");
     }
 
-    // amount 为元，换算成整数微元后做整数加减，避免浮点
+    // amount 为元，换算成整数微元后做整数加减，避免浮点。
+    // 系统允许负余额（复用 deductBalance 的透支语义），故不做「不能扣成负」守卫；
+    // 余额的扣减门槛统一由请求发起时的 checkBalance 预检负责。
     const amountUnits = toUnits(amount);
-    const newBalance = user.balance + amountUnits;
-    if (newBalance < 0) {
-        throw new customError.AppError("Insufficient balance", 400);
-    }
+    await userManager.incrementBalance(userId, amountUnits);
 
-    // 两步写操作（扣/加余额 + 写充值记录）分属 userManager.updateBalance 与
+    // 两步写操作（扣/加余额 + 写充值记录）分属 userManager.incrementBalance 与
     // rechargeRecordManager.create，非原子（见 service_manager_split_design §6 方案 C）：
     // Worker 模式下 D1 不支持多语句事务（ormService 已绕过连接池），故维持原行为、
     // 不做事务包裹，仅把查询部分（findById）下沉到 manager。充值记录写入失败时
     // 余额已更新但不留记录，与拆分前行为一致。
-    await userManager.updateBalance(userId, newBalance);
-
     // Create recharge record（amount 仍以"元"记录）
     await rechargeRecordManager.create({
         user_id: userId,
@@ -84,20 +81,16 @@ async function adjustBalance(
         operator: operator,
     });
 
-    // 返回更新后的用户（updateBalance 走 query-builder，不回写内存实例，需重新读取）
+    // 返回更新后的用户（incrementBalance 走 query-builder，不回写内存实例，需重新读取）
     return (await userManager.findById(userId))!;
 }
 
 async function deductBalance(userId: number, amount: number): Promise<void> {
-    const user = await userManager.findById(userId);
-    if (!user) {
-        throw new customError.NotFoundError("User not found");
-    }
-
     // 允许余额为负（透支）：请求完成时正常扣减，余额不足的拦截在请求发起前由预检负责
     // 扣费 amount 为元，换算成整数微元做整数减法；余额本就是整数微元，无浮点漂移
+    // 原子增量扣减，由数据库执行 balance = balance - delta，避免高并发热路径的丢更新
     const amountUnits = toUnits(amount);
-    await userManager.updateBalance(userId, user.balance - amountUnits);
+    await userManager.incrementBalance(userId, -amountUnits);
 }
 
 async function checkBalance(userId: number, requiredAmount: number): Promise<boolean> {

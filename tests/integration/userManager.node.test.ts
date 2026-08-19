@@ -29,14 +29,18 @@ describe("userManager (node, real db)", () => {
         expect((await userManager.findById(user.id))?.name).toBe("tester");
     });
 
-    it("update + updateBalance", async () => {
+    it("update + incrementBalance", async () => {
         const user = await createUser();
 
         const updated = await userManager.update(user.id, { name: "renamed" });
         expect(updated?.name).toBe("renamed");
 
-        await userManager.updateBalance(user.id, 1_000_000);
+        // incrementBalance 为原子增量，可从 0 累加（含扣成负）
+        await userManager.incrementBalance(user.id, 1_000_000);
         expect((await userManager.findById(user.id))?.balance).toBe(1_000_000);
+
+        await userManager.incrementBalance(user.id, -2_000_000);
+        expect((await userManager.findById(user.id))?.balance).toBe(-1_000_000);
     });
 
     it("getByIds: empty returns [], non-empty returns users", async () => {

@@ -211,19 +211,20 @@ describe("Billing API", () => {
             expect(response.body.balance).toBe(120 * 1_000_000);
         });
 
-        it("should fail when insufficient balance", async () => {
+        it("should allow adjusting balance into negative (透支语义与 deductBalance 一致)", async () => {
+            // 系统允许负余额：adjustBalance 不再拦截「余额扣成负」，门槛由请求前 checkBalance 负责
             const response = await requestHelper.post(
                 `/user/${testUserId}/balance/adjust.json`,
                 {
                     amount: -200,
                     type: "adjustment",
-                    remark: "Should fail",
+                    remark: "Should allow negative",
                 },
                 adminToken,
             );
 
-            expect(response.status).toBe(400);
-            expect(response.body.error).toBe("Insufficient balance");
+            expect(response.status).toBe(200);
+            expect(response.body.balance).toBe(-80 * 1_000_000);
         });
 
         it("should fail with invalid type", async () => {

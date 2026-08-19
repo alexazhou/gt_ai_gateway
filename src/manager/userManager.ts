@@ -57,8 +57,9 @@ async function update(userId: number, data: Record<string, unknown>): Promise<Sg
     return await SgUser.query().find(userId);
 }
 
-async function updateBalance(userId: number, balance: number): Promise<void> {
-    await SgUser.query().where("id", userId).update({ balance });
+// 原子增量更新：由数据库执行 balance = balance + delta，避免「先读后写」的并发丢更新
+async function incrementBalance(userId: number, delta: number): Promise<void> {
+    await SgUser.query().where("id", userId).increment("balance", delta);
 }
 
 async function count(): Promise<number> {
@@ -72,6 +73,6 @@ export default {
     list,
     create,
     update,
-    updateBalance,
+    incrementBalance,
     count,
 };
