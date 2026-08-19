@@ -167,15 +167,29 @@ export class OpenAIChatAccumulator extends AccumulatorBase {
             }
         }
 
-        // 保存 usage 信息（最后一个消息中才包含）
+        // 保存 usage 信息（最后一个消息中才包含）:统一交由 accumulateUsage 合并,
+        // 不在此处混用当前 chunk 与历史累积值
         if (msg.usage) {
-            this.response.usage = {
-                prompt_tokens: msg.usage.prompt_tokens,
-                completion_tokens: msg.usage.completion_tokens,
-                cache_read_tokens: (msg.usage as any).prompt_tokens_details?.cached_tokens ?? this.response.usage?.cache_read_tokens,
-                completion_tokens_details: msg.usage.completion_tokens_details,
-            };
+            this.accumulateUsage(msg.usage);
         }
+    }
+
+    /**
+     * 把一条 usage 合并进唯一的累积源 this.response.usage。
+     * 合并规则:当前 chunk 某字段为 null/undefined 时保留之前累积值,否则采用当前的
+     * (注意 ?? 只回退 null/undefined——当前若为 0 也会被当作「已提供」而采用)。
+     * 合并后,读取方(getUsage 等)统一从 this.response.usage 取值。
+     */
+    private accumulateUsage(rawUsage: OpenAIChatChunk["usage"]): void {
+        const promptDetails = (rawUsage as any).prompt_tokens_details;
+        const prev = this.response.usage;
+        this.response.usage = {
+            prompt_tokens: rawUsage?.prompt_tokens ?? prev?.prompt_tokens,
+            completion_tokens: rawUsage?.completion_tokens ?? prev?.completion_tokens,
+            cache_read_tokens: promptDetails?.cached_tokens ?? prev?.cache_read_tokens,
+            cache_write_tokens: promptDetails?.cache_write_tokens ?? prev?.cache_write_tokens,
+            completion_tokens_details: rawUsage?.completion_tokens_details ?? prev?.completion_tokens_details,
+        };
     }
 
     /**

@@ -22,6 +22,7 @@ interface AnthropicChunk {
             input_tokens?: number;
             output_tokens?: number;
             cache_read_input_tokens?: number;
+            cache_creation_input_tokens?: number;
         };
     };
     content_block?: {
@@ -36,6 +37,7 @@ interface AnthropicChunk {
         input_tokens?: number;
         output_tokens?: number;
         cache_read_input_tokens?: number;
+        cache_creation_input_tokens?: number;
     };
     delta?: {
         type?: "text_delta" | "thinking_delta" | "signature_delta" | "input_json_delta";
@@ -116,13 +118,9 @@ export class AnthropicAccumulator extends AccumulatorBase {
             if (msg.message.model) this.response.model = msg.message.model;
             if (msg.message.role) this.response.choices[0].message.role = msg.message.role;
 
-            // 初始化 usage（input_tokens 在这里提供）
+            // 初始化 usage（input_tokens 在这里提供）:统一交由 accumulateUsage 合并
             if (msg.message.usage) {
-                this.response.usage = {
-                    prompt_tokens: msg.message.usage.input_tokens,
-                    completion_tokens: msg.message.usage.output_tokens || 0,
-                    cache_read_tokens: msg.message.usage.cache_read_input_tokens,
-                };
+                this.accumulateUsage(msg.message.usage);
             }
             return;
         }
@@ -186,21 +184,36 @@ export class AnthropicAccumulator extends AccumulatorBase {
                 this.response.choices[0].finish_reason = stopReason;
             }
 
-            // 更新最终的 usage（output_tokens 在这里最终确定）
+            // 更新最终的 usage（output_tokens 在这里最终确定）:统一交由 accumulateUsage 合并
             if (msg.message?.usage || msg.usage) {
                 const usage = msg.usage || msg.message?.usage;
                 if (usage) {
-                    const promptTokens = usage.input_tokens ?? this.response.usage?.prompt_tokens ?? 0;
-                    const completionTokens = usage.output_tokens ?? this.response.usage?.completion_tokens ?? 0;
-                    this.response.usage = {
-                        prompt_tokens: promptTokens,
-                        completion_tokens: completionTokens,
-                        cache_read_tokens: usage.cache_read_input_tokens ?? this.response.usage?.cache_read_tokens,
-                    };
+                    this.accumulateUsage(usage);
                 }
             }
             return;
         }
+    }
+
+    /**
+     * 把一条 anthropic usage 合并进唯一的累积源 this.response.usage。
+     * 合并规则:当前 usage 某字段为 null/undefined 时保留之前累积值,否则采用当前的
+     * (注意 ?? 只回退 null/undefined——当前若为 0 也会被当作「已提供」而采用)。
+     * 合并后,读取方(getUsage 等)统一从 this.response.usage 取值。
+     */
+    private accumulateUsage(usage: {
+        input_tokens?: number;
+        output_tokens?: number;
+        cache_read_input_tokens?: number;
+        cache_creation_input_tokens?: number;
+    }): void {
+        const prev = this.response.usage;
+        this.response.usage = {
+            prompt_tokens: usage.input_tokens ?? prev?.prompt_tokens ?? 0,
+            completion_tokens: usage.output_tokens ?? prev?.completion_tokens ?? 0,
+            cache_read_tokens: usage.cache_read_input_tokens ?? prev?.cache_read_tokens,
+            cache_write_tokens: usage.cache_creation_input_tokens ?? prev?.cache_write_tokens,
+        };
     }
 
     /**

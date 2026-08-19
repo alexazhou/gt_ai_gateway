@@ -42,6 +42,7 @@ export interface AccumulatedResponse {
         prompt_tokens?: number;
         completion_tokens?: number;
         cache_read_tokens?: number;
+        cache_write_tokens?: number;
         completion_tokens_details?: {
             reasoning_tokens?: number;
         };

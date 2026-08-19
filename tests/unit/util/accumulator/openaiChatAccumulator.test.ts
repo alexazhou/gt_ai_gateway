@@ -104,6 +104,23 @@ describe("OpenAIChatAccumulator stream state", () => {
         expect(acc.getUsage()?.completion_tokens).toBe(3);
     });
 
+    it("captures cache_read_tokens and cache_write_tokens from prompt_tokens_details", () => {
+        const acc = new openaiChatAccumulator.OpenAIChatAccumulator();
+        acc.addEvent({ data: JSON.stringify({
+            choices: [],
+            usage: {
+                prompt_tokens: 71617,
+                completion_tokens: 128,
+                total_tokens: 71745,
+                prompt_tokens_details: { cached_tokens: 71168, cache_write_tokens: 1234 },
+            },
+        }) });
+
+        const usage = acc.getUsage()!;
+        expect(usage.cache_read_tokens).toBe(71168);
+        expect(usage.cache_write_tokens).toBe(1234);
+    });
+
     it("reset clears all state", () => {
         const acc = new openaiChatAccumulator.OpenAIChatAccumulator();
         acc.addEvent({ data: JSON.stringify({ choices: [{ delta: { content: "hi" } }] }) });

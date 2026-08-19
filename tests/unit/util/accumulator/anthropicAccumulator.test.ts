@@ -88,6 +88,25 @@ describe("AnthropicAccumulator stream state", () => {
         expect(acc.isOutputStarted()).toBe(true);
     });
 
+    it("captures cache_write_tokens from cache_creation_input_tokens", () => {
+        const acc = new anthropicAccumulator.AnthropicAccumulator();
+        acc.addEvent({ data: JSON.stringify({
+            type: "message_start",
+            message: {
+                id: "msg_1",
+                type: "message",
+                role: "assistant",
+                content: [],
+                usage: { input_tokens: 100, output_tokens: 0, cache_read_input_tokens: 80, cache_creation_input_tokens: 15 },
+            },
+        }), event: "message_start" });
+        acc.addEvent({ data: JSON.stringify({ type: "message_stop" }), event: "message_stop" });
+
+        const usage = acc.getUsage()!;
+        expect(usage.cache_read_tokens).toBe(80);
+        expect(usage.cache_write_tokens).toBe(15);
+    });
+
     it("does not parse the trailing [DONE] marker as JSON after message_stop (issue #14)", () => {
         const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
         const acc = new anthropicAccumulator.AnthropicAccumulator();
