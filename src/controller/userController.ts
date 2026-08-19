@@ -3,6 +3,7 @@ import { UserType } from "../constants";
 import userManager from "../manager/userManager";
 import userService from "../service/userService";
 import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
+import maskUtil from "../util/maskUtil";
 
 async function listUsers(c: Context) {
     const query = c.req.query();
@@ -60,7 +61,8 @@ async function createUser(c: Context) {
             token = crypto.randomUUID();
         }
 
-        console.log("[userController] Creating user:", { name, token, type });
+        // token 掩码进日志（前 4 位 + *），避免明文
+        console.log("[userController] Creating user:", { name, type, token: maskUtil.maskToken(token) });
 
         const instance = await userManager.create({
             name,
@@ -68,7 +70,7 @@ async function createUser(c: Context) {
             type: type || UserType.NORMAL,
         });
 
-        console.log("[userController] User created successfully:", instance);
+        console.log("[userController] User created successfully:", { id: instance.id, name: instance.name, type: instance.type, token: maskUtil.maskToken(instance.token) });
         return c.json(instance);
     } catch (error) {
         console.error("[userController] Error creating user:", error);

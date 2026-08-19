@@ -8,6 +8,7 @@ import recordService from "./service/recordService";
 import hostService from "./service/hostService";
 import app, { Env } from "./routes";
 import initLogger, { Logger } from "./util/loggerUtil";
+import maskUtil from "./util/maskUtil";
 import { RunMode } from "./constants";
 
 // --api-only: 跳过前端静态文件服务，仅提供 API（桌面 sidecar 模式使用）
@@ -173,7 +174,8 @@ async function startServer() {
     });
 
     server.on('listening', () => {
-        console.log(`ROOT_TOKEN: ${bindings.ROOT_TOKEN}`);
+        // ROOT_TOKEN 掩码进日志（前 4 位 + *），避免明文
+        console.log(`ROOT_TOKEN: ${maskUtil.maskToken(bindings.ROOT_TOKEN)}`);
         // Bypass Node.js stdout block-buffering for pipes by using writeSync
         require('fs').writeSync(1, `Server listening on http://${hostname}:${port}\n`);
     });
