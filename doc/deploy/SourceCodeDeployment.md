@@ -34,7 +34,7 @@ cd frontend && npm install && cd ..
 在项目根目录下复制环境变量模板，并创建真实的 `.dev.vars` 文件：
 
 ```bash
-cp .env.template .dev.vars
+cp .dev.vars.template .dev.vars
 ```
 
 打开 `.dev.vars` 文件，根据您的需要进行修改。主要的必填配置是管理员密钥：

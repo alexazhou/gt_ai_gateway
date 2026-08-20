@@ -1,0 +1,30 @@
+# -------------------------
+# Runtime Configuration (.dev.vars 模板)
+# -------------------------
+# 本文件是 .dev.vars 的模板：cp .dev.vars.template .dev.vars 后按需修改。
+# 加载方式：src/local.ts 通过 dotenv(override: false) 读取 .dev.vars——
+# 进程已有同名环境变量（如 Tauri 传入）优先级最高，本文件仅作兜底补充。
+
+# 仅列出会对 Node 运行时实际生效的变量。测试相关 (TEST_*) 与流日志开关
+# 已不再通过环境变量读取，请勿在此配置（详见文件末尾说明）。
+
+# 服务器监听端口（Node 模式），默认 8720
+PORT=8720
+# 监听地址，默认 127.0.0.1（如需对外可改为 0.0.0.0）
+# HOST=127.0.0.1
+# Root 用户的鉴权 Token，用于管理员接口访问（必填，务必修改为自己的）
+ROOT_TOKEN=root-token-123
+# 业务数据库文件路径（Node 模式），默认为项目根目录的 local.db
+DB_PATH=./local.db
+# 日志输出目录，默认 ./log
+# LOG_DIR=./log
+# 是否在 recordService 中打印请求记录的创建/更新日志。
+# 仅当值为 true 时开启；设为 false 或删除本行效果相同（只有 === "true" 才开）。
+RECORD_LOG_ENABLED=false
+
+# -------------------------
+# 以下变量已不再通过 .dev.vars / 环境变量生效，请勿在此配置：
+# - STREAM_LOG_ENABLED（流式日志）：现为数据库配置项 config 表 stream_log_enabled，
+#   请在管理界面或数据库配置中修改，环境变量已不再读取。
+# - 所有 TEST_*（TEST_PORT / TEST_DB_PATH / TEST_UPSTREAM_* 等）：仅供测试代码
+#   从 process.env 读取，测试进程不会加载 .dev.vars，在此配置无效。
