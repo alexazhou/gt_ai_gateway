@@ -39,7 +39,7 @@ describe("model multi-upstream migration", () => {
             "INSERT INTO vendor_model (id, vendor_id, model_id) VALUES (?, ?, ?)",
         ).run(7, 3, "legacy-upstream-model");
 
-        db.exec(readFileSync(join(migrationDirectory, "migrate_0026.sql"), "utf8"));
+        db.exec(readFileSync(join(migrationDirectory, "migrate_0026", "sqlite.sql"), "utf8"));
 
         const migrated = db.prepare(
             "SELECT routing_mode, routing_config FROM model WHERE id = ?",
