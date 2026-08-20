@@ -181,12 +181,8 @@ describe("AI Responses API", () => {
             expect(response.body).toContain("response.completed");
 
             // 验证 record 已创建且 usage 正确
-            const recordsResponse = await requestHelper.get(
-                "/record/latest.json?limit=1",
-                adminToken,
-            );
-            expect(recordsResponse.status).toBe(200);
-            const record = recordsResponse.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
             expect(record.user_id).toBe(testUserId);
             expect(record.model_id).toBe(responsesModelId);
             expect(record.status).toBe("success");

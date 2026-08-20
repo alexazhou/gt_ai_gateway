@@ -1,4 +1,6 @@
-ALTER TABLE model ADD COLUMN prices LONGTEXT DEFAULT '{}' NOT NULL;
+-- MySQL 8.0.13+ 允许 TEXT/BLOB 使用括号表达式默认值（如 ('{}')）。
+-- 用 DEFAULT ('{}') 与 SQLite 的 DEFAULT '{}' 语义一致。
+ALTER TABLE model ADD COLUMN prices LONGTEXT NOT NULL DEFAULT ('{}');
 
 UPDATE model
 SET prices = JSON_OBJECT(

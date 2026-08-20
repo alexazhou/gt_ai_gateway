@@ -227,8 +227,8 @@ describe("Stream Failure Handling", () => {
                 testUserToken,
             );
 
-            const recordRes = await requestHelper.get("/record/latest.json?limit=1", adminToken);
-            const record = recordRes.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
 
             expect(record.status).toBe("failed");
             expect(record.failed_code).toBe("stream_incomplete");
@@ -241,8 +241,8 @@ describe("Stream Failure Handling", () => {
                 testUserToken,
             );
 
-            const recordRes = await requestHelper.get("/record/latest.json?limit=1", adminToken);
-            const record = recordRes.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
 
             expect(record.status).toBe("failed");
             expect(record.failed_code).toBe("upstream_disconnected");
@@ -273,8 +273,8 @@ describe("Stream Failure Handling", () => {
                 testUserToken,
             );
 
-            const recordRes = await requestHelper.get("/record/latest.json?limit=1", adminToken);
-            const record = recordRes.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
 
             expect(record.status).toBe("success");
             expect(record.failed_code).toBeNull();
@@ -295,8 +295,8 @@ describe("Stream Failure Handling", () => {
                 testUserToken,
             );
 
-            const recordRes = await requestHelper.get("/record/latest.json?limit=1", adminToken);
-            const record = recordRes.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
 
             expect(record.status).toBe("failed");
             expect(record.failed_code).toBe("stream_incomplete");
@@ -312,8 +312,8 @@ describe("Stream Failure Handling", () => {
                 testUserToken,
             );
 
-            const recordRes = await requestHelper.get("/record/latest.json?limit=1", adminToken);
-            const record = recordRes.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
 
             expect(record.status).toBe("failed");
             expect(record.failed_code).toBe("stream_incomplete");
@@ -335,8 +335,8 @@ describe("Stream Failure Handling", () => {
             expect(response.body).toContain("event: error");
             expect(response.body).toContain("rate_limit_error");
 
-            const recordRes = await requestHelper.get("/record/latest.json?limit=1", adminToken);
-            const record = recordRes.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
 
             expect(record.status).toBe("failed");
             expect(record.failed_code).toBe("upstream_error");
@@ -388,8 +388,8 @@ describe("Stream Failure Handling", () => {
                 stream: true,
             });
 
-            const recordRes = await requestHelper.get("/record/latest.json?limit=1", adminToken);
-            const record = recordRes.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
 
             expect(record.status).toBe("failed");
             expect(record.failed_code).toBe("client_disconnected");
@@ -403,8 +403,8 @@ describe("Stream Failure Handling", () => {
                 max_tokens: 100,
             });
 
-            const recordRes = await requestHelper.get("/record/latest.json?limit=1", adminToken);
-            const record = recordRes.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
 
             expect(record.status).toBe("failed");
             expect(record.failed_code).toBe("client_disconnected");
@@ -417,8 +417,8 @@ describe("Stream Failure Handling", () => {
                 stream: true,
             });
 
-            const recordRes = await requestHelper.get("/record/latest.json?limit=1", adminToken);
-            const record = recordRes.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
 
             expect(record.status).toBe("failed");
             expect(record.failed_code).toBe("client_disconnected");
@@ -460,8 +460,8 @@ describe("Stream Failure Handling", () => {
             // Give the gateway time to detect the disconnect and finalize the record
             await new Promise((resolve) => setTimeout(resolve, 800));
 
-            const recordRes = await requestHelper.get("/record/latest.json?limit=1", adminToken);
-            const record = recordRes.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
 
             expect(record.status).toBe("success");
             expect(record.failed_code).toBeNull();

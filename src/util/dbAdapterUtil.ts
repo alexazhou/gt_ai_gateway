@@ -7,7 +7,7 @@ export interface DatabaseAdapter {
 }
 
 export interface StatementAdapter {
-    all(): Promise<{ results: any }> | any[];
+    all(): Promise<any> | any;
     first(): Promise<any> | any;
     run(...args: any[]): Promise<any> | any;
 }
@@ -79,5 +79,53 @@ class D1StatementAdapter implements StatementAdapter {
 
     async run(...args: any[]): Promise<any> {
         return await this.stmt.bind(...args).run();
+    }
+}
+
+// MySQL 适配器（运行时 DatabaseAdapter）
+// 底层使用 mysql2/promise 连接池；prepare 返回的 statement 异步执行
+export class MySQLAdapter implements DatabaseAdapter {
+    private pool: any;
+
+    constructor(pool?: any, private fallback?: () => any) {
+        this.pool = pool;
+    }
+
+    // 提供给调用方通过 (ormService.dbAdapter as any).db 访问
+    get db(): any {
+        return this.pool;
+    }
+
+    async exec(sql: string): Promise<void> {
+        await this._pool().query(sql);
+    }
+
+    prepare(sql: string): StatementAdapter {
+        return new MySQLStatementAdapter(this._pool(), sql);
+    }
+
+    private _pool(): any {
+        if (this.pool) return this.pool;
+        if (this.fallback) return this.fallback();
+        throw new customError.AppError("MySQLAdapter: pool not initialized", 500);
+    }
+}
+
+class MySQLStatementAdapter implements StatementAdapter {
+    constructor(private pool: any, private sql: string) {}
+
+    async all(): Promise<any[]> {
+        const [rows] = await this.pool.query(this.sql);
+        return rows as any[];
+    }
+
+    async first(): Promise<any> {
+        const [rows] = await this.pool.query(this.sql);
+        return (rows as any[])[0];
+    }
+
+    async run(...args: any[]): Promise<any> {
+        const [result] = await this.pool.execute(this.sql, args);
+        return result;
     }
 }

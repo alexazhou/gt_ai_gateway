@@ -1,8 +1,14 @@
 import { Model } from "sutando";
 import { inspect, InspectOptions } from "util";
+import { MicroAmountCast } from "../util/protocol/billingUtil";
 
 class SgRechargeRecord extends Model {
     table = "recharge_records";
+
+    casts = {
+        // MySQL 下以整数微元存储（应用层仍以"元"读写），避免 DECIMAL 返回字符串
+        amount: MicroAmountCast,
+    };
 
     id!: number;
 

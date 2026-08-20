@@ -1,1 +1,0 @@
-ALTER TABLE user ADD COLUMN type TEXT DEFAULT 'normal' NOT NULL;

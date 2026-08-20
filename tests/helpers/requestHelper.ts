@@ -152,6 +152,34 @@ function tryParseJSON(str: string): any {
     }
 }
 
+/**
+ * 获取最近 N 条请求记录，并轮询直至它们完成落库（status 不再是 processing）。
+ * 原因：Node 模式下响应结束后，record 的最终状态（success/failed）由 runInBackground 异步补齐，
+ * MySQL 后端该写回的延迟可能晚于测试紧接着的读取，导致读到临时的 "processing"。此函数等它 settle。
+ */
+async function getFinalizedRecords(
+    token: string,
+    limit: number = 1,
+    timeoutMs: number = 5000,
+): Promise<any[]> {
+    const deadline = Date.now() + timeoutMs;
+    let last: any[] = [];
+    for (;;) {
+        const res = await get(`/record/latest.json?limit=${limit}`, token);
+        const records = Array.isArray(res.body) ? res.body : [];
+        last = records;
+        const inFlight = records.filter((r: any) => r && r.status === "processing");
+        if (records.length === 0 || inFlight.length === 0) {
+            return records;
+        }
+        if (Date.now() >= deadline) {
+            return records;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+    }
+    return last;
+}
+
 export default {
     request,
     get,
@@ -159,4 +187,5 @@ export default {
     postWithAnthropicStyleApiKey,
     put,
     del,
+    getFinalizedRecords,
 };

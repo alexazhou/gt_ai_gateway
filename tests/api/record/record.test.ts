@@ -482,12 +482,9 @@ describe("Record API", () => {
                 testUserToken,
             );
 
-            const recordsResponse = await requestHelper.get(
-                "/record/latest.json?limit=1",
-                adminToken,
-            );
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
 
-            const record = recordsResponse.body[0];
+            const record = records[0];
             const recordResponse = await requestHelper.get(
                 `/record/${record.id}`,
                 adminToken,
@@ -573,12 +570,9 @@ describe("Record API", () => {
                 testUserToken,
             );
 
-            const recordsResponse = await requestHelper.get(
-                "/record/latest.json?limit=1",
-                adminToken,
-            );
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
 
-            const record = recordsResponse.body[0];
+            const record = records[0];
             const recordResponse = await requestHelper.get(
                 `/record/${record.id}`,
                 adminToken,

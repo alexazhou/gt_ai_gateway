@@ -14,8 +14,19 @@ PORT=8720
 # HOST=127.0.0.1
 # Root 用户的鉴权 Token，用于管理员接口访问（必填，务必修改为自己的）
 ROOT_TOKEN=root-token-123
-# 业务数据库文件路径（Node 模式），默认为项目根目录的 local.db
+# 业务数据库文件路径（Node 模式，DB_DRIVER=sqlite 时生效），默认为项目根目录的 local.db
 DB_PATH=./local.db
+# 数据库驱动（Node 模式）：sqlite（默认）/ mysql。
+# 不设置或为 sqlite 时行为与旧版完全一致；设为 mysql 时需配置下方 MySQL 连接参数。
+# DB_DRIVER=mysql
+# --- mysql 连接参数（DB_DRIVER=mysql 时生效）---
+# DB_HOST=127.0.0.1
+# DB_PORT=3306
+# DB_USER=
+# DB_PASSWORD=
+# DB_NAME=
+# 可选连接串，mysql://user:pass@host:port/db，设置后优先于上面的离散变量
+# DB_URL=
 # 日志输出目录，默认 ./log
 # LOG_DIR=./log
 # 是否在 recordService 中打印请求记录的创建/更新日志。

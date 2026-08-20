@@ -1,0 +1,2 @@
+-- MySQL：TEXT 列不能有默认值，改用 VARCHAR + 默认值
+ALTER TABLE user ADD COLUMN type VARCHAR(32) DEFAULT 'normal' NOT NULL;

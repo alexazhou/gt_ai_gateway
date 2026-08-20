@@ -1,7 +1,9 @@
 import { sutando } from "sutando";
-import { DatabaseAdapter, D1Adapter, SQLiteAdapter } from "../util/dbAdapterUtil";
+import { DatabaseAdapter, D1Adapter, SQLiteAdapter, MySQLAdapter } from "../util/dbAdapterUtil";
+import { MySQLDBAdapter } from "../util/db/mysqlDBAdapter";
+import { SQLiteDBAdapter } from "../util/db/sqliteDBAdapter";
+import dbMigrationService from "./dbMigrationService";
 import customError from "../util/customErrorUtil";
-import dbScript from "../../script/db";
 import { RunMode } from "../constants";
 
 interface ORMOptions {
@@ -19,6 +21,38 @@ class ORMService {
 
         if (mode === RunMode.WORKER) {
             this._dbAdapter = new D1Adapter();
+        } else if (process.env.DB_DRIVER === "mysql") {
+            // MySQL 分支：建立 sutando(mysql2) 连接 + 运行时 MySQLAdapter + 执行迁移
+            const mysql = (await import("mysql2/promise")).default;
+            const conn = dbMigrationService.mysqlConnFromEnv();
+
+            const pool = mysql.createPool({
+                ...conn,
+                connectionLimit: 10,
+                multipleStatements: true,
+                charset: "utf8mb4",
+                dateStrings: true,
+            });
+
+            sutando.addConnection({
+                client: "mysql2",
+                connection: {
+                    ...conn,
+                },
+                // 静默 knex 对 mysql 不支持 .returning() 的警告（mysql 通过 insertId 取回自增 id，无需 returning）
+                log: {
+                    warn: () => {},
+                    deprecate: () => {},
+                    debug: () => {},
+                },
+                useNullAsDefault: true,
+            });
+
+            this._dbAdapter = new MySQLAdapter(pool);
+
+            const migrateAdapter = new MySQLDBAdapter(conn);
+            await dbMigrationService.migrate(migrateAdapter, "node");
+            migrateAdapter.close();
         } else {
             if (!dbPath) {
                 throw new customError.AppError("dbPath is required for node mode", 500);
@@ -36,8 +70,8 @@ class ORMService {
             const db = new Database(dbPath);
             this._dbAdapter = new SQLiteAdapter(db);
 
-            const migrateAdapter = new dbScript.LocalDBAdapter(dbPath);
-            await dbScript.migrate(migrateAdapter, "node");
+            const migrateAdapter = new SQLiteDBAdapter(dbPath);
+            await dbMigrationService.migrate(migrateAdapter, "node");
             migrateAdapter.close();
         }
 
@@ -181,13 +215,18 @@ class ORMService {
 
     async verifySchema(): Promise<void> {
         try {
-            const knex = this.getKnex();
-            if (!knex) return;
+            if (!this._dbAdapter) return;
 
-            const result = await knex.raw("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
-            
-            // Handle different driver return formats (better-sqlite3 returns array directly, D1 returns { results: array })
-            const rows = result.results || result;
+            // 按驱动选择列表业务表的 SQL：sqlite 用 sqlite_master，mysql 用 information_schema
+            const isMysql = process.env.DB_DRIVER === "mysql";
+            const tableSql = isMysql
+                ? "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE()"
+                : "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'";
+
+            const result = await this._dbAdapter.prepare(tableSql).all();
+
+            // Handle different driver return formats (better-sqlite3/mysql return array, D1 returns { results: array })
+            const rows = Array.isArray(result) ? result : (result as any).results || [];
             const actualTables = new Set(rows.map((row: any) => row.name));
 
             const missingTables = ORMService.EXPECTED_TABLES.filter(table => !actualTables.has(table));

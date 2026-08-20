@@ -62,6 +62,16 @@ TEST_VERBOSE=true TEST_CLEANUP=false npm run backend:test           # 调试模�
 TEST_REAL_API=true npm run backend:test                             # 真实 API
 ```
 
+### MySQL 后端测试
+
+默认测试使用 SQLite。如需以 MySQL 作为后端跑完整的 node 模式测试套件（与 SQLite 并行、相互独立），设置 `DB_DRIVER=mysql` 并配置连接参数即可，测试过程中会自动清空并重建目标库的 schema（必须指向专用测试库，勿指向生产库）：
+
+```bash
+npm run backend:test:node:mysql                                    # 即 TEST_MODE=node DB_DRIVER=mysql vitest --run
+```
+
+连接参数通过环境变量传入：`DB_HOST`（默认 127.0.0.1）、`DB_PORT`（默认 3306）、`DB_USER`、`DB_PASSWORD`、`DB_NAME`（默认 `test`）。CI 中 `.github/workflows/test.yml` 的 `test-node-mysql` job 使用 `services: mysql:8` 容器运行该套件。
+
 ## 测试方法
 
 1. 当遇到测试失败时，先定位失败的用例，从修复其中一条开始。测试是否修复时，也只需要执行这一条，甚至一个方法，这样比较高效

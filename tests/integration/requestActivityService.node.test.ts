@@ -43,7 +43,7 @@ describe("requestActivityService (node, real db)", () => {
         await requestActivityService.append(42, RequestActivityStage.ROUTING, "路由选择");
         await requestActivityService.append(42, RequestActivityStage.FAILOVER, "切换", undefined, ActivityLevel.WARN);
 
-        const rows = dbHelper.query<any>(
+        const rows = await dbHelper.query<any>(
             "SELECT record_id, activities, created_at, updated_at FROM request_activity WHERE record_id = ?",
             [42],
         );

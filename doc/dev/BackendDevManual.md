@@ -60,6 +60,31 @@ PORT=8720
 RECORD_LOG_ENABLED=false
 ```
 
+#### 数据库驱动选择（Node 模式下支持 SQLite 与 MySQL）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DB_DRIVER` | `sqlite` | 数据库驱动：`sqlite`（默认）或 `mysql` |
+| `DB_PATH` | `./local.db` | 仅 `DB_DRIVER=sqlite` 时生效，SQLite 数据库文件路径 |
+| `DB_HOST` | `127.0.0.1` | `DB_DRIVER=mysql` 时：主机 |
+| `DB_PORT` | `3306` | `DB_DRIVER=mysql` 时：端口 |
+| `DB_USER` | - | `DB_DRIVER=mysql` 时：用户名 |
+| `DB_PASSWORD` | - | `DB_DRIVER=mysql` 时：密码 |
+| `DB_NAME` | - | `DB_DRIVER=mysql` 时：库名（必填） |
+| `DB_URL` | - | `DB_DRIVER=mysql` 时：可选连接串 `mysql://user:pass@host:port/db`，设置后优先于离散变量 |
+
+设置 `DB_DRIVER=mysql` 并配置连接参数后，Node 模式会通过 `mysql2` 连接 MySQL，启动时自动建表并执行与 SQLite 等价的迁移。不设置或为 `sqlite` 时行为与旧版完全一致。示例：
+
+```bash
+# .dev.vars
+DB_DRIVER=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=yourpass
+DB_NAME=gt_ai_gateway
+```
+
 ### 开发常用 Token 说明
 
 为方便日常开发和测试，系统预设或建议使用以下 Token 进行管理操作：

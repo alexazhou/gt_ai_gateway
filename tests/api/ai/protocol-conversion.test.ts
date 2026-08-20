@@ -194,8 +194,8 @@ describe("AI Protocol Conversion API", () => {
         expect(response.body).toContain("[DONE]");
         expect(response.body).not.toContain("message_start");
 
-        const recordsResponse = await requestHelper.get("/record/latest.json?limit=1", adminToken);
-        const record = recordsResponse.body[0];
+        const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+        const record = records[0];
         expect(record.user_id).toBe(testUserId);
         expect(record.model_id).toBe(openAIClientModelId);
         expect(record.status).toBe("success");
@@ -229,8 +229,8 @@ describe("AI Protocol Conversion API", () => {
         expect(response.body).toContain("event: message_stop");
         expect(response.body).not.toContain("[DONE]");
 
-        const recordsResponse = await requestHelper.get("/record/latest.json?limit=1", adminToken);
-        const record = recordsResponse.body[0];
+        const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+        const record = records[0];
         expect(record.user_id).toBe(testUserId);
         expect(record.model_id).toBe(anthropicClientModelId);
         expect(record.status).toBe("success");

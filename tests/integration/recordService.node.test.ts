@@ -23,7 +23,7 @@ describe("recordService (node, real db)", () => {
     }
 
     async function getRecordRow(recordId: number) {
-        const rows = dbHelper.query<any>(
+        const rows = await dbHelper.query<any>(
             "SELECT id FROM record WHERE id = ?",
             [recordId],
         );
@@ -31,7 +31,14 @@ describe("recordService (node, real db)", () => {
     }
 
     async function getRecordColumns(): Promise<string[]> {
-        const rows = dbHelper.query<{ name: string }>(
+        if (process.env.DB_DRIVER === "mysql") {
+            // MySQL：information_schema.columns 列出列名
+            const rows = await dbHelper.query<{ COLUMN_NAME: string }>(
+                "SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'record'",
+            );
+            return rows.map((r) => r.COLUMN_NAME);
+        }
+        const rows = await dbHelper.query<{ name: string }>(
             "PRAGMA table_info(record)",
         );
         return rows.map((r) => r.name);

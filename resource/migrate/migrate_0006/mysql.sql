@@ -7,7 +7,7 @@ CREATE TABLE vendor_new
     type       VARCHAR(64)                         not null,
     name       VARCHAR(255)                        not null,
     token      LONGTEXT                            not null,
-    urls       LONGTEXT                            default '{}' not null,
+    urls       LONGTEXT                            not null default ('{}'),
     created_at TIMESTAMP default CURRENT_TIMESTAMP not null,
     updated_at TIMESTAMP default CURRENT_TIMESTAMP not null
 ) engine=InnoDB default charset=utf8mb4;

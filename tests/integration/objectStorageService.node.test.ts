@@ -67,8 +67,8 @@ function createMockR2Bucket(): R2Bucket {
     } as unknown as R2Bucket;
 }
 
-function getStoredDatabaseObject(key: string): { object_key: string; data: Buffer } | null {
-    const rows = dbHelper.query<{ object_key: string; data: Buffer }>(
+async function getStoredDatabaseObject(key: string): Promise<{ object_key: string; data: Buffer } | null> {
+    const rows = await dbHelper.query<{ object_key: string; data: Buffer }>(
         "SELECT object_key, data FROM storage_record WHERE object_key = ?",
         [key],
     );
@@ -203,7 +203,7 @@ describe("objectStorageService", () => {
 
         await objectStorageService.putText(key, "database-value");
 
-        const row = getStoredDatabaseObject(key);
+        const row = await getStoredDatabaseObject(key);
         expect(row).not.toBeNull();
         expect(row!.object_key).toBe(key);
         expect(row!.data.toString()).toBe("database-value");

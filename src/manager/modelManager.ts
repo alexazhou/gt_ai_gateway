@@ -10,10 +10,21 @@ interface ModelListOptions {
 
 
 function filterByVendor(query: Builder<SgModel>, vendorId: number): void {
-    query.whereRaw(
-        "EXISTS (SELECT 1 FROM json_each(model.routing_config, '$.upstreams') AS upstream WHERE json_extract(upstream.value, '$.vendor_id') = ?)",
-        [vendorId],
-    );
+    if (process.env.DB_DRIVER === "mysql") {
+        // MySQL 8：JSON_TABLE 展开 upstreams 数组后按 vendor_id 过滤。
+        // 注意：须用「外层在 IN 子查询中加入别名」的形式；直接对同表做相关 EXISTS + JSON_TABLE
+        // 会在部分 MySQL 版本（如 8.4）报 "Invalid JSON text ... document is empty"。
+        query.whereRaw(
+            "model.id IN (SELECT sub.id FROM model AS sub, JSON_TABLE(sub.routing_config, '$.upstreams[*]' COLUMNS (vendor_id BIGINT PATH '$.vendor_id')) AS t WHERE t.vendor_id = ?)",
+            [vendorId],
+        );
+    } else {
+        // SQLite JSON1：json_each + json_extract
+        query.whereRaw(
+            "EXISTS (SELECT 1 FROM json_each(model.routing_config, '$.upstreams') AS upstream WHERE json_extract(upstream.value, '$.vendor_id') = ?)",
+            [vendorId],
+        );
+    }
 }
 
 

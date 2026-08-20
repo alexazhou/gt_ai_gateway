@@ -218,13 +218,10 @@ describe("AI Chat API", () => {
             expect(response.body).toContain("[DONE]");
 
             // Verify record was created for streaming request
-            const recordsResponse = await requestHelper.get(
-                "/record/latest.json?limit=1",
-                adminToken,
-            );
-            expect(recordsResponse.status).toBe(200);
-            expect(recordsResponse.body.length).toBeGreaterThan(0);
-            const latestRecord = recordsResponse.body[0];
+            // 流式请求的最终状态由 runInBackground 异步落库，轮询直到 settled
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            expect(records.length).toBeGreaterThan(0);
+            const latestRecord = records[0];
             expect(latestRecord.user_id).toBe(testUserId);
             expect(latestRecord.model_id).toBe(openaiModelId);
             expect(latestRecord.status).toBe("success");
@@ -284,12 +281,8 @@ describe("AI Chat API", () => {
             expect(response.body).toContain("\"tool_calls\"");
             expect(response.body).toContain("\"finish_reason\":\"tool_calls\"");
 
-            const recordsResponse = await requestHelper.get(
-                "/record/latest.json?limit=1",
-                adminToken,
-            );
-            expect(recordsResponse.status).toBe(200);
-            const latestRecord = recordsResponse.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const latestRecord = records[0];
             expect(latestRecord.user_id).toBe(testUserId);
             expect(latestRecord.model_id).toBe(openaiModelId);
             expect(latestRecord.status).toBe("success");

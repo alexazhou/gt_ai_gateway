@@ -49,6 +49,14 @@ const WORKER_CONFIG = {
 const DB_CONFIG = {
     path: process.env.TEST_DB_PATH || join(PROJECT_ROOT, "test.db"),
     mode: process.env.TEST_DB_MODE || "local",
+    driver: process.env.DB_DRIVER || "sqlite",
+    mysql: {
+        host: process.env.DB_HOST || "127.0.0.1",
+        port: parseInt(process.env.DB_PORT || "3306", 10),
+        user: process.env.DB_USER || "root",
+        password: process.env.DB_PASSWORD || "",
+        database: process.env.DB_NAME || "test",
+    },
 };
 
 /**

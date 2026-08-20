@@ -2,6 +2,7 @@ import { Model } from "sutando";
 import { inspect, InspectOptions } from "util";
 
 import { SgRecordStatus } from "../constants";
+import { MicroAmountCast } from "../util/protocol/billingUtil";
 
 
 class SgRecordUsage {
@@ -18,6 +19,8 @@ class SgRecord extends Model {
     casts = {
         start_at: "datetime",
         end_at: "datetime",
+        // MySQL 下以整数微元存储（应用层仍以"元"读写），避免 DECIMAL 返回字符串
+        cost: MicroAmountCast,
     };
 
     id!: number;

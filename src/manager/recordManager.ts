@@ -1,5 +1,6 @@
 import { SgRecord, RECORD_SUMMARY_COLUMNS } from "../model/sgRecord";
 import { SgRecordStatus } from "../constants";
+import billingUtil from "../util/protocol/billingUtil";
 
 interface RecordListOptions {
     status?: string;
@@ -33,9 +34,13 @@ async function create(data: RecordCreateData) {
 
 /**
  * 更新 record 表字段。response_data 不是 record 表列（存在对象存储），写入表前必须剥离。
+ * cost 以"元"传入；裸 query().update() 不走模型 cast，这里手动换算成整数微元存储。
  */
 async function update(recordId: number, data: Partial<SgRecord>) {
     const { response_data: _omit, ...tableData } = data as any;
+    if (tableData.cost !== undefined) {
+        tableData.cost = billingUtil.toUnits(tableData.cost);
+    }
     return SgRecord.query().where("id", recordId).update(tableData);
 }
 

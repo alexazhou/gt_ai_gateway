@@ -106,10 +106,10 @@ describe("Protocol Conversion Integration", () => {
         expect(streamResponse.body).toContain("chat.completion.chunk");
         expect(streamResponse.body).toContain("[DONE]");
 
-        const recordsResponse = await requestHelper.get("/record/latest.json?limit=2", adminToken);
-        expect(recordsResponse.status).toBe(200);
+        const records = await requestHelper.getFinalizedRecords(adminToken, 2);
+        expect(records.length).toBeGreaterThan(0);
 
-        for (const record of recordsResponse.body) {
+        for (const record of records) {
             expect(record.user_id).toBe(userId);
             expect(record.model_id).toBe(openAIClientModelId);
             expect(record.status).toBe("success");
@@ -147,10 +147,10 @@ describe("Protocol Conversion Integration", () => {
         expect(streamResponse.body).toContain("event: message_start");
         expect(streamResponse.body).toContain("event: message_stop");
 
-        const recordsResponse = await requestHelper.get("/record/latest.json?limit=2", adminToken);
-        expect(recordsResponse.status).toBe(200);
+        const records = await requestHelper.getFinalizedRecords(adminToken, 2);
+        expect(records.length).toBeGreaterThan(0);
 
-        for (const record of recordsResponse.body) {
+        for (const record of records) {
             expect(record.user_id).toBe(userId);
             expect(record.model_id).toBe(anthropicClientModelId);
             expect(record.status).toBe("success");

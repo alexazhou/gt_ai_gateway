@@ -48,7 +48,7 @@ describe.skipIf(config.TEST_MODE === "worker")("record object storage chain", ()
     });
 
     async function getStoredObject(recordId: number): Promise<{ request: string | null; response: string | null } | null> {
-        const rows = dbHelper.query<{ object_key: string; data: Buffer }>(
+        const rows = await dbHelper.query<{ object_key: string; data: Buffer }>(
             "SELECT object_key, data FROM storage_record WHERE object_key = ?",
             [`record/${recordId}`],
         );

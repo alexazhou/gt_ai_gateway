@@ -129,13 +129,9 @@ describe("AI Messages API (Anthropic)", () => {
             expect(response.body).toHaveProperty("usage");
 
             // Verify record was created
-            const recordsResponse = await requestHelper.get(
-                "/record/latest.json?limit=1",
-                adminToken,
-            );
-            expect(recordsResponse.status).toBe(200);
-            expect(recordsResponse.body.length).toBeGreaterThan(0);
-            const latestRecord = recordsResponse.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            expect(records.length).toBeGreaterThan(0);
+            const latestRecord = records[0];
             expect(latestRecord.user_id).toBe(testUserId);
             expect(latestRecord.model_id).toBe(anthropicModelId);
             expect(latestRecord.status).toBe("success");
@@ -194,13 +190,9 @@ describe("AI Messages API (Anthropic)", () => {
             expect(response.body).toContain("message_stop");
 
             // Verify record was created for streaming request
-            const recordsResponse = await requestHelper.get(
-                "/record/latest.json?limit=1",
-                adminToken,
-            );
-            expect(recordsResponse.status).toBe(200);
-            expect(recordsResponse.body.length).toBeGreaterThan(0);
-            const latestRecord = recordsResponse.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            expect(records.length).toBeGreaterThan(0);
+            const latestRecord = records[0];
             expect(latestRecord.user_id).toBe(testUserId);
             expect(latestRecord.model_id).toBe(anthropicModelId);
             expect(latestRecord.status).toBe("success");
@@ -256,12 +248,8 @@ describe("AI Messages API (Anthropic)", () => {
             expect(response.body).toContain("\"tool_use\"");
             expect(response.body).toContain("\"input_json_delta\"");
 
-            const recordsResponse = await requestHelper.get(
-                "/record/latest.json?limit=1",
-                adminToken,
-            );
-            expect(recordsResponse.status).toBe(200);
-            const latestRecord = recordsResponse.body[0];
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const latestRecord = records[0];
             expect(latestRecord.user_id).toBe(testUserId);
             expect(latestRecord.model_id).toBe(anthropicModelId);
             expect(latestRecord.status).toBe("success");
