@@ -51,6 +51,7 @@
     "dotenv": "^17.3.1",
     "hono": "^4.12.3",
     "knex-cloudflare-d1": "^0.1.1",
+    "mysql2": "^3.23.4",
     "smol-toml": "^1.7.0",
     "socks": "^2.8.9",
     "sutando": "^1.7.2",

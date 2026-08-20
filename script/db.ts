@@ -1,5 +1,5 @@
 import { join } from "path";
-import { readdirSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "fs";
 import { execSync } from "child_process";
 import { createInterface } from "readline";
 import Database from "better-sqlite3";
@@ -39,12 +39,40 @@ for (let i = 0; i < args.length; i++) {
 }
 
 // 统一的执行 SQL 接口
+// 允许异步（MySQL 适配器），同步适配器（SQLite）返回普通值，await 同样生效
 export interface DBAdapter {
-    exec(sql: string): void;
-    query<T>(sql: string): T[];
-    run(sql: string, ...params: any[]): void;
-    close(): void;
-    execTransaction?(sqls: string[]): void;
+    exec(sql: string): Promise<void> | void;
+    query<T>(sql: string): Promise<T[]> | T[];
+    run(sql: string, ...params: any[]): Promise<void> | void;
+    close(): Promise<void> | void;
+    execTransaction?(sqls: string[]): Promise<void> | void;
+}
+
+// 当前方言：node 模式由 DB_DRIVER 决定（默认 sqlite），worker(D1) 始终为 sqlite 方言
+function getDialect(env: string): "sqlite" | "mysql" {
+    if (env === "node") {
+        return process.env.DB_DRIVER === "mysql" ? "mysql" : "sqlite";
+    }
+    return "sqlite"; // worker 走 D1，与 sqlite 同方言
+}
+
+// 一个迁移目录下、当前方言应执行的文件（方言文件优先，无则回退 common.sql）
+function migrationSqlFile(dir: string, dialect: "sqlite" | "mysql"): string {
+    const candidates =
+        dialect === "mysql" ? ["mysql.sql", "common.sql"] : ["sqlite.sql", "common.sql"];
+    for (const f of candidates) {
+        const p = join(dir, f);
+        if (existsSync(p)) return p;
+    }
+    throw new Error(`Migration ${dir} has no SQL file for dialect ${dialect}`);
+}
+
+// 列出所有迁移目录（按名字排序，如 migrate_0001 … migrate_0028）
+function listMigrations(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && /^migrate_\d{4}$/.test(d.name))
+        .map((d) => d.name)
+        .sort();
 }
 
 class LocalDBAdapter implements DBAdapter {
@@ -94,6 +122,70 @@ class LocalDBAdapter implements DBAdapter {
 
     close(): void {
         this.db.close();
+    }
+}
+
+class MySQLDBAdapter implements DBAdapter {
+    private pool: any;
+
+    constructor(conn: any) {
+        // mysql2/promise 的 createPool 同步返回连接池，各方法异步执行
+        // multipleStatements: true —— 迁移文件常含多条语句，交由 exec 一次执行
+        const mysql = require("mysql2/promise");
+        this.pool = mysql.createPool({
+            host: conn.host,
+            port: conn.port,
+            user: conn.user,
+            password: conn.password,
+            database: conn.database,
+            connectionLimit: 10,
+            multipleStatements: true,
+            charset: "utf8mb4",
+            dateStrings: true,
+        });
+    }
+
+    private async withConn<T>(fn: (c: any) => Promise<T>): Promise<T> {
+        const c = await this.pool.getConnection();
+        try {
+            return await fn(c);
+        } finally {
+            c.release();
+        }
+    }
+
+    async exec(sql: string): Promise<void> {
+        await this.withConn(async (c) => c.query(sql));
+    }
+
+    async query<T>(sql: string): Promise<T[]> {
+        return this.withConn(async (c) => {
+            const [rows] = await c.query(sql);
+            return rows as T[];
+        });
+    }
+
+    async run(sql: string, ...params: any[]): Promise<void> {
+        await this.withConn(async (c) => c.execute(sql, params));
+    }
+
+    async execTransaction(sqls: string[]): Promise<void> {
+        await this.withConn(async (c) => {
+            try {
+                await c.beginTransaction();
+                for (const s of sqls) {
+                    await c.query(s);
+                }
+                await c.commit();
+            } catch (e) {
+                await c.rollback();
+                throw e;
+            }
+        });
+    }
+
+    async close(): Promise<void> {
+        await this.pool.end();
     }
 }
 
@@ -175,6 +267,15 @@ class WranglerDBAdapter implements DBAdapter {
 
 function getAdapter(env: string): DBAdapter {
     if (env === "node") {
+        if (getDialect(env) === "mysql") {
+            return new MySQLDBAdapter({
+                host: process.env.DB_HOST || "127.0.0.1",
+                port: parseInt(process.env.DB_PORT || "3306", 10),
+                user: process.env.DB_USER || "",
+                password: process.env.DB_PASSWORD || "",
+                database: process.env.DB_NAME || "",
+            });
+        }
         return new LocalDBAdapter(LOCAL_DB_PATH);
     } else if (env === "worker-local") {
         return new WranglerDBAdapter("--local", dbConfigPath, dbName);
@@ -185,23 +286,29 @@ function getAdapter(env: string): DBAdapter {
     }
 }
 
+// _migrations 记录表 DDL（按方言）
+function migrationsTableDdl(dialect: "sqlite" | "mysql"): string {
+    return dialect === "mysql"
+        ? "CREATE TABLE IF NOT EXISTS _migrations (id BIGINT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(255) NOT NULL UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)"
+        : "CREATE TABLE IF NOT EXISTS _migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)";
+}
+
 // 命令实现
 export async function migrate(adapter: DBAdapter, env: string) {
-    console.log(`${MIGRATION_START_MARKER} env=${env}`);
+    const dialect = getDialect(env);
+    console.log(`${MIGRATION_START_MARKER} env=${env} dialect=${dialect}`);
     let success = false;
 
     try {
         console.log(`Initializing migrations table in ${env}...`);
-        adapter.exec(
-            "CREATE TABLE IF NOT EXISTS _migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)",
-        );
+        await adapter.exec(migrationsTableDdl(dialect));
 
         console.log("Fetching applied migrations...");
         let applied: Migration[] = [];
         try {
-            applied = adapter.query<Migration>(
+            applied = (await adapter.query<Migration>(
                 "SELECT name FROM _migrations ORDER BY name",
-            );
+            )) as Migration[];
         } catch (e) {
             console.log("Error fetching applied migrations, assuming empty.", e);
         }
@@ -209,24 +316,20 @@ export async function migrate(adapter: DBAdapter, env: string) {
         const appliedNames = new Set(applied.map((m) => m.name));
 
         console.log("Scanning available migrations in", MIGRATION_DIR);
-        let available: string[] = [];
+        let pendingMigrations: string[] = [];
         try {
-            available = readdirSync(MIGRATION_DIR).filter((f) =>
-                f.endsWith(".sql"),
+            // 每个迁移一个目录，目录名（如 migrate_0001）即迁移标识
+            pendingMigrations = listMigrations(MIGRATION_DIR).filter(
+                (name) => !appliedNames.has(name),
             );
         } catch (e) {
             console.warn(`Could not read migration directory: ${MIGRATION_DIR}`);
         }
 
-        // 过滤并排序
-        const validFiles = available.filter((f) => /(\d{4})\.sql$/.test(f)).sort();
-
-        const pendingMigrations = validFiles.filter(
-            (name) => !appliedNames.has(name),
-        );
+        const availableCount = listMigrations(MIGRATION_DIR).length;
 
         console.log(
-            `Applied: ${applied.length}, Available: ${validFiles.length}, Pending: ${pendingMigrations.length}`,
+            `Applied: ${applied.length}, Available: ${availableCount}, Pending: ${pendingMigrations.length}`,
         );
 
         if (pendingMigrations.length === 0) {
@@ -238,17 +341,16 @@ export async function migrate(adapter: DBAdapter, env: string) {
         // Worker mode: 合并所有 pending migrations 为一个文件，一次执行
         if (!adapter.execTransaction) {
             console.log(`\n📦 Merging ${pendingMigrations.length} migrations into single file:`);
-            pendingMigrations.forEach((file, i) => console.log(`   ${i + 1}. ${file}`));
+            pendingMigrations.forEach((name, i) => console.log(`   ${i + 1}. ${name}`));
 
             mkdirSync(TMP_DIR, { recursive: true });
             const tmpFile = join(TMP_DIR, `migration_${crypto.randomUUID()}.sql`);
 
             let combinedSql = "";
-            for (const file of pendingMigrations) {
-                const sqlPath = join(MIGRATION_DIR, file);
-                const sql = readFileSync(sqlPath, "utf-8");
+            for (const name of pendingMigrations) {
+                const sql = readFileSync(migrationSqlFile(join(MIGRATION_DIR, name), dialect), "utf-8");
                 combinedSql += `${sql}\n`;
-                combinedSql += `INSERT INTO _migrations (name) VALUES ('${file}');\n`;
+                combinedSql += `INSERT INTO _migrations (name) VALUES ('${name}');\n`;
             }
 
             writeFileSync(tmpFile, combinedSql, "utf-8");
@@ -262,17 +364,16 @@ export async function migrate(adapter: DBAdapter, env: string) {
             console.log(`✅ Successfully applied ${pendingMigrations.length} migrations in one batch`);
         } else {
             // Node mode: 用事务逐个执行
-            for (const file of pendingMigrations) {
-                console.log(`\nApplying migration: ${file}...`);
-                const sqlPath = join(MIGRATION_DIR, file);
-                const sql = readFileSync(sqlPath, "utf-8");
-                const insertRecord = `INSERT INTO _migrations (name) VALUES ('${file}')`;
+            for (const name of pendingMigrations) {
+                console.log(`\nApplying migration: ${name}...`);
+                const sql = readFileSync(migrationSqlFile(join(MIGRATION_DIR, name), dialect), "utf-8");
+                const insertRecord = `INSERT INTO _migrations (name) VALUES ('${name}')`;
 
                 try {
-                    adapter.execTransaction!([sql, insertRecord]);
-                    console.log(`✅ Successfully applied: ${file}`);
+                    await adapter.execTransaction!([sql, insertRecord]);
+                    console.log(`✅ Successfully applied: ${name}`);
                 } catch (e) {
-                    console.error(`❌ Failed to apply migration ${file}:`, e);
+                    console.error(`❌ Failed to apply migration ${name}:`, e);
                     throw e;
                 }
             }
@@ -286,43 +387,38 @@ export async function migrate(adapter: DBAdapter, env: string) {
     }
 }
 
-async function status(adapter: DBAdapter) {
+async function status(adapter: DBAdapter, env: string) {
+    const dialect = getDialect(env);
     console.log("Initializing migrations table...");
-    adapter.exec(
-        "CREATE TABLE IF NOT EXISTS _migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)",
-    );
+    await adapter.exec(migrationsTableDdl(dialect));
 
     let applied: Migration[] = [];
     try {
-        applied = adapter.query<Migration>(
+        applied = (await adapter.query<Migration>(
             "SELECT name, applied_at FROM _migrations ORDER BY name",
-        );
+        )) as Migration[];
     } catch (e) {
         console.log("Error fetching applied migrations", e);
     }
 
-    let available: string[] = [];
+    let migs: string[] = [];
     try {
-        available = readdirSync(MIGRATION_DIR).filter((f) =>
-            f.endsWith(".sql"),
-        );
+        migs = listMigrations(MIGRATION_DIR);
     } catch (e) {
         console.warn(`Could not read migration directory: ${MIGRATION_DIR}`);
     }
 
-    const validFiles = available.filter((f) => /(\d{4})\.sql$/.test(f)).sort();
-
     console.log(`\n=== Migration Status ===`);
 
-    if (validFiles.length === 0) {
-        console.log("No migration files found in resource/migrate.");
+    if (migs.length === 0) {
+        console.log("No migrations found in resource/migrate.");
         return;
     }
 
     const appliedMap = new Map<string, string>();
     applied.forEach((m) => appliedMap.set(m.name, m.applied_at || "unknown"));
 
-    validFiles.forEach((file) => {
+    migs.forEach((file) => {
         if (appliedMap.has(file)) {
             console.log(`✅ ${file} (Applied at: ${appliedMap.get(file)})`);
         } else {
@@ -330,29 +426,31 @@ async function status(adapter: DBAdapter) {
         }
     });
 
-    const lastApplied = applied.length > 0 ? applied[applied.length - 1] : null;
-    const version = lastApplied
-        ? parseInt(lastApplied.name.match(/(\d{4})\.sql$/)?.[1] || "0", 10)
-        : 0;
+    const version = applied.length > 0 ? parseInt(applied[applied.length - 1].name.replace(/\D/g, ""), 10) || 0 : 0;
 
     console.log(`\nCurrent Database Version: ${version}`);
-    console.log(`Migrations to apply: ${validFiles.length - applied.length}`);
+    console.log(`Migrations to apply: ${migs.length - applied.length}`);
 }
 
 async function clear(adapter: DBAdapter, env: string) {
+    const dialect = getDialect(env);
     // 注意：这个操作很危险
     console.warn(
         `\n⚠️  WARNING: You are about to CLEAR the database in environment: ${env}`,
     );
     console.warn(
-        `All tables EXCEPT sqlite_schema / d1 internal tables will be DROPPED.\n`,
+        `All tables EXCEPT sqlite_schema / mysql system tables will be DROPPED.\n`,
     );
+
+    // 按方言列出业务表：sqlite 用 sqlite_master，mysql 用 information_schema
+    const listSql =
+        dialect === "mysql"
+            ? "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name NOT LIKE '\\_%'"
+            : "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'd1_%'";
 
     let tables: any[] = [];
     try {
-        tables = adapter.query<{ name: string }>(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'd1_%'",
-        );
+        tables = (await adapter.query<{ name: string }>(listSql)) as any[];
     } catch (e) {
         console.error("Failed to query tables:", e);
         return;
@@ -388,7 +486,7 @@ async function clear(adapter: DBAdapter, env: string) {
     for (const table of tables) {
         try {
             console.log(`Dropping table: ${table.name}...`);
-            adapter.exec(`DROP TABLE IF EXISTS ${table.name}`);
+            await adapter.exec(`DROP TABLE IF EXISTS ${table.name}`);
         } catch (e) {
             console.error(`Failed to drop table ${table.name}:`, e);
         }
@@ -441,7 +539,7 @@ async function main() {
                 await migrate(adapter, env);
                 break;
             case "status":
-                await status(adapter);
+                await status(adapter, env);
                 break;
             case "clear":
                 await clear(adapter, env);

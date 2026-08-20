@@ -301,7 +301,7 @@ async function cleanup(): Promise<void> {
 
     const tables = adapter.query<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'd1_%' AND name != '_migrations'",
-    );
+    ) as unknown as { name: string }[];
 
     for (const table of tables) {
         try {
@@ -345,7 +345,7 @@ async function truncate(): Promise<void> {
 
     const tables = adapter.query<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'd1_%' AND name != '_migrations'",
-    );
+    ) as unknown as { name: string }[];
 
     for (const table of tables) {
         try {
@@ -380,7 +380,7 @@ function query<T>(sql: string, params: any[] = []): T[] {
 
     try {
         if (isWorkerMode) {
-            return adapter.query<T>(sql);
+            return adapter.query<T>(sql) as unknown as T[];
         } else {
             return localDb!.prepare(sql).all(...params) as T[];
         }

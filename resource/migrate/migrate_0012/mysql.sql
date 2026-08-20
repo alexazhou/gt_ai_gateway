@@ -1,0 +1,2 @@
+ALTER TABLE record ADD COLUMN client_format VARCHAR(32) NULL;
+ALTER TABLE record ADD COLUMN upstream_format VARCHAR(32) NULL;

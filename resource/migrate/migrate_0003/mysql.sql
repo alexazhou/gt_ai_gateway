@@ -1,0 +1,1 @@
+ALTER TABLE vendor ADD COLUMN api_format VARCHAR(32) DEFAULT 'openai' NOT NULL;
