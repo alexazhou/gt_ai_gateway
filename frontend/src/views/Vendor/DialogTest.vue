@@ -332,7 +332,6 @@ async function runRoutingTest() {
     const requestBody = {
         model: modelName,
         messages,
-        temperature: 0.7,
         max_tokens: 256,
         stream: false,
     };
