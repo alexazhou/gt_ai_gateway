@@ -60,5 +60,5 @@ V1.7 前的插件产品规划曾设想「用户可配置 JS 脚本插件」的�
 
 ## 相关文档
 
-- [产品文档](./v1.7_step1_product.md)
+- [产品文档](./step1_product.md)
 - 专项设计：[client_manager_design.md](./client_manager_design.md)、[connection_mode_official_design.md](./connection_mode_official_design.md)

@@ -62,4 +62,4 @@ cost = input_cost + output_cost + cache_cost
 
 ## 相关文档
 
-- [产品文档](./v1.4_step1_product.md)
+- [产品文档](./step1_product.md)

@@ -114,6 +114,6 @@ responseHandlerService → requestActivityService.append
 
 ## 相关文档
 
-- [产品文档](./v1.9_step1_product.md)
-- [开发任务表](./v1.9_step3_tasks.md)
+- [产品文档](./step1_product.md)
+- [开发任务表](./step3_tasks.md)
 - 专项设计：[service_manager_split_design.md](./service_manager_split_design.md)

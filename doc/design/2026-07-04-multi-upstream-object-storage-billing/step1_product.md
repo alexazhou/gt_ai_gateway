@@ -56,6 +56,6 @@
 
 ## 相关文档
 
-- [技术文档](./v1.8_step2_technical.md)
-- [开发任务表](./v1.8_step3_tasks.md)
+- [技术文档](./step2_technical.md)
+- [开发任务表](./step3_tasks.md)
 - 专项设计：[model_multi_upstream_routing_design.md](./model_multi_upstream_routing_design.md)、[request_record_and_activity_design.md](./request_record_and_activity_design.md)、[upstream_failover_last_error_design.md](./upstream_failover_last_error_design.md)

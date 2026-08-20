@@ -74,6 +74,6 @@ objectStorageService
 
 ## 相关文档
 
-- [产品文档](./v1.8_step1_product.md)
-- [开发任务表](./v1.8_step3_tasks.md)
+- [产品文档](./step1_product.md)
+- [开发任务表](./step3_tasks.md)
 - 专项设计：[model_multi_upstream_routing_design.md](./model_multi_upstream_routing_design.md)、[request_record_and_activity_design.md](./request_record_and_activity_design.md)、[upstream_failover_last_error_design.md](./upstream_failover_last_error_design.md)

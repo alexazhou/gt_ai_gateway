@@ -41,4 +41,4 @@
 
 ## 相关文档
 
-- 专项设计：[request_record_and_activity_design.md](../v1.8/request_record_and_activity_design.md)
+- 专项设计：[request_record_and_activity_design.md](../2026-07-04-multi-upstream-object-storage-billing/request_record_and_activity_design.md)

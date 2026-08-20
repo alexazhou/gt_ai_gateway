@@ -64,6 +64,6 @@ controller → service（业务编排） → manager（DAL/持久化） → mode
 
 ## 相关文档
 
-- [技术文档](./v1.9_step2_technical.md)
-- [开发任务表](./v1.9_step3_tasks.md)
+- [技术文档](./step2_technical.md)
+- [开发任务表](./step3_tasks.md)
 - 专项设计：[service_manager_split_design.md](./service_manager_split_design.md)

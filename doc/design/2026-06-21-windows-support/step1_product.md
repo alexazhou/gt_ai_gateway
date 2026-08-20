@@ -19,4 +19,4 @@
 
 ## 相关文档
 
-- [Tauri 开发手册](../../../dev/TauriDevManual.md)
+- [Tauri 开发手册](../../dev/TauriDevManual.md)

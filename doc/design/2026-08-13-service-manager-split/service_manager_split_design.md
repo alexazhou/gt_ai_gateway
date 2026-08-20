@@ -1,4 +1,4 @@
-> ✅ V1.9 专项设计：已排期实施。原为 `_planning/` 规划稿，随 V1.9 版本落地转为正式设计文档，推进节奏见 [v1.9_step3_tasks.md](./v1.9_step3_tasks.md)。
+> ✅ V1.9 专项设计：已排期实施。原为 `_planning/` 规划稿，随 V1.9 版本落地转为正式设计文档，推进节奏见 [step3_tasks.md](./step3_tasks.md)。
 
 # Service / Manager 分层重构设计
 
@@ -255,6 +255,6 @@ responseHandlerService → requestActivityService.append
 
 ## 9. 相关文档
 
-- [产品文档](./v1.9_step1_product.md)
-- [技术文档](./v1.9_step2_technical.md)
-- [开发任务表](./v1.9_step3_tasks.md)
+- [产品文档](./step1_product.md)
+- [技术文档](./step2_technical.md)
+- [开发任务表](./step3_tasks.md)

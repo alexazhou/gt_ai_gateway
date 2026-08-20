@@ -27,5 +27,5 @@
 
 ## 相关文档
 
-- [技术文档](./v1.7_step2_technical.md)
+- [技术文档](./step2_technical.md)
 - 专项设计：[client_manager_design.md](./client_manager_design.md)、[connection_mode_official_design.md](./connection_mode_official_design.md)

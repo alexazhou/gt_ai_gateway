@@ -26,6 +26,6 @@
 
 ## 相关文档
 
-- [技术文档](./v1.5_step2_technical.md)
-- [Tauri 开发手册](../../../dev/TauriDevManual.md)
-- [协议转换说明](../../../usage/ProtocolConversion.md)
+- [技术文档](./step2_technical.md)
+- [Tauri 开发手册](../../dev/TauriDevManual.md)
+- [协议转换说明](../../usage/ProtocolConversion.md)

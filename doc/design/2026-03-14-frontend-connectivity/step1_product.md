@@ -20,4 +20,4 @@
 
 ## 相关文档
 
-- 基础前端能力见 [V1.0 产品文档](../v1.0/v1.0_step1_product.md) 与 [V1.0 技术文档](../v1.0/v1.0_step2_technical.md)
+- 基础前端能力见 [V1.0 产品文档](../2026-03-13-basic-gateway/step1_product.md) 与 [V1.0 技术文档](../2026-03-13-basic-gateway/step2_technical.md)

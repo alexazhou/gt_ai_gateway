@@ -43,4 +43,4 @@
 
 ## 相关文档
 
-- [技术文档](./v1.4_step2_technical.md)
+- [技术文档](./step2_technical.md)

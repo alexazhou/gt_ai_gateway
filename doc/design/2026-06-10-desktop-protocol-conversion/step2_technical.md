@@ -43,6 +43,6 @@ V1.5 的核心是两条主线：**桌面端运行形态**与**协议转换引擎
 
 ## 相关文档
 
-- [产品文档](./v1.5_step1_product.md)
-- [Tauri 开发手册](../../../dev/TauriDevManual.md)
-- [协议转换说明](../../../usage/ProtocolConversion.md)
+- [产品文档](./step1_product.md)
+- [Tauri 开发手册](../../dev/TauriDevManual.md)
+- [协议转换说明](../../usage/ProtocolConversion.md)
