@@ -95,13 +95,11 @@ async function listEnabledModels() {
 }
 
 
-async function checkDuplicateEnabledModel(
+async function checkDuplicateModel(
     name: string,
     excludeId?: number,
 ): Promise<boolean> {
-    const query = SgModel.query()
-        .where("name", name)
-        .where("enable", 1);
+    const query = SgModel.query().where("name", name);
     if (excludeId) {
         query.where("id", "!=", excludeId);
     }
@@ -139,7 +137,7 @@ export default {
     listModels,
     hasModelsUsingVendor,
     listEnabledModels,
-    checkDuplicateEnabledModel,
+    checkDuplicateModel,
     deleteModel,
     filterByVendor,
     count,

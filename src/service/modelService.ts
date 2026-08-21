@@ -5,8 +5,8 @@ import routingService from "./routingService/core";
 
 
 async function createModel(model: SgModel): Promise<SgModel> {
-    if (model.enable && await modelManager.checkDuplicateEnabledModel(model.name ?? "")) {
-        throw new customError.AppError("An enabled model with this name already exists", 409);
+    if (await modelManager.checkDuplicateModel(model.name ?? "")) {
+        throw new customError.AppError("A model with this name already exists", 409);
     }
 
     model.validatePrices();
@@ -26,12 +26,10 @@ async function updateModel(inputModel: SgModel): Promise<SgModel | null> {
     const { id: _id, ...updateData } = inputModel.toData();
     model.fill(updateData);
 
-    // Check for duplicate enabled model when enabling or changing name
-    if (model.enable) {
-        const isDuplicate = await modelManager.checkDuplicateEnabledModel(model.name ?? "", model.id);
-        if (isDuplicate) {
-            throw new customError.AppError("An enabled model with this name already exists", 409);
-        }
+    // Check for duplicate model name (regardless of enable)
+    const isDuplicate = await modelManager.checkDuplicateModel(model.name ?? "", model.id);
+    if (isDuplicate) {
+        throw new customError.AppError("A model with this name already exists", 409);
     }
 
     model.validatePrices();

@@ -39,11 +39,11 @@ describe("modelManager (node, real db)", () => {
         expect(list.length).toBe(1);
     });
 
-    it("checkDuplicateEnabledModel + deleteModel", async () => {
+    it("checkDuplicateModel + deleteModel", async () => {
         const model = await modelManager.save(buildModel("gpt-4o"));
 
-        expect(await modelManager.checkDuplicateEnabledModel("gpt-4o")).toBe(true);
-        expect(await modelManager.checkDuplicateEnabledModel("gpt-4o", model.id)).toBe(false);
+        expect(await modelManager.checkDuplicateModel("gpt-4o")).toBe(true);
+        expect(await modelManager.checkDuplicateModel("gpt-4o", model.id)).toBe(false);
 
         expect(await modelManager.deleteModel(model.id)).toBe(true);
         expect(await modelManager.findById(model.id)).toBeNull();

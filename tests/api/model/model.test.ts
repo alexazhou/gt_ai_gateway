@@ -352,10 +352,9 @@ describe("Model API (Positive)", () => {
         });
     });
 
-    describe("Duplicate Enabled Model Detection", () => {
+    describe("Duplicate Model Name Detection", () => {
         let enabledModel1: any;
         let disabledModel1: any;
-        let enabledModel2: any;
 
         beforeAll(async () => {
             const enabled1 = await requestHelper.post(
@@ -374,31 +373,9 @@ describe("Model API (Positive)", () => {
                 adminToken,
             );
             disabledModel1 = disabled1.body;
-
-            const enabled2 = await requestHelper.post(
-                "/model/create.json",
-                modelFixtures.createRandomModel(openaiVendorId, "duplicate-test-3"),
-                adminToken,
-            );
-            enabledModel2 = enabled2.body;
         });
 
-        it("should return error when editing model to enabled with existing enabled model name", async () => {
-            const response = await requestHelper.put(
-                `/model/${disabledModel1.id}`,
-                {
-                    ...toModelRequest(disabledModel1),
-                    name: enabledModel1.name,
-                    enable: true,
-                },
-                adminToken,
-            );
-
-            expect(response.status).toBe(409);
-            expect(response.body.error).toContain("already exists");
-        });
-
-        it("should succeed when editing model to disabled with existing enabled model name", async () => {
+        it("should return error when editing model to an existing name (regardless of enable)", async () => {
             const response = await requestHelper.put(
                 `/model/${disabledModel1.id}`,
                 {
@@ -409,51 +386,11 @@ describe("Model API (Positive)", () => {
                 adminToken,
             );
 
-            expect(response.status).toBe(200);
-            expect(response.body.name).toBe(enabledModel1.name);
-            expect(response.body.enable).toBeFalsy();
-        });
-
-        it("should return error when editing model enable to true with duplicate name", async () => {
-            const response = await requestHelper.put(
-                `/model/${disabledModel1.id}`,
-                {
-                    ...toModelRequest(disabledModel1),
-                    name: "new-duplicate-name",
-                    enable: true,
-                },
-                adminToken,
-            );
-
-            expect(response.status).toBe(200);
-            disabledModel1 = response.body;
-
-            const duplicateResponse = await requestHelper.put(
-                `/model/${enabledModel2.id}`,
-                {
-                    ...toModelRequest(enabledModel2),
-                    name: "new-duplicate-name",
-                    enable: true,
-                },
-                adminToken,
-            );
-
-            expect(duplicateResponse.status).toBe(409);
-            expect(duplicateResponse.body.error).toContain("already exists");
-        });
-
-        it("should return error when creating enabled model with existing enabled name", async () => {
-            const response = await requestHelper.post(
-                "/model/create.json",
-                modelFixtures.createRandomModel(openaiVendorId, enabledModel1.name),
-                adminToken,
-            );
-
             expect(response.status).toBe(409);
             expect(response.body.error).toContain("already exists");
         });
 
-        it("should succeed when creating disabled model with existing enabled name", async () => {
+        it("should return error when creating a model with an existing name (regardless of enable)", async () => {
             const response = await requestHelper.post(
                 "/model/create.json",
                 {
@@ -463,8 +400,22 @@ describe("Model API (Positive)", () => {
                 adminToken,
             );
 
+            expect(response.status).toBe(409);
+            expect(response.body.error).toContain("already exists");
+        });
+
+        it("should succeed when creating a model with a unique name while disabled", async () => {
+            const response = await requestHelper.post(
+                "/model/create.json",
+                {
+                    ...modelFixtures.createRandomModel(openaiVendorId, "unique-disabled-name"),
+                    enable: false,
+                },
+                adminToken,
+            );
+
             expect(response.status).toBe(200);
-            expect(response.body.name).toBe(enabledModel1.name);
+            expect(response.body.name).toBe("unique-disabled-name");
             expect(response.body.enable).toBeFalsy();
         });
     });

@@ -325,9 +325,15 @@ async function createBackup(params: CreateClientConfigBackupParams): Promise<Cli
         const apiKey = await resolveApiKey(fields.connectionMode, fields.vendorId, fields.userId);
         if (apiKey) fields.apiKey = apiKey;
     }
+    // 显式提供名字时数据库层会强制 (client, name) 唯一，这里给出友好错误
+    const name = params.name?.trim();
+    if (name && await clientConfigManager.findByNameAndClient(name, params.client)) {
+        throw new Error(`A backup named "${name}" already exists for this client`);
+    }
+
     const record = await clientConfigManager.create({
         client: params.client,
-        name: params.name?.trim() || await clientConfigManager.formatUniqueName(params.client, "未命名配置"),
+        name: name || await clientConfigManager.formatUniqueName(params.client, "未命名配置"),
         configContent: fields,
         enabled: false,
     });
@@ -354,6 +360,13 @@ async function renameBackup(params: RenameClientConfigBackupParams): Promise<Cli
 
     if (!backup) {
         throw new Error("Backup not found");
+    }
+
+    // 同一 client 内名字不允许重复（数据库层有 UNIQUE(client, name) 约束，
+    // 这里给出友好错误而非原生 DB 错误）
+    const duplicate = await clientConfigManager.findByNameAndClient(name, params.client, params.backupId);
+    if (duplicate) {
+        throw new Error(`A backup named "${name}" already exists for this client`);
     }
 
     await clientConfigManager.update(backup, { name });

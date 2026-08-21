@@ -18,6 +18,19 @@ async function findByIdAndClient(backupId: number, client: string): Promise<SgCl
         .first();
 }
 
+/**
+ * 按 client + name 查找，确保同一 client 内名字不重复；不存在时返回 null。
+ */
+async function findByNameAndClient(name: string, client: string, excludeId?: number): Promise<SgClientConfig | null> {
+    const q = SgClientConfig.query()
+        .where("name", name)
+        .where("client", client);
+    if (excludeId) {
+        q.where("id", "!=", excludeId);
+    }
+    return await q.first();
+}
+
 async function create(data: Record<string, any>) {
     return await SgClientConfig.query().create(data);
 }
@@ -56,6 +69,7 @@ async function formatUniqueName(client: string, baseName: string): Promise<strin
 export default {
     listByClient,
     findByIdAndClient,
+    findByNameAndClient,
     create,
     update,
     remove,
