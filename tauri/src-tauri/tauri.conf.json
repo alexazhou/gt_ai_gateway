@@ -34,7 +34,7 @@
         "targets": "all",
         "resources": {
             "icons/tray-icon@2x.png": "icons/tray-icon@2x.png",
-            "../../resource/migrate/*": "resource/migrate/"
+            "../../resource/migrate/**/*": "resource/migrate/"
         },
         "externalBin": [
             "../build/binaries/ai-gateway-backend"
