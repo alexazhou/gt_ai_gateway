@@ -43,3 +43,34 @@ describe("versionUtil.getVersion", () => {
         expect(versionUtil.getVersion({})).toBe(packageJson.version);
     });
 });
+
+describe("versionUtil.isNewerVersion", () => {
+    it("纯数字版本：latest 主干更高才视为有更新", () => {
+        expect(versionUtil.isNewerVersion("1.8.6", "1.8.7")).toBe(true);
+        expect(versionUtil.isNewerVersion("1.8.7", "1.8.6")).toBe(false);
+        expect(versionUtil.isNewerVersion("1.8.7", "1.8.10")).toBe(true);
+        expect(versionUtil.isNewerVersion("1.8.10", "1.8.7")).toBe(false);
+    });
+
+    it("当前为更新的 prerelease：1.8.7-beta2 比正式版 1.8.6 新，不提示更新", () => {
+        expect(versionUtil.isNewerVersion("1.8.7-beta2", "1.8.6")).toBe(false);
+        expect(versionUtil.isNewerVersion("1.8.7-beta2", "1.8.6.0")).toBe(false);
+    });
+
+    it("同主干：beta < 正式版，beta 用户应收到正式版升级提示", () => {
+        expect(versionUtil.isNewerVersion("1.8.7-beta2", "1.8.7")).toBe(true);
+        expect(versionUtil.isNewerVersion("1.8.7", "1.8.7-beta2")).toBe(false);
+        expect(versionUtil.isNewerVersion("1.8.7-beta2", "1.8.8")).toBe(true);
+    });
+
+    it("主干低于 latest 的 prerelease：当前正式版 1.8.7 vs latest 1.8.8-beta1 视为有更新", () => {
+        expect(versionUtil.isNewerVersion("1.8.7", "1.8.8-beta1")).toBe(true);
+    });
+
+    it("相等版本与 v 前缀不干扰比较", () => {
+        expect(versionUtil.isNewerVersion("1.8.7", "1.8.7")).toBe(false);
+        expect(versionUtil.isNewerVersion("v1.8.7", "v1.8.7")).toBe(false);
+        expect(versionUtil.isNewerVersion("1.8.7", "v1.8.6")).toBe(false);
+        expect(versionUtil.isNewerVersion("v1.8.7", "1.8.8")).toBe(true);
+    });
+});

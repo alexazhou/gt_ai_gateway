@@ -1,5 +1,6 @@
 import packageJson from "../../package.json";
 import { getLogger } from "../util/loggerUtil";
+import versionUtil from "../util/versionUtil";
 
 interface GitHubRelease {
     tag_name: string;
@@ -63,7 +64,7 @@ async function checkUpdate(_ctx: any, force: boolean = false): Promise<UpdateSta
             latestVersion = latestVersion.substring(1);
         }
 
-        const hasUpdate = isNewerVersion(currentVersion, latestVersion);
+        const hasUpdate = versionUtil.isNewerVersion(currentVersion, latestVersion);
 
         const status: UpdateStatus = {
             success: true,
@@ -86,20 +87,6 @@ async function checkUpdate(_ctx: any, force: boolean = false): Promise<UpdateSta
             error_message: String(e)
         };
     }
-}
-
-// Compare semantic versions (e.g. 1.2.3 < 1.2.4)
-function isNewerVersion(current: string, latest: string): boolean {
-    const currParts = current.split('.').map(Number);
-    const latestParts = latest.split('.').map(Number);
-
-    for (let i = 0; i < Math.max(currParts.length, latestParts.length); i++) {
-        const curr = currParts[i] || 0;
-        const lat = latestParts[i] || 0;
-        if (lat > curr) return true;
-        if (lat < curr) return false;
-    }
-    return false;
 }
 
 export default {
