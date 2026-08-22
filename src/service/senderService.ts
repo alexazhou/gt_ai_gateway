@@ -41,6 +41,20 @@ function buildUpstreamFailureResponse(c: Context, error: unknown): Response {
 }
 
 
+// inspect 模式下脱敏上游请求头，避免认证信息泄露给调用方
+function sanitizeUpstreamHeaders(headers: Headers): Record<string, string> {
+    const result: Record<string, string> = {};
+    headers.forEach((value, key) => {
+        const lower = key.toLowerCase();
+        result[key] =
+            lower === "authorization" || lower === "x-api-key"
+                ? (value.length > 12 ? value.slice(0, 8) + "****" + value.slice(-4) : "****")
+                : value;
+    });
+    return result;
+}
+
+
 async function sendRequestToUpstream(
     c: Context,
     user: SgUser,
@@ -96,6 +110,12 @@ async function sendRequestToUpstream(
         "trailer",
         "transfer-encoding",
         "upgrade",
+        "cookie",
+        "accept",
+        "accept-encoding",
+        "accept-language",
+        "priority",
+        "user-agent",
     ];
 
     for (const [key, value] of c.req.raw.headers.entries()) {
@@ -201,6 +221,22 @@ async function sendRequestToUpstream(
 
     await streamLogService.writeRequestLog(record, upstreamBody);
 
+    // inspect 模式（专用测试接口使用）：把本次（最终命中的）上游实际请求快照注入 c，
+    // 供调用方返回给前端展示。生产路径不带 inspect 标记，此处零开销。
+    if (c.get("inspectUpstream")) {
+        c.set("upstreamRequestSnapshot", {
+            url,
+            method: "POST",
+            headers: sanitizeUpstreamHeaders(finalHeaders),
+            body: upstreamBody,
+            client_format: clientFormat,
+            upstream_format: upstreamFormat,
+            vendor: { id: vendor.id, name: vendor.name },
+            vendor_model_name: vendorModelName,
+            proxy: vendor.config.proxy ?? null,
+        });
+    }
+
     // 7. 发起上游请求，拿到响应头后立即判断响应类型
     await requestActivityService.append(recordId, RequestActivityStage.UPSTREAM_ATTEMPT, "发起上游请求", {
         vendor_id: vendor.id,
@@ -266,7 +302,13 @@ async function sendRequest(
     modelConfig: SgModel,
     clientFormat: ApiFormat,
     body: string,
+    options: { inspect?: boolean } = {},
 ): Promise<Response> {
+    // inspect 模式：在 c 上打标记，sendRequestToUpstream 据此把上游请求快照注入 c（供专用测试接口使用）
+    if (options.inspect) {
+        c.set("inspectUpstream", true);
+    }
+
     // 预检：余额为负的用户阻止请求，不向上游发起（负余额在完成时扣减产生，充值前不再放行）
     // balance 为整数微元，负值即欠费；但未启用计费（价格未设置或为 0）的模型不拦截
     if (user.balance < 0 && modelConfig.hasBilling()) {

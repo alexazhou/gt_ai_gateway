@@ -122,8 +122,7 @@ import { ref, computed, watch } from 'vue';
 import { testVendor, listVendorModels } from '@/api/vendor';
 import type { VendorTestResponse } from '@/api/vendor';
 import type { Vendor, VendorModel } from '@/types/vendor';
-import { sendApiTest } from '@/api/gateway';
-import type { ApiFormat, TestMessage } from '@/types/gateway';
+import { testModelRoute } from '@/api/model';
 import { notifyRequestError, notifySuccess, notifyWarning } from '@/utils/requestFeedback';
 import { message as antMessage } from 'ant-design-vue';
 import { CopyOutlined } from '@ant-design/icons-vue';
@@ -277,68 +276,36 @@ function handleSearch(val: string) {
     searchValue.value = val;
 }
 
-// 模型路由测试：走网关 /llm 路由，让 routing_mode + failover 真实生效
+// 模型路由测试：走专用接口（真实网关路由 + failover），返回上游实际请求快照与上游响应
 async function runRoutingTest() {
     const model = modelName.value;
     if (!model) return;
-
-    const messages: TestMessage[] = [{ role: 'user', content: '你好' }];
-    const requestBody = {
-        model,
-        messages,
-        max_tokens: 256,
-        stream: false,
-    };
-    const endpoint = format.value === 'anthropic' ? '/llm/v1/messages' : '/llm/v1/chat/completions';
 
     loading.value = true;
     result.value = null;
     const startTime = Date.now();
 
     try {
-        await sendApiTest(
-            { ...requestBody, format: format.value as ApiFormat },
-            {
-                onRawResponse: (raw) => {
-                    result.value = {
-                        success: true,
-                        duration: Date.now() - startTime,
-                        url: endpoint,
-                        request_method: 'POST',
-                        request_body: requestBody,
-                        response: raw,
-                    };
-                },
-                onComplete: () => {
-                    loading.value = false;
-                    if (result.value?.success) {
-                        notifySuccess('测试完成，模型正常响应');
-                    }
-                },
-                onError: (error) => {
-                    loading.value = false;
-                    result.value = {
-                        success: false,
-                        duration: Date.now() - startTime,
-                        url: endpoint,
-                        request_method: 'POST',
-                        request_body: requestBody,
-                        error,
-                    };
-                    notifyWarning(`测试失败：${error}`);
-                },
-            },
-        );
+        const res = await testModelRoute(model, format.value);
+        result.value = res;
+        if (res.success) {
+            notifySuccess('测试完成，模型正常响应');
+        } else {
+            if (res.status) {
+                notifyWarning(`测试完成，但上游返回错误 (HTTP ${res.status})`);
+            } else {
+                notifyWarning('测试请求失败 (底层网络报错)');
+            }
+        }
     } catch (error) {
-        loading.value = false;
         const requestError = notifyRequestError(error, '测试请求发送失败');
         result.value = {
             success: false,
-            url: endpoint,
-            request_method: 'POST',
-            request_body: requestBody,
+            duration: Date.now() - startTime,
             error: requestError.message,
         };
+    } finally {
+        loading.value = false;
     }
 }
 

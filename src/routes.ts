@@ -136,6 +136,7 @@ app.delete("/vendor/:id", authMiddleware.requireAdmin, vendorController.deleteVe
 
 // Model (需要管理员权限)
 app.post("/model/create.json", authMiddleware.requireAdmin, modelController.createModel);
+app.post("/model/route-test.json", authMiddleware.requireAdmin, modelController.testModelRoute);
 app.get("/model/list.json", authMiddleware.requireAdmin, modelController.listModels);
 app.post("/model/batch.json", authMiddleware.requireAdmin, modelController.getModelsByIds);
 app.get("/model/:id", authMiddleware.requireAdmin, modelController.getModel);
