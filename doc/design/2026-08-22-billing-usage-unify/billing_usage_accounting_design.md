@@ -115,11 +115,10 @@ class SgRecordUsage extends CastsAttributes {
 
 **`src/service/responseHandlerService.ts`（去重，调用方零改动）**
 
-- 抽内部共享函数：
-  - `handleNonStreamResponse(c, upstreamRes, record, model, user, options)`：收敛两个非流式 handler，`options` 携带 converter / upstreamFormat / 日志前缀。
-  - `runSseLoop(c, upstreamRes, stream, opts)`：收敛 SSE 消费循环，返回 `{ accumulator, firstTokenTime, failedCode, streamErrorData }`；`opts` 携带 accumulator 工厂、converter、日志前缀。
-  - `finalizeStreamResult(...)`：收敛 runInBackground 收尾。三个失败分支原样搬入；「成功」分支因 §4.2 的归一化不再需要按协议区分——统一为 `normalizeUsage(OPENAI, accumulator.getUsage())` + `calculateCost`。
-- 保留 4 个公开导出的函数名作为薄封装，`senderService` 调用点不变。
+- 对外只保留 **2 个处理器**（即完整实现，无包装层）：
+  - `handleStreamResponse(...)`：流式完整实现——按 `format` 选择累加器（anthropic / responses / openai chat），复用内部 `runSseLoop`（SSE 消费循环）与 `finalizeStreamResult`（runInBackground 收尾，三个失败分支原样搬入；成功分支统一为 `normalizeUsage(OPENAI, accumulator.getUsage())` + `calculateCost`）。
+  - `handleNonStreamResponse(...)`：非流式完整实现（各协议通用）。原两个非流式 handler 的日志前缀统一。
+- 删除原 4 个 `handleChat*/handleResponses*` 包装；`senderService` 的 Responses 特判分支并入统一分发，调用点简化为一次流式/非流式判断。
 
 **`src/util/protocolConverter/OpenAIToAnthropicConverter.ts`（顺带修复，见 §6）**
 - 流式 `message_delta` 输出补 `prompt_tokens_details.cached_tokens`，不再丢失上游 Anthropic 的 cache 信息。

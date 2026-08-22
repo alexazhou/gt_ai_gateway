@@ -37,31 +37,26 @@ interface StreamAccumulator {
 
 
 // ====================================================================
-// 共享：非流式响应处理（handleChatNonStreamResponse / handleResponsesNonStreamResponse 收敛）
+// 非流式响应处理（openai / anthropic / responses 通用）
 // ====================================================================
 
-interface NonStreamOptions {
-    converter: BaseConverter | null;
-    upstreamFormat: ApiFormat;
-    errorLogPrefix: string;
-    convertErrorLogPrefix: string;
-    usageParseLogPrefix: string;
-}
-
-
-async function handleNonStreamResponse(
+/**
+ * 非流式响应：各协议通用。协议转换按 converter 是否存在判断，上游 usage 按 upstreamFormat 解析。
+ */
+export async function handleNonStreamResponse(
     c: Context,
     upstreamRes: Response,
     record: SgRecord,
     model: SgModel,
     user: SgUser,
-    opts: NonStreamOptions,
+    upstreamFormat: ApiFormat,
+    converter: BaseConverter | null = null,
 ): Promise<Response> {
     const responseText = await upstreamRes.text();
     const statusCode = upstreamRes.status as StatusCode;
 
     if (!upstreamRes.ok) {
-        console.error(opts.errorLogPrefix, {
+        console.error("[responseHandlerService] Upstream non-stream error response:", {
             recordId: record.id,
             status: statusCode,
             contentType: upstreamRes.headers.get("content-type"),
@@ -89,13 +84,13 @@ async function handleNonStreamResponse(
     }
 
     let clientResponseText = responseText;
-    if (opts.converter) {
+    if (converter) {
         try {
             const responseJson = JSON.parse(responseText);
-            const clientRes = opts.converter.convertResponse(responseJson);
+            const clientRes = converter.convertResponse(responseJson);
             clientResponseText = JSON.stringify(clientRes);
         } catch (e) {
-            console.error(opts.convertErrorLogPrefix, e);
+            console.error("[responseHandlerService] Failed to convert response format:", e);
             throw new customError.AppError(
                 `Failed to convert upstream response format: ${e instanceof Error ? e.message : String(e)}`,
                 502,
@@ -106,9 +101,9 @@ async function handleNonStreamResponse(
     let normalizedUsage: ReturnType<typeof usageUtils.normalizeUsage> | null = null;
     try {
         const responseJson = JSON.parse(responseText);
-        normalizedUsage = usageUtils.normalizeUsage(opts.upstreamFormat, responseJson.usage);
+        normalizedUsage = usageUtils.normalizeUsage(upstreamFormat, responseJson.usage);
     } catch (e) {
-        console.log(opts.usageParseLogPrefix, e);
+        console.log("Failed to parse response for token stats:", e);
     }
 
     const usageJson = normalizedUsage ? usageUtils.serializeStoredUsage(normalizedUsage.recordUsage) : null;
@@ -148,7 +143,7 @@ async function handleNonStreamResponse(
 
 
 // ====================================================================
-// 共享：流式响应处理（handleChatStreamResponse / handleResponsesStreamResponse 收敛）
+// 流式响应处理（openai / anthropic / responses 通用）
 // ====================================================================
 
 interface StreamRunResult {
@@ -372,108 +367,39 @@ function finalizeStreamResult(
 }
 
 
-async function handleStreamResponse(
+/**
+ * 流式响应：按客户端协议格式选择累加器（anthropic / responses / openai chat）。
+ */
+export async function handleStreamResponse(
     c: Context,
     upstreamRes: Response,
     record: SgRecord,
     model: SgModel,
     user: SgUser,
-    opts: RunSseLoopOptions,
+    format: ApiFormat,
+    upstreamFormat: ApiFormat = format,
+    converter: BaseConverter | null = null,
 ): Promise<Response> {
     const logStream = await streamLogService.prepareStreamLog(record);
 
     return streamSSE(c, async (stream: SSEStreamingApi) => {
-        const state = await runSseLoop(c, upstreamRes, stream, logStream, opts);
-        console.log(`${opts.logPrefix} Stream ended, events: ${state.eventCount}, completed: ${state.accumulator.isCompleted()}, failedCode: ${state.failedCode}`);
+        const state = await runSseLoop(c, upstreamRes, stream, logStream, {
+            createAccumulator: () => format === ApiFormat.ANTHROPIC
+                ? new anthropicAccumulator.AnthropicAccumulator()
+                : format === ApiFormat.RESPONSES
+                    ? new responsesAccumulator.ResponsesAccumulator()
+                    : new openaiChatAccumulator.OpenAIChatAccumulator(),
+            converter,
+            logPrefix: "[responseHandlerService]",
+        });
+        console.log(`[responseHandlerService] Stream ended, events: ${state.eventCount}, completed: ${state.accumulator.isCompleted()}, failedCode: ${state.failedCode}`);
         finalizeStreamResult(c, record, model, user, state);
         logStream?.end();
     });
 }
 
 
-// ====================================================================
-// 公开包装（薄封装，保持 senderService 调用点与签名不变）
-// ====================================================================
-
-export async function handleChatStreamResponse(
-    c: Context,
-    upstreamRes: Response,
-    record: SgRecord,
-    model: SgModel,
-    user: SgUser,
-    format: ApiFormat,
-    upstreamFormat: ApiFormat = format,
-    converter: BaseConverter | null = null,
-): Promise<Response> {
-    return handleStreamResponse(c, upstreamRes, record, model, user, {
-        createAccumulator: () => format === ApiFormat.ANTHROPIC
-            ? new anthropicAccumulator.AnthropicAccumulator()
-            : new openaiChatAccumulator.OpenAIChatAccumulator(),
-        converter,
-        logPrefix: "[responseHandlerService]",
-    });
-}
-
-
-export async function handleChatNonStreamResponse(
-    c: Context,
-    upstreamRes: Response,
-    record: SgRecord,
-    model: SgModel,
-    user: SgUser,
-    format: ApiFormat,
-    upstreamFormat: ApiFormat = format,
-    converter: BaseConverter | null = null,
-): Promise<Response> {
-    return handleNonStreamResponse(c, upstreamRes, record, model, user, {
-        converter,
-        upstreamFormat,
-        errorLogPrefix: "[responseHandlerService] Upstream non-stream error response:",
-        convertErrorLogPrefix: "[responseHandlerService] Failed to convert response format:",
-        usageParseLogPrefix: "Failed to parse response for token stats:",
-    });
-}
-
-
-export async function handleResponsesStreamResponse(
-    c: Context,
-    upstreamRes: Response,
-    record: SgRecord,
-    model: SgModel,
-    user: SgUser,
-    converter: BaseConverter | null = null,
-    upstreamFormat: ApiFormat = ApiFormat.RESPONSES,
-): Promise<Response> {
-    return handleStreamResponse(c, upstreamRes, record, model, user, {
-        createAccumulator: () => new responsesAccumulator.ResponsesAccumulator(),
-        converter,
-        logPrefix: "[responseHandlerService]",
-    });
-}
-
-
-export async function handleResponsesNonStreamResponse(
-    c: Context,
-    upstreamRes: Response,
-    record: SgRecord,
-    model: SgModel,
-    user: SgUser,
-    converter: BaseConverter | null = null,
-    upstreamFormat: ApiFormat = ApiFormat.RESPONSES,
-): Promise<Response> {
-    return handleNonStreamResponse(c, upstreamRes, record, model, user, {
-        converter,
-        upstreamFormat,
-        errorLogPrefix: "[responseHandlerService] Upstream responses non-stream error response:",
-        convertErrorLogPrefix: "[responseHandlerService] Failed to convert responses non-stream response:",
-        usageParseLogPrefix: "Failed to parse responses API response:",
-    });
-}
-
-
 export default {
-    handleChatStreamResponse,
-    handleChatNonStreamResponse,
-    handleResponsesStreamResponse,
-    handleResponsesNonStreamResponse,
+    handleStreamResponse,
+    handleNonStreamResponse,
 };

@@ -280,20 +280,11 @@ async function sendRequestToUpstream(
         upstreamRes.ok &&
         upstreamRes.headers.get("content-type")?.startsWith("text/event-stream");
 
-    // 8. 按响应类型分发处理
-    if (clientFormat === ApiFormat.RESPONSES) {
-        if (isStream) {
-            return responseHandlerService.handleResponsesStreamResponse(c, upstreamRes, record, modelConfig, user, converter, upstreamFormat);
-        } else {
-            return responseHandlerService.handleResponsesNonStreamResponse(c, upstreamRes, record, modelConfig, user, converter, upstreamFormat);
-        }
-    }
-
+    // 8. 按响应类型分发处理（三种协议统一走 responseHandlerService，按 clientFormat 选累加器/解析口径）
     if (isStream) {
-        return responseHandlerService.handleChatStreamResponse(c, upstreamRes, record, modelConfig, user, clientFormat, upstreamFormat, converter);
-    } else {
-        return responseHandlerService.handleChatNonStreamResponse(c, upstreamRes, record, modelConfig, user, clientFormat, upstreamFormat, converter);
+        return responseHandlerService.handleStreamResponse(c, upstreamRes, record, modelConfig, user, clientFormat, upstreamFormat, converter);
     }
+    return responseHandlerService.handleNonStreamResponse(c, upstreamRes, record, modelConfig, user, upstreamFormat, converter);
 }
 
 
