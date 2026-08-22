@@ -137,31 +137,21 @@ function handleView(record: Record) {
 
 function getTokens(record: Record): { prompt: number; output: number; cacheRead: number | null } | null {
     if (!record.usage) return null;
-    try {
-        const u = JSON.parse(record.usage);
-        if (u.prompt_tokens === undefined && u.completion_tokens === undefined) return null;
-        const cacheRead = (u.cache_read_tokens !== undefined && u.cache_read_tokens !== null)
-            ? (u.cache_read_tokens as number)
-            : null;
-        return { prompt: u.prompt_tokens ?? 0, output: u.completion_tokens ?? 0, cacheRead };
-    } catch {
-        return null;
-    }
+    const u = record.usage;
+    if (u.prompt_tokens == null && u.completion_tokens == null) return null;
+    const cacheRead = u.cache_read_tokens != null ? (u.cache_read_tokens as number) : null;
+    return { prompt: u.prompt_tokens ?? 0, output: u.completion_tokens ?? 0, cacheRead };
 }
 
 function getCacheHitRate(record: Record): { rate: number; tokens: number } | null {
     if (!record.usage) return null;
-    try {
-        const u = JSON.parse(record.usage);
-        if (u.cache_read_tokens === undefined || u.cache_read_tokens === null) return null;
-        const cacheRead = u.cache_read_tokens;
-        const promptTokens = u.prompt_tokens ?? 0;
-        const total = promptTokens + cacheRead;
-        const rate = total <= 0 ? 0 : Math.floor(cacheRead / total * 1000) / 10;
-        return { rate, tokens: cacheRead };
-    } catch {
-        return null;
-    }
+    const u = record.usage;
+    if (u.cache_read_tokens == null) return null;
+    const cacheRead = u.cache_read_tokens;
+    const promptTokens = u.prompt_tokens ?? 0;
+    const total = promptTokens + cacheRead;
+    const rate = total <= 0 ? 0 : Math.floor(cacheRead / total * 1000) / 10;
+    return { rate, tokens: cacheRead };
 }
 
 

@@ -130,7 +130,7 @@ describe("AI Responses API", () => {
             expect(record.user_id).toBe(testUserId);
             expect(record.model_id).toBe(responsesModelId);
             expect(record.status).toBe("success");
-            const usageR1 = JSON.parse(record.usage);
+            const usageR1 = record.usage;
             expect(usageR1.prompt_tokens).toBeGreaterThan(0);
             expect(usageR1.completion_tokens).toBeGreaterThan(0);
             expect(usageR1.cache_read_tokens).toBe(4);
@@ -186,7 +186,7 @@ describe("AI Responses API", () => {
             expect(record.user_id).toBe(testUserId);
             expect(record.model_id).toBe(responsesModelId);
             expect(record.status).toBe("success");
-            const usageR2 = JSON.parse(record.usage);
+            const usageR2 = record.usage;
             expect(usageR2.prompt_tokens).toBeGreaterThan(0);
             expect(usageR2.completion_tokens).toBeGreaterThan(0);
             expect(usageR2.cache_read_tokens).toBe(4);

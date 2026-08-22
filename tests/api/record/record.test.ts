@@ -450,7 +450,7 @@ describe("Record API", () => {
             expect(recordResponse.body.model_id).toBe(openaiModelId);
 
             // Verify token statistics are populated
-            const usage1 = JSON.parse(recordResponse.body.usage);
+            const usage1 = recordResponse.body.usage;
             if (config.isRealMode) {
                 expect(usage1.prompt_tokens).toBeGreaterThan(0);
                 expect(usage1.completion_tokens).toBeGreaterThan(0);
@@ -496,7 +496,7 @@ describe("Record API", () => {
             expect(recordResponse.body.model_id).toBe(openaiModelId);
 
             // Verify token statistics for streaming
-            const usage2 = JSON.parse(recordResponse.body.usage);
+            const usage2 = recordResponse.body.usage;
             if (config.isRealMode) {
                 expect(usage2.prompt_tokens).toBeGreaterThan(0);
                 expect(usage2.completion_tokens).toBeGreaterThan(0);
@@ -543,7 +543,7 @@ describe("Record API", () => {
             expect(recordResponse.body.model_id).toBe(anthropicModelId);
 
             // Verify token statistics
-            const usage3 = JSON.parse(recordResponse.body.usage);
+            const usage3 = recordResponse.body.usage;
             if (config.isRealMode) {
                 expect(usage3.prompt_tokens).toBeGreaterThan(0);
                 expect(usage3.completion_tokens).toBeGreaterThan(0);
@@ -584,7 +584,7 @@ describe("Record API", () => {
             expect(recordResponse.body.model_id).toBe(anthropicModelId);
 
             // Verify token statistics for streaming
-            const usage4 = JSON.parse(recordResponse.body.usage);
+            const usage4 = recordResponse.body.usage;
             if (config.isRealMode) {
                 expect(usage4.prompt_tokens).toBeGreaterThan(0);
                 expect(usage4.completion_tokens).toBeGreaterThan(0);

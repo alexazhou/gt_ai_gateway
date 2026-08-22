@@ -27,6 +27,14 @@ interface RecordCreateData {
     cost: number;
 }
 
+/**
+ * record 表更新载荷。usage 列以「存储串」写入（DB 值），与模型读侧的 SgRecordUsage 实例不同表示；
+ * response_data 不是 record 表列（存在对象存储），update 时会被剥离。
+ */
+type RecordUpdateData = Partial<Omit<SgRecord, "usage">> & {
+    usage?: string | null;
+};
+
 
 async function create(data: RecordCreateData) {
     return await SgRecord.query().create(data);
@@ -34,9 +42,10 @@ async function create(data: RecordCreateData) {
 
 /**
  * 更新 record 表字段。response_data 不是 record 表列（存在对象存储），写入表前必须剥离。
- * cost 以"元"传入；裸 query().update() 不走模型 cast，这里手动换算成整数微元存储。
+ * cost 以"元"传入；裸 query().update() 不走模型 cast，这里手动换算成整数微元存储；
+ * usage 同样直接以存储串写入（见 RecordUpdateData）。
  */
-async function update(recordId: number, data: Partial<SgRecord>) {
+async function update(recordId: number, data: RecordUpdateData) {
     const { response_data: _omit, ...tableData } = data as any;
     if (tableData.cost !== undefined) {
         tableData.cost = billingUtil.toUnits(tableData.cost);
@@ -116,6 +125,9 @@ async function count(): Promise<number> {
 async function deleteAll(): Promise<void> {
     await SgRecord.query().delete();
 }
+
+export { RecordUpdateData };
+
 
 export default {
     create,

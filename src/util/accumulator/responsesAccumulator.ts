@@ -30,16 +30,15 @@ interface ResponsesOutputItem {
     content: ResponsesContentPart[];
 }
 
+/**
+ * 归一化后的 usage（统一 OpenAI 口径键：prompt_tokens 为含缓存的输入总量，cache_read_tokens 为其子集）。
+ * 上游 Responses 原生键（input_tokens / input_tokens_details.cached_tokens）在落地时转换。
+ * 缺失字段为 null，明确返回 0 则为 0（与 SgRecordUsage 同口径）。
+ */
 interface ResponsesUsage {
-    input_tokens?: number;
-    output_tokens?: number;
-    total_tokens?: number;
-    input_tokens_details?: {
-        cached_tokens?: number;
-    };
-    output_tokens_details?: {
-        reasoning_tokens?: number;
-    };
+    prompt_tokens?: number | null;
+    completion_tokens?: number | null;
+    cache_read_tokens?: number | null;
 }
 
 interface ResponsesAccumulatedResponse {
@@ -233,6 +232,19 @@ export class ResponsesAccumulator extends AccumulatorBase {
     }
 
 
+    /**
+     * Responses 原生 usage → 归一化口径（prompt_tokens 总量含缓存 / completion_tokens / cache_read_tokens）
+     */
+    private toCanonicalUsage(usage: Record<string, any> | undefined): ResponsesUsage | undefined {
+        if (!usage) return undefined;
+        return {
+            prompt_tokens: usage.input_tokens ?? null,
+            completion_tokens: usage.output_tokens ?? null,
+            cache_read_tokens: (usage.input_tokens_details as Record<string, any> | undefined)?.cached_tokens ?? null,
+        };
+    }
+
+
     private handleResponseCompleted(responseObj: Record<string, any> | undefined): void {
         if (!responseObj) return;
         // response.completed 包含最终完整的 response 对象，直接覆盖
@@ -242,7 +254,7 @@ export class ResponsesAccumulator extends AccumulatorBase {
         if (responseObj.model) this.response.model = responseObj.model;
         if (responseObj.status) this.response.status = responseObj.status;
         if (responseObj.output) this.response.output = responseObj.output;
-        if (responseObj.usage) this.response.usage = responseObj.usage;
+        if (responseObj.usage) this.response.usage = this.toCanonicalUsage(responseObj.usage);
         if (responseObj.completed_at) this.response.completed_at = responseObj.completed_at;
     }
 

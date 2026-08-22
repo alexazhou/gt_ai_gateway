@@ -39,10 +39,10 @@ export interface AccumulatedResponse {
         finish_reason: string | null;
     }>;
     usage?: {
-        prompt_tokens?: number;
-        completion_tokens?: number;
-        cache_read_tokens?: number;
-        cache_write_tokens?: number;
+        prompt_tokens?: number | null;
+        completion_tokens?: number | null;
+        cache_read_tokens?: number | null;
+        cache_write_tokens?: number | null;
         completion_tokens_details?: {
             reasoning_tokens?: number;
         };

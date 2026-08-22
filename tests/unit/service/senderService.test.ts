@@ -98,6 +98,7 @@ describe("normalizeUsage", () => {
         expect(normalized!.promptTokens).toBe(100);
         expect(normalized!.outputTokens).toBe(12);
         expect(normalized!.cacheReadTokens).toBe(40);
+        // recordUsage 为展示口径（构造时由总量 - 缓存归一）：prompt_tokens = 非缓存输入
         expect(normalized!.recordUsage.prompt_tokens).toBe(60);
         expect(normalized!.recordUsage.completion_tokens).toBe(12);
         expect(normalized!.recordUsage.cache_read_tokens).toBe(40);
@@ -105,32 +106,32 @@ describe("normalizeUsage", () => {
 });
 
 
-describe("buildStreamUsageAccounting", () => {
-    it("stores OpenAI-compatible streamed cache reads as separate record input tokens", () => {
-        const accounting = usageUtils.buildStreamUsageAccounting(
-            ApiFormat.OPENAI,
-            {
-                prompt_tokens: 53067,
-                completion_tokens: 262,
-                cache_read_tokens: 52864,
-            },
-            {
-                prices: {
-                    input: 0.002,
-                    cache_read: 0.0002,
-                    output: 0.01,
-                },
-            } as any,
-        );
-
-        expect(accounting.usageJson).not.toBeNull();
-        expect(JSON.parse(accounting.usageJson!)).toMatchObject({
-            prompt_tokens: 203,
+describe("serializeStoredUsage", () => {
+    it("stores OpenAI-compatible streamed cache reads as total prompt tokens with version marker", () => {
+        const normalized = usageUtils.normalizeUsage(ApiFormat.OPENAI, {
+            prompt_tokens: 53067,
             completion_tokens: 262,
             cache_read_tokens: 52864,
         });
+        expect(normalized).not.toBeNull();
+
+        const usageJson = usageUtils.serializeStoredUsage(normalized!.recordUsage);
+        expect(usageJson).not.toBeNull();
+        expect(JSON.parse(usageJson!)).toMatchObject({
+            usage_version: 2,
+            prompt_tokens: 53067,
+            completion_tokens: 262,
+            cache_read_tokens: 52864,
+        });
+
+        const cost = usageUtils.calculateCost(
+            { prices: { input: 0.002, cache_read: 0.0002, output: 0.01 } } as any,
+            normalized!.promptTokens,
+            normalized!.outputTokens,
+            normalized!.cacheReadTokens,
+        );
         // 成本按最小扣减单位（1e-6）取整：0.0000135988 → 14e-6
-        expect(accounting.cost).toBeCloseTo(14e-6, 12);
+        expect(cost).toBeCloseTo(14e-6, 12);
     });
 });
 

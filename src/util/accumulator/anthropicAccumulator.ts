@@ -57,6 +57,13 @@ export class AnthropicAccumulator extends AccumulatorBase {
     };
 
     /**
+     * 非缓存输入基数（Anthropic input_tokens 语义：不含缓存命中）。
+     * 口径统一为总量 = 该基数 + cache_read_input_tokens，跨 chunk 分开合并避免相互覆盖。
+     * 上游未提供时为 null（区别于返回 0）。
+     */
+    private inputTokens: number | null = null;
+
+    /**
      * 添加一条客户端 SSE 事件（原始 data 字符串）
      * 内部解析并检测完成/错误/首个输出。
      */
@@ -208,11 +215,16 @@ export class AnthropicAccumulator extends AccumulatorBase {
         cache_creation_input_tokens?: number;
     }): void {
         const prev = this.response.usage;
+        if (usage.input_tokens !== undefined) {
+            this.inputTokens = usage.input_tokens;
+        }
+        const cacheRead = usage.cache_read_input_tokens ?? prev?.cache_read_tokens ?? null;
         this.response.usage = {
-            prompt_tokens: usage.input_tokens ?? prev?.prompt_tokens ?? 0,
-            completion_tokens: usage.output_tokens ?? prev?.completion_tokens ?? 0,
-            cache_read_tokens: usage.cache_read_input_tokens ?? prev?.cache_read_tokens,
-            cache_write_tokens: usage.cache_creation_input_tokens ?? prev?.cache_write_tokens,
+            // 统一 OpenAI 口径：prompt_tokens = 非缓存输入基数 + 缓存命中（总量含缓存）；缺失字段为 null
+            prompt_tokens: this.inputTokens != null ? this.inputTokens + (cacheRead ?? 0) : null,
+            completion_tokens: usage.output_tokens ?? prev?.completion_tokens ?? null,
+            cache_read_tokens: cacheRead,
+            cache_write_tokens: usage.cache_creation_input_tokens ?? prev?.cache_write_tokens ?? null,
         };
     }
 
@@ -259,6 +271,7 @@ export class AnthropicAccumulator extends AccumulatorBase {
                 { index: 0, message: { content: "", thinking: "", signature: "" }, finish_reason: null },
             ],
         };
+        this.inputTokens = 0;
         this.resetState();
     }
 }

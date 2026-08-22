@@ -279,21 +279,17 @@ watch(conversationData, (newVal) => {
 const usageTokens = computed(() => {
     const usage = recordStore.currentRecord?.usage;
     if (!usage) return null;
-    try {
-        const u = JSON.parse(usage);
-        if (u.prompt_tokens === undefined && u.completion_tokens === undefined) return null;
-        const prompt: number = u.prompt_tokens ?? 0;
-        const output: number = u.completion_tokens ?? 0;
-        const cacheRead = u.cache_read_tokens;
-        let cacheHitRate: number | null = null;
-        if (cacheRead !== undefined && cacheRead !== null) {
-            const total = prompt + cacheRead;
-            cacheHitRate = total > 0 ? Math.floor(cacheRead / total * 1000) / 10 : 0;
-        }
-        return { prompt, output, cacheHitRate, cacheReadTokens: cacheRead ?? null };
-    } catch {
-        return null;
+    const u = usage;
+    if (u.prompt_tokens == null && u.completion_tokens == null) return null;
+    const prompt: number = u.prompt_tokens ?? 0;
+    const output: number = u.completion_tokens ?? 0;
+    const cacheRead = u.cache_read_tokens;
+    let cacheHitRate: number | null = null;
+    if (cacheRead != null) {
+        const total = prompt + cacheRead;
+        cacheHitRate = total > 0 ? Math.floor(cacheRead / total * 1000) / 10 : 0;
     }
+    return { prompt, output, cacheHitRate, cacheReadTokens: cacheRead ?? null };
 });
 
 const totalDuration = computed(() => {

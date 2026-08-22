@@ -199,7 +199,7 @@ describe("AI Protocol Conversion API", () => {
         expect(record.user_id).toBe(testUserId);
         expect(record.model_id).toBe(openAIClientModelId);
         expect(record.status).toBe("success");
-        const usageA = JSON.parse(record.usage);
+        const usageA = record.usage;
         expect(usageA.prompt_tokens).toBeGreaterThan(0);
         expect(usageA.completion_tokens).toBeGreaterThan(0);
 
@@ -234,7 +234,7 @@ describe("AI Protocol Conversion API", () => {
         expect(record.user_id).toBe(testUserId);
         expect(record.model_id).toBe(anthropicClientModelId);
         expect(record.status).toBe("success");
-        const usageB = JSON.parse(record.usage);
+        const usageB = record.usage;
 
         const responseData = JSON.parse(record.response_data);
         expect(responseData.choices[0].message.role).toBe("assistant");
@@ -243,7 +243,8 @@ describe("AI Protocol Conversion API", () => {
         expect(responseData.usage.completion_tokens).toBeGreaterThan(0);
         expect(usageB.prompt_tokens).toBe(responseData.usage.prompt_tokens);
         expect(usageB.completion_tokens).toBe(responseData.usage.completion_tokens);
-        expect(usageB.cache_read_tokens).toBe(responseData.usage.cache_read_tokens);
+        // record.usage 为展示口径：上游未返回缓存时为 null；accumulator 原始 dict 中可能缺省
+        expect(usageB.cache_read_tokens).toBe(responseData.usage.cache_read_tokens ?? null);
     }, 30000);
 
 

@@ -1,6 +1,6 @@
 import { SgRecord } from "../model/sgRecord";
 import { SgRecordStatus, ApiFormat, ConfigKey } from "../constants";
-import recordManager from "../manager/recordManager";
+import recordManager, { type RecordUpdateData } from "../manager/recordManager";
 import objectStorageService from "./objectStorageService";
 import configService from "./configService";
 
@@ -94,7 +94,7 @@ async function create(
     return record;
 }
 
-async function update(recordId: number, data: Partial<SgRecord>) {
+async function update(recordId: number, data: RecordUpdateData) {
     if (isLogEnabled()) {
         console.log(`[RecordService] Updating record ${recordId}:`, JSON.stringify(data, null, 2));
     }

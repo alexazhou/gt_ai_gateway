@@ -370,12 +370,16 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
             };
 
             if (msgDelta.usage) {
-                const promptTokens = msgDelta.usage.input_tokens ?? this.inputTokens;
+                const cacheReadTokens = msgDelta.usage.cache_read_input_tokens ?? 0;
+                const promptTokensBase = msgDelta.usage.input_tokens ?? this.inputTokens;
+                // OpenAI 口径：prompt_tokens 为含缓存命中总量，缓存部分单独经 prompt_tokens_details 透传
+                const promptTokens = promptTokensBase + cacheReadTokens;
                 const completionTokens = msgDelta.usage.output_tokens || 0;
                 chunk.usage = {
                     prompt_tokens: promptTokens,
                     completion_tokens: completionTokens,
                     total_tokens: promptTokens + completionTokens,
+                    prompt_tokens_details: { cached_tokens: cacheReadTokens },
                 };
             }
             return [{ data: JSON.stringify(chunk) }];

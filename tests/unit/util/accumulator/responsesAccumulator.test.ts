@@ -57,15 +57,13 @@ describe("ResponsesAccumulator", () => {
             expect(response.output[0].content[0].text).toBe("Hello! How can I help you?");
         });
 
-        it("parses usage tokens", () => {
+        it("parses usage tokens (normalized to canonical keys)", () => {
             const acc = parseResponsesStream(requireFixture("responses-stream.log"));
             const response = acc.getResponse();
 
-            expect(response.usage?.input_tokens).toBe(10);
-            expect(response.usage?.output_tokens).toBe(8);
-            expect(response.usage?.total_tokens).toBe(18);
-            expect(response.usage?.input_tokens_details?.cached_tokens).toBe(0);
-            expect(response.usage?.output_tokens_details?.reasoning_tokens).toBe(0);
+            expect(response.usage?.prompt_tokens).toBe(10);
+            expect(response.usage?.completion_tokens).toBe(8);
+            expect(response.usage?.cache_read_tokens).toBe(0);
             expect(acc.getUsage()).toEqual(response.usage);
         });
 
@@ -126,9 +124,10 @@ describe("ResponsesAccumulator", () => {
             expect(acc.isCompleted()).toBe(true);
             expect(acc.isErrored()).toBe(false);
             expect(acc.getUsage()).toEqual({
-                input_tokens: 2,
-                output_tokens: 3,
-                total_tokens: 5,
+                prompt_tokens: 2,
+                completion_tokens: 3,
+                // 上游未返回缓存 → null（区别于返回 0）
+                cache_read_tokens: null,
             });
         });
 

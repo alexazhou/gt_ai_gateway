@@ -103,6 +103,8 @@ describe("AnthropicAccumulator stream state", () => {
         acc.addEvent({ data: JSON.stringify({ type: "message_stop" }), event: "message_stop" });
 
         const usage = acc.getUsage()!;
+        // prompt_tokens 按总量口径 = 非缓存输入基数 + 缓存命中
+        expect(usage.prompt_tokens).toBe(180);
         expect(usage.cache_read_tokens).toBe(80);
         expect(usage.cache_write_tokens).toBe(15);
     });
