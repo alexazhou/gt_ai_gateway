@@ -35,7 +35,7 @@ interface StreamRunResult {
 
 
 interface RunSseLoopOptions {
-    createAccumulator: () => AccumulatorBase;
+    accumulator: AccumulatorBase;
     converter: BaseConverter | null;
     logPrefix: string;
 }
@@ -56,7 +56,7 @@ async function runSseLoop(
     logStream: WriteStream | null,
     opts: RunSseLoopOptions,
 ): Promise<StreamRunResult> {
-    const accumulator = opts.createAccumulator();
+    const { accumulator } = opts;
     const reader = upstreamRes.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -371,13 +371,18 @@ export async function handleStreamResponse(
 ): Promise<Response> {
     const logStream = await streamLogService.prepareStreamLog(record);
 
+    let accumulator: AccumulatorBase;
+    if (format === ApiFormat.ANTHROPIC) {
+        accumulator = new anthropicAccumulator.AnthropicAccumulator();
+    } else if (format === ApiFormat.RESPONSES) {
+        accumulator = new responsesAccumulator.ResponsesAccumulator();
+    } else {
+        accumulator = new openaiChatAccumulator.OpenAIChatAccumulator();
+    }
+
     return streamSSE(c, async (stream: SSEStreamingApi) => {
         const state = await runSseLoop(c, upstreamRes, stream, logStream, {
-            createAccumulator: () => format === ApiFormat.ANTHROPIC
-                ? new anthropicAccumulator.AnthropicAccumulator()
-                : format === ApiFormat.RESPONSES
-                    ? new responsesAccumulator.ResponsesAccumulator()
-                    : new openaiChatAccumulator.OpenAIChatAccumulator(),
+            accumulator,
             converter,
             logPrefix: "[responseHandlerService]",
         });
