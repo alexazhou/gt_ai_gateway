@@ -89,19 +89,7 @@ jobs:
       - name: Build Frontend
         run: npm run frontend:build
 
-      - name: Check for Beta Version
-        id: check_beta
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          if [[ "$VERSION" == *"-beta"* ]]; then
-            echo "is_beta=true" >> "$GITHUB_OUTPUT"
-            echo "Skipping Cloudflare deployment for beta version: $VERSION"
-          else
-            echo "is_beta=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Deploy to Cloudflare
-        if: steps.check_beta.outputs.is_beta != 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
