@@ -2,6 +2,7 @@ import { SgUser } from "../model/sgUser";
 import { ROOT_USER_ID, UserType, BALANCE_SCALE } from "../constants";
 import userManager from "../manager/userManager";
 import rechargeRecordManager from "../manager/rechargeRecordManager";
+import configService from "./configService";
 import customError from "../util/customErrorUtil";
 
 // 元 → 整数微元（DB 余额存整数微元，避免浮点）
@@ -86,6 +87,10 @@ async function adjustBalance(
 }
 
 async function deductBalance(userId: number, amount: number): Promise<void> {
+    // 全局计费开关关闭时不扣费（module_billing_enabled）
+    if (!(await configService.isModuleBillingEnabled())) {
+        return;
+    }
     // 允许余额为负（透支）：请求完成时正常扣减，余额不足的拦截在请求发起前由预检负责
     // 扣费 amount 为元，换算成整数微元做整数减法；余额本就是整数微元，无浮点漂移
     // 原子增量扣减，由数据库执行 balance = balance - delta，避免高并发热路径的丢更新

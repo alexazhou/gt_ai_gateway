@@ -66,6 +66,11 @@ async function getConfig(name: ConfigKey | string): Promise<ConfigItem> {
     return new ConfigItem(undefined, defaultValue);
 }
 
+// 全局计费总开关：module_billing_enabled 为 false 时，后端不预检余额、不扣费
+async function isModuleBillingEnabled(): Promise<boolean> {
+    return (await getConfig(ConfigKey.MODULE_BILLING_ENABLED)).getBoolean();
+}
+
 async function setValue(name: ConfigKey | string, value: string): Promise<SgConfig> {
     const key = name as string;
     const strValue = String(value);
@@ -113,4 +118,5 @@ export default {
     getAll,
     updateAll,
     clearCache,
+    isModuleBillingEnabled,
 };

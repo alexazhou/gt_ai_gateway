@@ -15,6 +15,7 @@ import streamLogService from "./streamLogService";
 import responseHandlerService from "./responseHandlerService";
 import fetchUtil from "../util/fetchUtil";
 import routingService, { type ModelRoutingResult } from "./routingService/core";
+import configService from "./configService";
 import upstreamHealthService from "./upstreamHealthService";
 import RoutingContext from "./routingService/routingContext";
 
@@ -309,9 +310,11 @@ async function sendRequest(
         c.set("inspectUpstream", true);
     }
 
-    // 预检：余额为负的用户阻止请求，不向上游发起（负余额在完成时扣减产生，充值前不再放行）
+    // 预检：仅全局计费开启时检查余额（module_billing_enabled 关闭则完全不拦）。
+    // 余额为负的用户阻止请求，不向上游发起（负余额在完成时扣减产生，充值前不再放行）
     // balance 为整数微元，负值即欠费；但未启用计费（价格未设置或为 0）的模型不拦截
-    if (user.balance < 0 && modelConfig.hasBilling()) {
+    const billingEnabled = await configService.isModuleBillingEnabled();
+    if (billingEnabled && user.balance < 0 && modelConfig.hasBilling()) {
         await recordService.recordFailedRequest(
             user.id,
             modelConfig.name,
