@@ -5,8 +5,8 @@ import userManager from "../manager/userManager";
 import vendorManager from "../manager/vendorManager";
 import modelManager from "../manager/modelManager";
 import recordManager from "../manager/recordManager";
-import packageJson from "../../package.json";
 import hostService from "../service/hostService";
+import versionUtil from "../util/versionUtil";
 import { RunMode, ConfigKey } from "../constants";
 
 // 当前实例的启动时间（延迟初始化，避免 Workers 模块加载时日期异常）
@@ -113,7 +113,7 @@ async function status(c: Context) {
             },
             system: {
                 environment: getEnvironmentName(),
-                version: packageJson.version,
+                version: versionUtil.getVersion(c.env),
                 apiAddress: getApiAddress(c),
                 startTime: startTime.toISOString(),
                 uptime: formatUptime(startTime),

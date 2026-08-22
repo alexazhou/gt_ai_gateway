@@ -3,6 +3,7 @@ import requestHelper from "../../helpers/requestHelper";
 import dbHelper from "../../helpers/dbHelper";
 import { setupAdminUser } from "../../globalSetup";
 import { RunMode } from "../../../src/constants";
+import packageJson from "../../../package.json";
 
 /**
  * System Endpoint Tests
@@ -61,6 +62,15 @@ describe("System API", () => {
                 r2_available: true,
                 r2_unavailable_reason: "",
             });
+        });
+    });
+
+    describe("GET /status.json version", () => {
+        it("returns the code-defined version by default", async () => {
+            const response = await requestHelper.get("/status.json", adminToken);
+
+            expect(response.status).toBe(200);
+            expect(response.body.system.version).toBe(packageJson.version);
         });
     });
 });
