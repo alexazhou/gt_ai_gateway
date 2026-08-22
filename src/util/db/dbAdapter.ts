@@ -48,6 +48,13 @@ export function listMigrations(dir: string): string[] {
         .sort();
 }
 
+// 兼容旧版迁移记录：早期迁移记录的是文件名（如 migrate_0001.sql），
+// 重构为按"目录"（migrate_0001）之后目录名即迁移标识。读取记录时去掉尾部
+// .sql 后缀归一化为目录名，避免把已应用迁移误判为待应用。
+export function canonicalMigrationName(name: string): string {
+    return name.endsWith(".sql") ? name.slice(0, -4) : name;
+}
+
 // _migrations 记录表 DDL（按方言）
 export function migrationsTableDdl(dialect: Dialect): string {
     return dialect === "mysql"

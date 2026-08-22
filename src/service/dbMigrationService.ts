@@ -7,6 +7,7 @@ import {
     MIGRATION_DIR,
     MIGRATION_START_MARKER,
     MIGRATION_END_MARKER,
+    canonicalMigrationName,
     getDialect,
     migrationSqlFile,
     listMigrations,
@@ -81,7 +82,8 @@ export async function migrate(
             console.log("Error fetching applied migrations, assuming empty.", e);
         }
 
-        const appliedNames = new Set(applied.map((m) => m.name));
+        // 兼容旧版记录名（migrate_XXXX.sql），归一化为目录名后与 listMigrations 比对
+        const appliedNames = new Set(applied.map((m) => canonicalMigrationName(m.name)));
 
         console.log("Scanning available migrations in", MIGRATION_DIR);
         let pendingMigrations: string[] = [];
@@ -184,7 +186,8 @@ export async function status(adapter: DBAdapter, env: string) {
     }
 
     const appliedMap = new Map<string, string>();
-    applied.forEach((m) => appliedMap.set(m.name, m.applied_at || "unknown"));
+    // 同样归一化旧版记录名，确保旧库的 status 也能正确显示已应用状态
+    applied.forEach((m) => appliedMap.set(canonicalMigrationName(m.name), m.applied_at || "unknown"));
 
     migs.forEach((file) => {
         if (appliedMap.has(file)) {
