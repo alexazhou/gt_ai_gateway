@@ -84,9 +84,10 @@ describe("System API", () => {
                 expect(response.body.system.memory).toMatch(/^\d+(\.\d+)? MB$/);
                 expect(response.body.system.colo).toBeNull();
             } else {
-                // 测试环境无 cf：两个字段均为 null（真实 worker 下 colo 返回本次请求的边缘数据中心）
+                // worker 运行时提供 cf.colo（本次请求的边缘数据中心，如 "DFW"）；无进程内存
                 expect(response.body.system.memory).toBeNull();
-                expect(response.body.system.colo).toBeNull();
+                expect(typeof response.body.system.colo).toBe("string");
+                expect((response.body.system.colo as string).length).toBeGreaterThan(0);
             }
         });
     });
