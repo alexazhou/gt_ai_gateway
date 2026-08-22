@@ -101,6 +101,16 @@ describe("ResponsesAccumulator", () => {
     });
 
     describe("stream state", () => {
+        it("ignores invalid JSON payloads without changing state", () => {
+            const acc = new responsesAccumulator.ResponsesAccumulator();
+            acc.addEvent({ data: "this is not json" });
+
+            expect(acc.isCompleted()).toBe(false);
+            expect(acc.isErrored()).toBe(false);
+            expect(acc.isOutputStarted()).toBe(false);
+            expect(acc.getError()).toBeNull();
+        });
+
         it("marks stream completed on response.completed", () => {
             const acc = new responsesAccumulator.ResponsesAccumulator();
 

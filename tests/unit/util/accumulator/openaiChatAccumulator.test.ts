@@ -121,6 +121,27 @@ describe("OpenAIChatAccumulator stream state", () => {
         expect(usage.cache_write_tokens).toBe(1234);
     });
 
+    it("ignores invalid JSON payloads without changing state", () => {
+        const acc = new openaiChatAccumulator.OpenAIChatAccumulator();
+        acc.addEvent({ data: "this is not json" });
+
+        expect(acc.isCompleted()).toBe(false);
+        expect(acc.isErrored()).toBe(false);
+        expect(acc.isOutputStarted()).toBe(false);
+        expect(acc.getError()).toBeNull();
+    });
+
+    it("accumulates legacy function_call name and arguments across chunks", () => {
+        const acc = new openaiChatAccumulator.OpenAIChatAccumulator();
+        acc.addEvent({ data: JSON.stringify({ choices: [{ index: 0, delta: { function_call: { name: "get_weather", arguments: "{\"city\":" } }, finish_reason: null }] }) });
+        acc.addEvent({ data: JSON.stringify({ choices: [{ index: 0, delta: { function_call: { arguments: " \"beijing\"}" } }, finish_reason: null }] }) });
+
+        expect(acc.getResponse().choices[0].message.function_call).toEqual({
+            name: "get_weather",
+            arguments: "{\"city\": \"beijing\"}",
+        });
+    });
+
     it("reset clears all state", () => {
         const acc = new openaiChatAccumulator.OpenAIChatAccumulator();
         acc.addEvent({ data: JSON.stringify({ choices: [{ delta: { content: "hi" } }] }) });

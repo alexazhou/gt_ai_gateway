@@ -103,10 +103,68 @@ describe("normalizeUsage", () => {
         expect(normalized!.recordUsage.completion_tokens).toBe(12);
         expect(normalized!.recordUsage.cache_read_tokens).toBe(40);
     });
+
+    it("normalizes ANTHROPIC raw usage to total prompt (input_tokens + cache_read), recording cache write", () => {
+        const normalized = usageUtils.normalizeUsage(ApiFormat.ANTHROPIC, {
+            input_tokens: 100,
+            output_tokens: 20,
+            cache_read_input_tokens: 40,
+            cache_creation_input_tokens: 15,
+        });
+
+        expect(normalized).not.toBeNull();
+        expect(normalized!.promptTokens).toBe(140);
+        expect(normalized!.outputTokens).toBe(20);
+        expect(normalized!.cacheReadTokens).toBe(40);
+        // recordUsage 展示口径：prompt = 总量 140 - 缓存 40 = 非缓存输入 100
+        expect(normalized!.recordUsage.prompt_tokens).toBe(100);
+        expect(normalized!.recordUsage.completion_tokens).toBe(20);
+        expect(normalized!.recordUsage.cache_read_tokens).toBe(40);
+        expect(normalized!.recordUsage.cache_creation_tokens).toBe(15);
+    });
+
+    it("ANTHROPIC normalization reads cache via cache_read_tokens / cache_creation_tokens fallback keys", () => {
+        const normalized = usageUtils.normalizeUsage(ApiFormat.ANTHROPIC, {
+            input_tokens: 5,
+            output_tokens: 6,
+            cache_read_tokens: 2,
+            cache_creation_tokens: 1,
+        });
+
+        expect(normalized).not.toBeNull();
+        expect(normalized!.promptTokens).toBe(7);
+        expect(normalized!.cacheReadTokens).toBe(2);
+        expect(normalized!.recordUsage.prompt_tokens).toBe(5);
+        expect(normalized!.recordUsage.cache_read_tokens).toBe(2);
+        expect(normalized!.recordUsage.cache_creation_tokens).toBe(1);
+    });
+
+    it("ANTHROPIC usage without input_tokens yields null prompt", () => {
+        const normalized = usageUtils.normalizeUsage(ApiFormat.ANTHROPIC, {
+            output_tokens: 6,
+        });
+
+        expect(normalized).not.toBeNull();
+        expect(normalized!.promptTokens).toBe(0);
+        expect(normalized!.outputTokens).toBe(6);
+        expect(normalized!.cacheReadTokens).toBe(0);
+        expect(normalized!.recordUsage.prompt_tokens).toBeNull();
+        expect(normalized!.recordUsage.completion_tokens).toBe(6);
+        expect(normalized!.recordUsage.cache_read_tokens).toBeNull();
+    });
+
+    it("returns null when usage is missing", () => {
+        expect(usageUtils.normalizeUsage(ApiFormat.OPENAI, null)).toBeNull();
+        expect(usageUtils.normalizeUsage(ApiFormat.ANTHROPIC, undefined)).toBeNull();
+    });
 });
 
 
 describe("serializeStoredUsage", () => {
+    it("returns null when recordUsage is missing", () => {
+        expect(usageUtils.serializeStoredUsage(null)).toBeNull();
+        expect(usageUtils.serializeStoredUsage(undefined)).toBeNull();
+    });
     it("stores OpenAI-compatible streamed cache reads as total prompt tokens with version marker", () => {
         const normalized = usageUtils.normalizeUsage(ApiFormat.OPENAI, {
             prompt_tokens: 53067,

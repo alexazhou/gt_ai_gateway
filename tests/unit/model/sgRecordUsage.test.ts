@@ -115,4 +115,27 @@ describe("SgRecordUsage cast", () => {
             cache_read_tokens: 50,
         });
     });
+
+    it("toStorageJSON keeps cache_creation_tokens when present", () => {
+        const u = castGet(JSON.stringify({
+            usage_version: 2,
+            prompt_tokens: 150,
+            completion_tokens: 20,
+            cache_read_tokens: 50,
+            cache_creation_tokens: 15,
+        }));
+
+        // 构造后 prompt 为展示口径（150 - 50 = 100），存储还原为总量 150
+        expect(u!.toStorageJSON()).toEqual({
+            usage_version: 2,
+            prompt_tokens: 150,
+            completion_tokens: 20,
+            cache_read_tokens: 50,
+            cache_creation_tokens: 15,
+        });
+    });
+
+    it("set() returns null for null input", () => {
+        expect(SgRecordUsage.set(null as any, "usage", null)).toBeNull();
+    });
 });

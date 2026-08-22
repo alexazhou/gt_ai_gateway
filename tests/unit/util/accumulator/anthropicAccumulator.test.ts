@@ -109,6 +109,33 @@ describe("AnthropicAccumulator stream state", () => {
         expect(usage.cache_write_tokens).toBe(15);
     });
 
+    it("ignores invalid JSON payloads without changing state", () => {
+        const acc = new anthropicAccumulator.AnthropicAccumulator();
+        acc.addEvent({ data: "this is not json", event: "message_start" });
+
+        expect(acc.isCompleted()).toBe(false);
+        expect(acc.isErrored()).toBe(false);
+        expect(acc.isOutputStarted()).toBe(false);
+        expect(acc.getError()).toBeNull();
+    });
+
+    it("accumulates thinking signature from signature_delta", () => {
+        const acc = new anthropicAccumulator.AnthropicAccumulator();
+        acc.addEvent({ data: JSON.stringify({ type: "content_block_delta", delta: { type: "signature_delta", signature: "sig_abc" } }), event: "content_block_delta" });
+
+        expect(acc.getResponse().choices[0].message.signature).toBe("sig_abc");
+    });
+
+    it("accumulates tool call arguments from input_json_delta (auto-creating the tool_use slot) and parses final input", () => {
+        const acc = new anthropicAccumulator.AnthropicAccumulator();
+        acc.addEvent({ data: JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "{\"city\":" } }), event: "content_block_delta" });
+        acc.addEvent({ data: JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: " \"beijing\"}" } }), event: "content_block_delta" });
+
+        const toolUse = acc.getResponse().choices[0].message.tool_use?.[0];
+        expect(toolUse?.input_json).toBe("{\"city\": \"beijing\"}");
+        expect(toolUse?.input).toEqual({ city: "beijing" });
+    });
+
     it("does not parse the trailing [DONE] marker as JSON after message_stop (issue #14)", () => {
         const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
         const acc = new anthropicAccumulator.AnthropicAccumulator();
