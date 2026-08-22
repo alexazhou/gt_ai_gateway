@@ -284,19 +284,9 @@ function moveUpstream(index: number, offset: number) {
 }
 
 
-function handleTest(upstream: ModelUpstreamFormValue) {
-    const vendor = vendors.value.find(item => item.id === upstream.vendor_id);
-    if (!vendor) {
-        return;
-    }
-
-    const vendorModelName = upstream.vendor_model_id
-        ? (getVendorModels(upstream.vendor_id).find(model => model.id === upstream.vendor_model_id)?.model_id ?? null)
-        : null;
-    testDialogRef.value?.open(vendor, (vendorModelName ?? props.modelName) || undefined, {
-        modelName: props.modelName,
-        vendorModelName,
-    });
+function handleTest(_upstream: ModelUpstreamFormValue) {
+    if (!props.modelName) return;
+    testDialogRef.value?.openModelTest(props.modelName);
 }
 
 

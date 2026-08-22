@@ -9,24 +9,16 @@
             <div class="test-config">
                 <a-form layout="vertical">
                     <!-- Model mode: read-only info block -->
-                    <template v-if="modelInfo">
+                    <template v-if="mode === 'model'">
                         <div class="model-info">
-                            <div v-if="!modelInfo.hideModelName" class="info-row">
+                            <div class="info-row">
                                 <span class="info-label">模型名称</span>
-                                <span class="info-value">{{ modelInfo.modelName }}</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">供应商</span>
-                                <span class="info-value">{{ currentVendor?.name }}</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">供应商模型</span>
-                                <span class="info-value">{{ modelInfo.vendorModelName ?? '自动' }}</span>
+                                <span class="info-value">{{ modelName }}</span>
                             </div>
                         </div>
                     </template>
 
-                    <a-form-item :label="modelInfo?.hideModelName ? '服务端请求协议' : (modelInfo ? '客户端请求协议' : '向服务端请求协议')">
+                    <a-form-item :label="mode === 'model' ? '客户端请求协议' : '向服务端请求协议'">
                         <a-radio-group v-model:value="format">
                             <a-radio-button value="openai">OpenAI</a-radio-button>
                             <a-radio-button value="anthropic">Anthropic</a-radio-button>
@@ -35,7 +27,7 @@
                     </a-form-item>
 
                     <!-- Vendor mode: editable model select -->
-                    <template v-if="!modelInfo">
+                    <template v-if="mode === 'vendor'">
                         <a-form-item label="测试模型">
                             <a-select
                                 v-model:value="testModel"
@@ -135,72 +127,35 @@ import type { ApiFormat, TestMessage } from '@/types/gateway';
 import { notifyRequestError, notifySuccess, notifyWarning } from '@/utils/requestFeedback';
 import { message as antMessage } from 'ant-design-vue';
 import { CopyOutlined } from '@ant-design/icons-vue';
-import { useVendorPresets } from '@/composables/useVendorPresets';
-
-interface ModelInfo {
-    modelName: string;
-    vendorModelName: string | null;
-    allowedFormats?: string[] | null;
-    showAutoConvert?: boolean;
-    hideModelName?: boolean;
-}
-
-const { presetUrls, load: loadPresets } = useVendorPresets();
 
 const visible = ref(false);
 const loading = ref(false);
 const format = ref('openai');
 const result = ref<VendorTestResponse | null>(null);
 const currentVendor = ref<Vendor | null>(null);
-const modelInfo = ref<ModelInfo | null>(null);
-const useAutoConvert = ref(false);
 const activeTab = ref('response');
 
-const mergedUrls = computed(() => {
-    if (!currentVendor.value) return {};
-    const preset = presetUrls.value[currentVendor.value.type] ?? {};
-    const merged = { ...preset, ...currentVendor.value.urls };
-    delete merged['label'];
-    return merged;
-});
-
-const selectedVendorModelFormats = computed<string[] | null>(() => {
-    if (modelInfo.value || !testModel.value) return null;
-    const vm = vendorModels.value.find(m => m.model_id === testModel.value);
-    return vm?.allowed_formats ?? null;
-});
-
-const allowedFormats = computed(() =>
-    modelInfo.value?.allowedFormats ?? selectedVendorModelFormats.value,
-);
-
-const hasDirectUrl = computed(() => {
-    // If vendor model restricts protocols, format must be in the allowed list
-    if (allowedFormats.value?.length && !allowedFormats.value.includes(format.value)) {
-        return false;
-    }
-    if (format.value === 'responses') {
-        return !!(mergedUrls.value['responses'] || mergedUrls.value['openai']);
-    }
-    return !!mergedUrls.value[format.value];
-});
-
-const testButtonDisabled = computed(() => {
-    if (modelInfo.value) {
-        // 模型路由测试：走网关路由，只需网关模型名
-        return !modelInfo.value.modelName;
-    }
-    if (!testModel.value) return true;
-    if (!hasDirectUrl.value) return !useAutoConvert.value;
-    return false;
-});
+// 测试模式：vendor=供应商直连测试（POST /vendor/:id/test.json）；model=模型路由测试（/llm/*）
+const mode = ref<'vendor' | 'model'>('vendor');
+const modelName = ref('');
 
 const testModel = ref<string>('');
 const vendorModels = ref<VendorModel[]>([]);
 const modelsLoading = ref(false);
 const searchValue = ref('');
 
-const modalTitle = computed(() => modelInfo.value ? '模型可用性测试' : '供应商连通性测试');
+const isModelMode = computed(() => mode.value === 'model');
+
+const modalTitle = computed(() => isModelMode.value ? '模型可用性测试' : '供应商连通性测试');
+
+const testButtonDisabled = computed(() => {
+    if (isModelMode.value) {
+        // 模型路由测试：走网关路由，只需网关模型名
+        return !modelName.value;
+    }
+    // 供应商直连测试：需要选好供应商和测试模型
+    return !currentVendor.value || !testModel.value;
+});
 
 const selectOptions = computed(() => {
     const options = vendorModels.value.map(m => ({
@@ -273,38 +228,38 @@ function copyRequestText() {
     });
 }
 
-function open(vendor: Vendor, defaultModel?: string, info?: ModelInfo) {
+function openVendorTest(vendor: Vendor, model?: string) {
+    mode.value = 'vendor';
     currentVendor.value = vendor;
-    modelInfo.value = info ?? null;
     visible.value = true;
     result.value = null;
-    testModel.value = defaultModel ?? '';
+    testModel.value = model ?? '';
     searchValue.value = '';
-    useAutoConvert.value = false;
     activeTab.value = 'response';
+    format.value = vendor.type === 'anthropic' ? 'anthropic' : 'openai';
 
-    const af = info?.allowedFormats;
-    if (af?.length) {
-        format.value = af[0]!;
-    } else if (vendor.type === 'anthropic') {
-        format.value = 'anthropic';
-    } else {
-        format.value = 'openai';
-    }
-
-    void loadPresets();
-
-    // Only load the model list in vendor mode
-    if (!info) {
-        loadVendorModels(vendor.id, defaultModel);
-    }
+    loadVendorModels(vendor.id, model);
 }
 
-async function loadVendorModels(vendorId: number, defaultModel?: string) {
+function openModelTest(model: string) {
+    mode.value = 'model';
+    currentVendor.value = null;
+    modelName.value = model;
+    visible.value = true;
+    result.value = null;
+    testModel.value = '';
+    searchValue.value = '';
+    format.value = 'openai';
+    activeTab.value = 'response';
+}
+
+async function loadVendorModels(vendorId: number, presetModel?: string) {
     modelsLoading.value = true;
     try {
         vendorModels.value = await listVendorModels(vendorId);
-        if (!defaultModel && vendorModels.value.length > 0) {
+        if (presetModel) {
+            testModel.value = presetModel;
+        } else if (vendorModels.value.length > 0) {
             testModel.value = vendorModels.value[0]?.model_id || '';
         }
     } catch (error) {
@@ -315,7 +270,6 @@ async function loadVendorModels(vendorId: number, defaultModel?: string) {
 }
 
 watch(format, () => {
-    useAutoConvert.value = false;
     result.value = null;
 });
 
@@ -323,14 +277,14 @@ function handleSearch(val: string) {
     searchValue.value = val;
 }
 
-// 模型路由测试：走网关 /llm 路由（sendRequest），让 routing_mode + failover 真实生效
+// 模型路由测试：走网关 /llm 路由，让 routing_mode + failover 真实生效
 async function runRoutingTest() {
-    const modelName = modelInfo.value?.modelName;
-    if (!modelName) return;
+    const model = modelName.value;
+    if (!model) return;
 
     const messages: TestMessage[] = [{ role: 'user', content: '你好' }];
     const requestBody = {
-        model: modelName,
+        model,
         messages,
         max_tokens: 256,
         stream: false,
@@ -388,20 +342,15 @@ async function runRoutingTest() {
     }
 }
 
-async function handleTest() {
-    // 模型模式：走网关路由测试
-    if (modelInfo.value) {
-        await runRoutingTest();
-        return;
-    }
-
-    // 供应商模式：单供应商连通性测试
+// 供应商直连测试：POST /vendor/:id/test.json，测试用户选中的供应商模型
+async function runVendorTest() {
     if (!currentVendor.value || !testModel.value) return;
 
+    const model = testModel.value;
     loading.value = true;
     result.value = null;
     try {
-        const res = await testVendor(currentVendor.value.id, format.value, testModel.value, useAutoConvert.value);
+        const res = await testVendor(currentVendor.value.id, format.value, model);
         result.value = res;
         if (res.success) {
             notifySuccess('测试完成，连接正常');
@@ -423,7 +372,15 @@ async function handleTest() {
     }
 }
 
-defineExpose({ open });
+async function handleTest() {
+    if (isModelMode.value) {
+        await runRoutingTest();
+    } else {
+        await runVendorTest();
+    }
+}
+
+defineExpose({ openVendorTest, openModelTest });
 </script>
 
 <style scoped>

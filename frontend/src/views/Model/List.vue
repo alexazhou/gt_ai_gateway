@@ -244,21 +244,7 @@ function handleView(record: Model) {
 }
 
 function handleTest(record: Model) {
-    const upstream = record.routing_config.upstreams.find(item => item.enabled);
-    if (!upstream) return;
-    const vendor = vendors.value.find(v => v.id === upstream.vendor_id);
-    if (!vendor) return;
-    const vendorModel = upstream.vendor_model_id
-        ? (vendorModelsMap.value.get(upstream.vendor_model_id) ?? null)
-        : null;
-    const vendorModelName = vendorModel?.model_id ?? null;
-    const upstreamModel = vendorModelName ?? record.name;
-    testDialogRef.value?.open(vendor, upstreamModel, {
-        modelName: record.name,
-        vendorModelName,
-        allowedFormats: vendorModel?.allowed_formats ?? null,
-        showAutoConvert: true,
-    });
+    testDialogRef.value?.openModelTest(record.name);
 }
 
 function handleDelete(record: Model) {

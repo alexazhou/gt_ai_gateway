@@ -219,12 +219,7 @@ async function loadVendorName() {
 
 function handleTest(record: VendorModel) {
     if (!currentVendor.value) return;
-    testDialogRef.value?.open(currentVendor.value, record.model_id, {
-        modelName: record.model_id,
-        vendorModelName: record.model_id,
-        allowedFormats: record.allowed_formats,
-        hideModelName: true,
-    });
+    testDialogRef.value?.openVendorTest(currentVendor.value, record.model_id);
 }
 
 async function loadModels() {

@@ -189,7 +189,7 @@ function handleEditSuccess() {
 }
 
 function handleTest(record: Vendor) {
-    testDialogRef.value?.open(record);
+    testDialogRef.value?.openVendorTest(record);
 }
 
 function handleModels(record: Vendor) {
