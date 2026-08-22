@@ -1,8 +1,9 @@
 import { SgRecord } from "../model/sgRecord";
-import { SgRecordStatus, ApiFormat, ConfigKey } from "../constants";
+import { SgRecordStatus, ApiFormat, ConfigKey, RequestActivityStage, ActivityLevel } from "../constants";
 import recordManager, { type RecordUpdateData } from "../manager/recordManager";
 import objectStorageService from "./objectStorageService";
 import configService from "./configService";
+import requestActivityService from "./requestActivityService";
 
 interface RecordPayload {
     request: string | null;
@@ -120,6 +121,51 @@ async function latest(limit: number = 10, summaryOnly: boolean = false) {
     return records;
 }
 
+interface MarkFailedOptions {
+    /** RESULT 活动文案 */
+    message: string;
+    /** 活动 stage，默认 result */
+    stage?: RequestActivityStage;
+    /** 活动级别，默认 warn */
+    level?: ActivityLevel;
+    /** 追加到活动 detail 的额外字段 */
+    detail?: Record<string, unknown>;
+    /** 同时写入 response_data（存在对象存储） */
+    response_data?: string | null;
+}
+
+/**
+ * 统一「把 record 标为失败」的收尾：更新 FAILED + failed_code + end_at，并追加一条 RESULT 活动。
+ * 供各失败路径（上游超时/断连、非成功响应等）复用，避免 update + append 两步重复。
+ */
+async function markFailed(
+    recordId: number,
+    failedCode: string | null,
+    options: MarkFailedOptions,
+): Promise<void> {
+    const updateData: RecordUpdateData = {
+        status: SgRecordStatus.FAILED,
+        failed_code: failedCode,
+        end_at: new Date(),
+    };
+    if (options.response_data !== undefined) {
+        updateData.response_data = options.response_data;
+    }
+    await update(recordId, updateData);
+
+    await requestActivityService.append(
+        recordId,
+        options.stage ?? RequestActivityStage.RESULT,
+        options.message,
+        {
+            status: SgRecordStatus.FAILED,
+            ...(failedCode !== null ? { failed_code: failedCode } : {}),
+            ...options.detail,
+        },
+        options.level ?? ActivityLevel.WARN,
+    );
+}
+
 async function recordFailedRequest(
     userId: number,
     modelName: string | null,
@@ -149,6 +195,7 @@ export default {
     create,
     update,
     latest,
+    markFailed,
     recordFailedRequest,
     attachPayload,
     clearPayloads,

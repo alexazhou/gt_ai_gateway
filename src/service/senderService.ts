@@ -5,7 +5,7 @@ import { SgVendor } from "../model/sgVendor";
 import { SgRecord } from "../model/sgRecord";
 import recordService from "./recordService";
 import requestActivityService from "./requestActivityService";
-import { SgRecordStatus, ApiFormat, VendorAuthMode, FailedCode, RequestActivityStage, ActivityLevel } from "../constants";
+import { SgRecordStatus, ApiFormat, VendorAuthMode, FailedCode, RequestActivityStage, ActivityLevel, ConfigKey } from "../constants";
 import pluginService from "./pluginService";
 import hostService from "./hostService";
 import { ConverterFactory } from "../util/protocolConverter/ConverterFactory";
@@ -17,6 +17,7 @@ import fetchUtil from "../util/fetchUtil";
 import routingService, { type ModelRoutingResult } from "./routingService/core";
 import configService from "./configService";
 import upstreamHealthService from "./upstreamHealthService";
+import { TimeoutAbortController } from "../util/abortTimeoutUtil";
 import RoutingContext from "./routingService/routingContext";
 
 
@@ -247,6 +248,12 @@ async function sendRequestToUpstream(
         upstream_format: upstreamFormat,
     });
 
+    // 响应头超时：只约束「连接 + 响应头」阶段；配置值 <= 0 表示关闭超时。
+    // fetch 返回后 dispose 会移除客户端断开监听——body 阶段（流式 / 非流式）由各 handler
+    // 自己的 abort 监听兜底，handler 在注册监听时会先检查信号是否已中断。
+    const headersTimeoutMs = await configService.getNumber(ConfigKey.UPSTREAM_HEADERS_TIMEOUT_MS);
+    const abortCtrl = new TimeoutAbortController(headersTimeoutMs, c.req.raw.signal);
+
     let upstreamRes: Response;
     try {
         // 如果该 vendor 配置了跳过 TLS 验证（内网自签证书场景），注入 undici Agent
@@ -255,24 +262,27 @@ async function sendRequestToUpstream(
             method: "POST",
             headers: finalHeaders,
             body: upstreamBody,
-            signal: c.req.raw.signal,
+            signal: abortCtrl.signal,
             // dispatcher 是 undici (Node.js) 特有选项，不在 Cloudflare Workers 的 RequestInit 类型定义中
             ...(dispatcher ? { dispatcher: dispatcher } as any : {}),
         });
     } catch (e: any) {
         console.error("Upstream fetch failed:", e);
-        await recordService.update(recordId, {
-            status: SgRecordStatus.FAILED,
+        await recordService.markFailed(recordId, abortCtrl.failedCode(), {
+            stage: RequestActivityStage.UPSTREAM_ATTEMPT,
+            message: "上游请求失败",
+            level: ActivityLevel.ERROR,
             response_data: String(e),
-            end_at: new Date(),
+            detail: {
+                vendor_id: vendor.id,
+                vendor_name: vendor.name,
+                url,
+                error: e instanceof Error ? e.message : String(e),
+            },
         });
-        await requestActivityService.append(recordId, RequestActivityStage.UPSTREAM_ATTEMPT, "上游请求失败", {
-            vendor_id: vendor.id,
-            vendor_name: vendor.name,
-            url,
-            error: e instanceof Error ? e.message : String(e),
-        }, ActivityLevel.ERROR);
         throw e;
+    } finally {
+        abortCtrl.dispose();
     }
     console.log("upstream response status:", upstreamRes.status);
 
