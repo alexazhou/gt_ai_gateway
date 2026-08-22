@@ -7,7 +7,7 @@ import { SgUser } from "../model/sgUser";
 import { SgRecord } from "../model/sgRecord";
 import { ApiFormat, FailedCode, SgRecordStatus, RequestActivityStage, ActivityLevel } from "../constants";
 import { BaseConverter } from "../util/protocolConverter/BaseConverter";
-import { ProtocolStreamEvent } from "../util/protocolConverter/protocolTypes";
+import { AccumulatorBase } from "../util/accumulator/accumulatorBase";
 import recordService from "./recordService";
 import requestActivityService from "./requestActivityService";
 import userService from "./userService";
@@ -21,133 +21,12 @@ import { runInBackground } from "../util/runInBackgroundUtil";
 import customError from "../util/customErrorUtil";
 
 
-/**
- * 各协议累加器共用的结构化接口（AccumulatorBase 只提供状态方法，协议相关的
- * addEvent / getResponse / getUsage 由各子类实现，这里用结构类型统一泛型边界）。
- */
-interface StreamAccumulator {
-    addEvent(clientEvent: ProtocolStreamEvent): void;
-    getResponse(): unknown;
-    getUsage(): unknown | null;
-    isCompleted(): boolean;
-    isErrored(): boolean;
-    isOutputStarted(): boolean;
-    getError(): unknown | null;
-}
-
-
 // ====================================================================
-// 非流式响应处理（openai / anthropic / responses 通用）
-// ====================================================================
-
-/**
- * 非流式响应：各协议通用。协议转换按 converter 是否存在判断，上游 usage 按 upstreamFormat 解析。
- */
-export async function handleNonStreamResponse(
-    c: Context,
-    upstreamRes: Response,
-    record: SgRecord,
-    model: SgModel,
-    user: SgUser,
-    upstreamFormat: ApiFormat,
-    converter: BaseConverter | null = null,
-): Promise<Response> {
-    const responseText = await upstreamRes.text();
-    const statusCode = upstreamRes.status as StatusCode;
-
-    if (!upstreamRes.ok) {
-        console.error("[responseHandlerService] Upstream non-stream error response:", {
-            recordId: record.id,
-            status: statusCode,
-            contentType: upstreamRes.headers.get("content-type"),
-            body: responseText,
-        });
-
-        // 非流式：首 token 时间 = 整体响应耗时
-        await recordService.update(record.id, {
-            response_data: responseText,
-            status: SgRecordStatus.FAILED,
-            usage: null,
-            end_at: new Date(),
-            cost: 0,
-            first_token_latency: Date.now() - record.created_at.getTime(),
-        });
-        await requestActivityService.append(record.id, RequestActivityStage.RESULT, "上游返回非成功响应", {
-            status: SgRecordStatus.FAILED,
-            upstream_status: statusCode,
-            response_body: responseText,
-        }, ActivityLevel.ERROR);
-
-        c.status(statusCode);
-        c.res.headers.set("Content-Type", upstreamRes.headers.get("content-type") || "application/json");
-        return c.body(responseText);
-    }
-
-    let clientResponseText = responseText;
-    if (converter) {
-        try {
-            const responseJson = JSON.parse(responseText);
-            const clientRes = converter.convertResponse(responseJson);
-            clientResponseText = JSON.stringify(clientRes);
-        } catch (e) {
-            console.error("[responseHandlerService] Failed to convert response format:", e);
-            throw new customError.AppError(
-                `Failed to convert upstream response format: ${e instanceof Error ? e.message : String(e)}`,
-                502,
-            );
-        }
-    }
-
-    let normalizedUsage: ReturnType<typeof usageUtils.normalizeUsage> | null = null;
-    try {
-        const responseJson = JSON.parse(responseText);
-        normalizedUsage = usageUtils.normalizeUsage(upstreamFormat, responseJson.usage);
-    } catch (e) {
-        console.log("Failed to parse response for token stats:", e);
-    }
-
-    const usageJson = normalizedUsage ? usageUtils.serializeStoredUsage(normalizedUsage.recordUsage) : null;
-    const cost = normalizedUsage
-        ? usageUtils.calculateCost(model, normalizedUsage.promptTokens, normalizedUsage.outputTokens, normalizedUsage.cacheReadTokens)
-        : 0;
-
-    const recordStatus = statusCode === 200 ? SgRecordStatus.SUCCESS : SgRecordStatus.FAILED;
-    // 非流式：首 token 时间 = 整体响应耗时
-    const endedAt = Date.now();
-    await recordService.update(record.id, {
-        response_data: clientResponseText,
-        status: recordStatus,
-        usage: usageJson,
-        end_at: new Date(endedAt),
-        cost: cost,
-        first_token_latency: endedAt - record.created_at.getTime(),
-    });
-    await requestActivityService.append(record.id, RequestActivityStage.RESULT,
-        recordStatus === SgRecordStatus.SUCCESS ? "请求成功" : "请求失败",
-        {
-            status: recordStatus,
-            upstream_status: statusCode,
-            ...(recordStatus === SgRecordStatus.SUCCESS ? { cost } : {}),
-        },
-        recordStatus === SgRecordStatus.SUCCESS ? ActivityLevel.INFO : ActivityLevel.ERROR,
-    );
-
-    if (user.type !== "root" && statusCode === 200) {
-        await userService.deductBalance(user.id, cost);
-    }
-
-    c.status(statusCode);
-    c.header("Content-Type", "application/json");
-    return c.body(clientResponseText);
-}
-
-
-// ====================================================================
-// 流式响应处理（openai / anthropic / responses 通用）
+// 内部类型
 // ====================================================================
 
 interface StreamRunResult {
-    accumulator: StreamAccumulator;
+    accumulator: AccumulatorBase;
     firstTokenTime: number | null;
     failedCode: string | null;
     streamErrorData: unknown | null;
@@ -156,11 +35,15 @@ interface StreamRunResult {
 
 
 interface RunSseLoopOptions {
-    createAccumulator: () => StreamAccumulator;
+    createAccumulator: () => AccumulatorBase;
     converter: BaseConverter | null;
     logPrefix: string;
 }
 
+
+// ====================================================================
+// 内部方法
+// ====================================================================
 
 /**
  * 消费上游 SSE 流：decode → 拆分事件 → 协议转换 → 累加 → 实时转发给客户端。
@@ -364,6 +247,112 @@ function finalizeStreamResult(
             failed_code: FailedCode.STREAM_INCOMPLETE,
         }, ActivityLevel.WARN);
     });
+}
+
+
+// ====================================================================
+// 公开入口
+// ====================================================================
+
+/**
+ * 非流式响应：各协议通用。协议转换按 converter 是否存在判断，上游 usage 按 upstreamFormat 解析。
+ */
+export async function handleNonStreamResponse(
+    c: Context,
+    upstreamRes: Response,
+    record: SgRecord,
+    model: SgModel,
+    user: SgUser,
+    upstreamFormat: ApiFormat,
+    converter: BaseConverter | null = null,
+): Promise<Response> {
+    const responseText = await upstreamRes.text();
+    const statusCode = upstreamRes.status as StatusCode;
+
+    if (!upstreamRes.ok) {
+        console.error("[responseHandlerService] Upstream non-stream error response:", {
+            recordId: record.id,
+            status: statusCode,
+            contentType: upstreamRes.headers.get("content-type"),
+            body: responseText,
+        });
+
+        // 非流式：首 token 时间 = 整体响应耗时
+        await recordService.update(record.id, {
+            response_data: responseText,
+            status: SgRecordStatus.FAILED,
+            usage: null,
+            end_at: new Date(),
+            cost: 0,
+            first_token_latency: Date.now() - record.created_at.getTime(),
+        });
+        await requestActivityService.append(record.id, RequestActivityStage.RESULT, "上游返回非成功响应", {
+            status: SgRecordStatus.FAILED,
+            upstream_status: statusCode,
+            response_body: responseText,
+        }, ActivityLevel.ERROR);
+
+        c.status(statusCode);
+        c.res.headers.set("Content-Type", upstreamRes.headers.get("content-type") || "application/json");
+        return c.body(responseText);
+    }
+
+    let clientResponseText = responseText;
+    if (converter) {
+        try {
+            const responseJson = JSON.parse(responseText);
+            const clientRes = converter.convertResponse(responseJson);
+            clientResponseText = JSON.stringify(clientRes);
+        } catch (e) {
+            console.error("[responseHandlerService] Failed to convert response format:", e);
+            throw new customError.AppError(
+                `Failed to convert upstream response format: ${e instanceof Error ? e.message : String(e)}`,
+                502,
+            );
+        }
+    }
+
+    let normalizedUsage: ReturnType<typeof usageUtils.normalizeUsage> | null = null;
+    try {
+        const responseJson = JSON.parse(responseText);
+        normalizedUsage = usageUtils.normalizeUsage(upstreamFormat, responseJson.usage);
+    } catch (e) {
+        console.log("Failed to parse response for token stats:", e);
+    }
+
+    const usageJson = normalizedUsage ? usageUtils.serializeStoredUsage(normalizedUsage.recordUsage) : null;
+    const cost = normalizedUsage
+        ? usageUtils.calculateCost(model, normalizedUsage.promptTokens, normalizedUsage.outputTokens, normalizedUsage.cacheReadTokens)
+        : 0;
+
+    const recordStatus = statusCode === 200 ? SgRecordStatus.SUCCESS : SgRecordStatus.FAILED;
+    // 非流式：首 token 时间 = 整体响应耗时
+    const endedAt = Date.now();
+    await recordService.update(record.id, {
+        response_data: clientResponseText,
+        status: recordStatus,
+        usage: usageJson,
+        end_at: new Date(endedAt),
+        cost: cost,
+        first_token_latency: endedAt - record.created_at.getTime(),
+    });
+    await requestActivityService.append(record.id, RequestActivityStage.RESULT,
+        recordStatus === SgRecordStatus.SUCCESS ? "请求成功" : "请求失败",
+        {
+            status: recordStatus,
+            upstream_status: statusCode,
+            ...(recordStatus === SgRecordStatus.SUCCESS ? { cost } : {}),
+        },
+        recordStatus === SgRecordStatus.SUCCESS ? ActivityLevel.INFO : ActivityLevel.ERROR,
+    );
+
+    if (user.type !== "root" && statusCode === 200) {
+        await userService.deductBalance(user.id, cost);
+    }
+
+    c.status(statusCode);
+    c.header("Content-Type", "application/json");
+    return c.body(clientResponseText);
 }
 
 
