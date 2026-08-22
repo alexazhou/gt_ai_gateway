@@ -73,4 +73,21 @@ describe("System API", () => {
             expect(response.body.system.version).toBe(packageJson.version);
         });
     });
+
+    describe("GET /status.json memory & colo", () => {
+        it("reports node process memory and worker edge colo as two separate fields", async () => {
+            const response = await requestHelper.get("/status.json", adminToken);
+
+            expect(response.status).toBe(200);
+            if (response.body.mode === RunMode.NODE) {
+                // "128.5 MB" 形式的标量；colo 为 null
+                expect(response.body.system.memory).toMatch(/^\d+(\.\d+)? MB$/);
+                expect(response.body.system.colo).toBeNull();
+            } else {
+                // 测试环境无 cf：两个字段均为 null（真实 worker 下 colo 返回本次请求的边缘数据中心）
+                expect(response.body.system.memory).toBeNull();
+                expect(response.body.system.colo).toBeNull();
+            }
+        });
+    });
 });

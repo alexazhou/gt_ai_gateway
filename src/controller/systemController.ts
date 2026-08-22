@@ -80,6 +80,35 @@ function formatUptime(startTime: Date): string {
     }
 }
 
+
+/**
+ * 当前进程 RSS 内存占用（MB，保留 1 位小数）。
+ * 仅 Node 模式有进程概念；Worker 模式返回 null。
+ */
+function getMemoryUsage(): string | null {
+    if (ormService.mode === RunMode.WORKER) {
+        return null;
+    }
+    const usage = globalThis.process?.memoryUsage?.();
+    if (!usage) {
+        return null;
+    }
+    return `${(usage.rss / 1024 / 1024).toFixed(1)} MB`;
+}
+
+
+/**
+ * 处理当前请求的边缘数据中心（cf.colo，如 "SJC"）。
+ * 仅 Worker 模式有意义；Node 模式返回 null。
+ */
+function getDataCenter(c: Context): string | null {
+    if (ormService.mode !== RunMode.WORKER) {
+        return null;
+    }
+    const cf = (c.req.raw as any)?.cf;
+    return typeof cf?.colo === "string" ? cf.colo : null;
+}
+
 function welcome(c: Context) {
     const message =
         ormService.mode === RunMode.WORKER
@@ -117,6 +146,8 @@ async function status(c: Context) {
                 apiAddress: getApiAddress(c),
                 startTime: startTime.toISOString(),
                 uptime: formatUptime(startTime),
+                memory: getMemoryUsage(),
+                colo: getDataCenter(c),
             },
             modules: {
                 billing: moduleBilling,

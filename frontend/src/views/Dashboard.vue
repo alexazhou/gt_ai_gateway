@@ -124,10 +124,16 @@
                         {{ systemInfo.environment || '-' }}
                     </span>
                 </div>
-                <div class="system-info-item">
-                    <span class="system-info-label">版本</span>
+                <div v-if="!isWorker" class="system-info-item">
+                    <span class="system-info-label">内存占用</span>
                     <span class="system-info-value">
-                        {{ systemInfo.version || '-' }}
+                        {{ systemInfo.memory || '-' }}
+                    </span>
+                </div>
+                <div v-if="isWorker" class="system-info-item">
+                    <span class="system-info-label">数据中心</span>
+                    <span class="system-info-value">
+                        {{ systemInfo.colo || '-' }}
                     </span>
                 </div>
                 <div class="system-info-item">
@@ -193,9 +199,12 @@ const systemStats = ref({
 });
 
 const systemStatus = ref('正常');
+// 运行模式：worker 无内存、显示数据中心；node 反之
+const isWorker = ref(false);
 const systemInfo = ref({
     environment: '',
-    version: '',
+    memory: '',
+    colo: '',
     apiAddress: '',
     startTime: '',
     uptime: '',
@@ -285,6 +294,7 @@ async function loadSystemData() {
         };
 
         if (systemStatusData) {
+            isWorker.value = systemStatusData?.mode === 'worker';
             const startTimeStr = systemStatusData.system?.startTime || '';
             if (startTimeStr) {
                 serverStartTime.value = new Date(startTimeStr);
@@ -292,7 +302,8 @@ async function loadSystemData() {
 
             systemInfo.value = {
                 environment: systemStatusData.system?.environment || '',
-                version: systemStatusData.system?.version || '',
+                memory: systemStatusData.system?.memory || '',
+                colo: systemStatusData.system?.colo || '',
                 apiAddress: systemStatusData.system?.apiAddress || '',
                 startTime: startTimeStr,
                 uptime: serverStartTime.value ? formatUptime(serverStartTime.value) : '',

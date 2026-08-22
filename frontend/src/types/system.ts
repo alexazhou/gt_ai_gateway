@@ -15,6 +15,10 @@ export interface SystemStatusInfo {
     apiAddress?: string;
     startTime?: string;
     uptime?: string;
+    /** Node 模式下的进程内存占用（如 "128.5 MB"）；Worker 模式为 null */
+    memory?: string | null;
+    /** Worker 模式下本次请求的边缘数据中心（如 "SJC"）；Node 模式为 null */
+    colo?: string | null;
 }
 
 export interface SystemStatistics {
