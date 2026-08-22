@@ -5,11 +5,13 @@ import type { WriteStream } from "fs";
 import { SgModel } from "../model/sgModel";
 import { SgUser } from "../model/sgUser";
 import { SgRecord } from "../model/sgRecord";
-import { ApiFormat, FailedCode, SgRecordStatus, RequestActivityStage, ActivityLevel } from "../constants";
+import { ApiFormat, FailedCode, SgRecordStatus, RequestActivityStage, ActivityLevel, ConfigKey } from "../constants";
 import { BaseConverter } from "../util/protocolConverter/BaseConverter";
 import { AccumulatorBase } from "../util/accumulator/accumulatorBase";
 import recordService from "./recordService";
 import requestActivityService from "./requestActivityService";
+import configService from "./configService";
+import { TimeoutAbortController } from "../util/abortTimeoutUtil";
 import userService from "./userService";
 import streamLogService from "./streamLogService";
 import usageUtils, { type Dict } from "../util/protocol/usageUtil";
@@ -65,21 +67,39 @@ async function runSseLoop(
     let streamErrorData: unknown | null = null;
     let firstTokenTime: number | null = null;
 
+    // 相邻 chunk 空闲超时：超时置 UPSTREAM_TIMEOUT 并取消上游 body
+    const idleTimeoutMs = (await configService.getConfig(ConfigKey.UPSTREAM_STREAM_IDLE_TIMEOUT_MS)).getNumber();
+
     const abortHandler = () => {
         if (!failedCode) failedCode = FailedCode.CLIENT_DISCONNECTED;
         reader.cancel().catch(() => {});
     };
-    c.req.raw.signal.addEventListener("abort", abortHandler);
+    // 仅需客户端断开感知：timeoutMs=0 关闭超时，onAbort 统一处理「已断开」与「随后断开」
+    const abortCtrl = new TimeoutAbortController(0, c.req.raw.signal);
+    const unsubscribeAbort = abortCtrl.onAbort(abortHandler);
 
     try {
         while (true) {
             let done: boolean;
             let value: Uint8Array | undefined;
             try {
-                const result = await reader.read();
+                const result = await abortCtrl.raceWithTimeout(
+                    reader.read(),
+                    idleTimeoutMs,
+                    () => {
+                        if (failedCode !== FailedCode.CLIENT_DISCONNECTED) {
+                            failedCode = FailedCode.UPSTREAM_TIMEOUT;
+                        }
+                        reader.cancel().catch(() => {});
+                    },
+                );
                 done = result.done;
                 value = result.value;
             } catch (e: any) {
+                if (failedCode === FailedCode.UPSTREAM_TIMEOUT) {
+                    // 空闲超时：onTimeout 已置位并 cancel，不再覆盖为 UPSTREAM_DISCONNECTED
+                    break;
+                }
                 console.error(`${opts.logPrefix} Upstream read error:`, e);
                 if (failedCode !== FailedCode.CLIENT_DISCONNECTED) {
                     failedCode = FailedCode.UPSTREAM_DISCONNECTED;
@@ -122,6 +142,7 @@ async function runSseLoop(
                         if (
                             failedCode !== FailedCode.CLIENT_DISCONNECTED
                             && failedCode !== FailedCode.UPSTREAM_DISCONNECTED
+                            && failedCode !== FailedCode.UPSTREAM_TIMEOUT
                         ) {
                             failedCode = FailedCode.UPSTREAM_ERROR;
                         }
@@ -150,12 +171,16 @@ async function runSseLoop(
         }
     } catch (e: any) {
         console.error(`${opts.logPrefix} Unexpected stream error:`, e);
-        if (failedCode !== FailedCode.CLIENT_DISCONNECTED) {
+        if (
+            failedCode !== FailedCode.CLIENT_DISCONNECTED
+            && failedCode !== FailedCode.UPSTREAM_TIMEOUT
+        ) {
             failedCode = FailedCode.UPSTREAM_DISCONNECTED;
         }
     }
 
-    c.req.raw.signal.removeEventListener("abort", abortHandler);
+    unsubscribeAbort();
+    abortCtrl.dispose();
     return { accumulator, firstTokenTime, failedCode, streamErrorData, eventCount };
 }
 
@@ -221,6 +246,19 @@ function finalizeStreamResult(
             return;
         }
 
+        if (failedCode === FailedCode.UPSTREAM_TIMEOUT) {
+            await recordService.update(record.id, {
+                status: SgRecordStatus.FAILED,
+                failed_code: FailedCode.UPSTREAM_TIMEOUT,
+                end_at: new Date(),
+            });
+            await requestActivityService.append(record.id, RequestActivityStage.RESULT, "上游响应超时", {
+                status: SgRecordStatus.FAILED,
+                failed_code: FailedCode.UPSTREAM_TIMEOUT,
+            }, ActivityLevel.WARN);
+            return;
+        }
+
         if (failedCode === FailedCode.UPSTREAM_ERROR || accumulator.isErrored()) {
             const errorData = accumulator.getError() ?? streamErrorData;
             await recordService.update(record.id, {
@@ -266,7 +304,30 @@ export async function handleNonStreamResponse(
     upstreamFormat: ApiFormat,
     converter: BaseConverter | null = null,
 ): Promise<Response> {
-    const responseText = await upstreamRes.text();
+    // 非流式 body 读取兜底：body 总超时 + 断连监听，异常时显式把 record 标 FAILED 并区分失败码。
+    // Response.text() 不接收 signal，由 readText 统一处理「中止 → body.cancel()」。
+    const nonStreamTimeoutMs = (await configService.getConfig(ConfigKey.UPSTREAM_NON_STREAM_TIMEOUT_MS)).getNumber();
+    const abortCtrl = new TimeoutAbortController(nonStreamTimeoutMs, c.req.raw.signal);
+
+    let responseText: string;
+    try {
+        responseText = await abortCtrl.readText(upstreamRes);
+    } catch (e) {
+        const failedCode = abortCtrl.failedCode() ?? FailedCode.UPSTREAM_DISCONNECTED;
+        await recordService.update(record.id, {
+            status: SgRecordStatus.FAILED,
+            failed_code: failedCode,
+            end_at: new Date(),
+        });
+        await requestActivityService.append(record.id, RequestActivityStage.RESULT, "请求中断", {
+            status: SgRecordStatus.FAILED,
+            failed_code: failedCode,
+        }, ActivityLevel.WARN);
+        throw e;
+    } finally {
+        abortCtrl.dispose();
+    }
+
     const statusCode = upstreamRes.status as StatusCode;
 
     if (!upstreamRes.ok) {

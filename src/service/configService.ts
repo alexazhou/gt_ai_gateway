@@ -17,6 +17,10 @@ const CONFIG_DEFAULTS: Record<string, string> = {
     [ConfigKey.MODULE_BILLING_ENABLED]: "true",
     [ConfigKey.MODULE_API_PLAYGROUND_ENABLED]: "true",
     [ConfigKey.MODULE_CLIENT_CONFIG_ENABLED]: "true",
+    [ConfigKey.UPSTREAM_HEADERS_TIMEOUT_MS]: "900000",
+    [ConfigKey.UPSTREAM_NON_STREAM_TIMEOUT_MS]: "180000",
+    [ConfigKey.UPSTREAM_STREAM_IDLE_TIMEOUT_MS]: "180000",
+    [ConfigKey.ORPHAN_RECOVER_THRESHOLD_MS]: "600000",
 };
 
 function getDefault(name: string): string {

@@ -2,6 +2,8 @@ import { Context } from "hono";
 import { SgRecord } from "../model/sgRecord";
 import recordManager from "../manager/recordManager";
 import recordService from "../service/recordService";
+import configService from "../service/configService";
+import { ConfigKey } from "../constants";
 import { parsePaginationQuery } from "../util/paginationUtil";
 
 function normalizeTimestampField(value: unknown): string | number | null {
@@ -105,6 +107,13 @@ async function clearAll(c: Context) {
     return c.json({ success: true, deleted: count });
 }
 
+async function recoverOrphans(c: Context) {
+    const thresholdMs = (await configService.getConfig(ConfigKey.ORPHAN_RECOVER_THRESHOLD_MS)).getNumber();
+    // getNumber() 对未配置/非法值返回 0，回退默认阈值 10 分钟
+    const recovered = await recordManager.recoverOrphans(thresholdMs > 0 ? thresholdMs : 600000);
+    return c.json({ success: true, recovered });
+}
+
 export default {
     listRecords,
     latestRecords,
@@ -112,4 +121,5 @@ export default {
     deleteRecord,
     clearPayload,
     clearAll,
+    recoverOrphans,
 };

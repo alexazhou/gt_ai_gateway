@@ -231,6 +231,12 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleOpenAIStreamDisconnect(req, res);
     } else if (url.includes("/chat/completions/slow")) {
         handleOpenAIStreamSlow(req, res);
+    } else if (url.includes("/chat/completions/hang-body")) {
+        handleOpenAIChatHangBody(req, res);
+    } else if (url.includes("/chat/completions/hang-headers")) {
+        handleHangHeaders(req, res);
+    } else if (url.includes("/chat/completions/trickle")) {
+        handleOpenAIStreamTrickle(req, res);
     } else if (url.includes("/chat/completions/error")) {
         handleOpenAIChatError(req, res);
     } else if (url.includes("/chat/completions/unavailable")) {
@@ -1332,6 +1338,79 @@ function handleOpenAIStreamSlow(req: IncomingMessage, res: ServerResponse): void
             res.write(`data: ${JSON.stringify(event)}\n\n`);
         }
         // Hang indefinitely — never send [DONE] or close
+    });
+}
+
+
+/**
+ * OpenAI 非流式：返回 200 + JSON 响应头后不发 body（模拟 body 僵死）。
+ * 网关非流式 body 超时（upstream_non_stream_timeout_ms）应把它标为 upstream_timeout。
+ */
+function handleOpenAIChatHangBody(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        res.writeHead(200, {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+        // Hang indefinitely — never write the response body or close
+    });
+}
+
+
+/**
+ * 只读请求体、不发送任何响应头（模拟「连接建立但一直不响应」）。
+ * 网关响应头超时（upstream_headers_timeout_ms）应把它标为 upstream_timeout。
+ */
+function handleHangHeaders(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        // 故意不调用 writeHead / end
+    });
+    // 客户端（网关）超时断开时静默清理，避免 unhandled error 影响 mock 进程
+    req.on("error", () => {});
+    res.on("close", () => {});
+}
+
+
+/**
+ * OpenAI 流式「长正常输出」：每 400ms 发一个 chunk，最后发 [DONE]。
+ * 用于验证流式空闲超时（upstream_stream_idle_timeout_ms）不误伤长正常输出。
+ */
+function handleOpenAIStreamTrickle(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+
+        const chunks = ["Hello", ", ", "world", "!"];
+        let i = 0;
+        const interval = setInterval(() => {
+            if (i < chunks.length) {
+                const event = {
+                    id: `chatcmpl-${Date.now()}`,
+                    object: "chat.completion.chunk",
+                    created: Math.floor(Date.now() / 1000),
+                    model: data.model || "gpt-3.5-turbo",
+                    choices: [{ index: 0, delta: { role: "assistant", content: chunks[i] }, finish_reason: i === chunks.length - 1 ? "stop" : null }],
+                };
+                res.write(`data: ${JSON.stringify(event)}\n\n`);
+                i++;
+            } else {
+                res.write("data: [DONE]\n\n");
+                res.end();
+                clearInterval(interval);
+            }
+        }, 400);
     });
 }
 
