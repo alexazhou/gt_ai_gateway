@@ -56,6 +56,7 @@
 文件：
 
 - `tauri/package.json`
+- `tauri/package-lock.json`
 - `tauri/src-tauri/tauri.conf.json`
 - `tauri/src-tauri/Cargo.toml`
 
@@ -127,6 +128,7 @@ TEST_REAL_API=true npx vitest run tests/api/stats/stats.test.ts --config vitest.
 - `frontend/package.json`
 - `frontend/package-lock.json`
 - `tauri/package.json`
+- `tauri/package-lock.json`
 - `tauri/src-tauri/tauri.conf.json`
 - `tauri/src-tauri/Cargo.toml`
 
@@ -157,7 +159,7 @@ git status --short
 示例：
 
 ```bash
-git add package.json package-lock.json frontend/package.json frontend/package-lock.json tauri/package.json tauri/src-tauri/tauri.conf.json tauri/src-tauri/Cargo.toml
+git add package.json package-lock.json frontend/package.json frontend/package-lock.json tauri/package.json tauri/package-lock.json tauri/src-tauri/tauri.conf.json tauri/src-tauri/Cargo.toml
 ```
 
 如果本次还包含功能改动或 UI 修复，则把对应源码文件一起加入。
