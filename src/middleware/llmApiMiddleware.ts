@@ -1,7 +1,9 @@
 import { Context, MiddlewareHandler } from "hono";
-import { ApiFormat, UserStatus } from "../constants";
+import { ApiFormat, FailedCode, UserStatus } from "../constants";
 import userService from "../service/userService";
 import llmRequestService from "../service/llmRequestService";
+import recordService from "../service/recordService";
+import ruleService from "../service/ruleService";
 import { SgUser } from "../model/sgUser";
 import customError from "../customError";
 
@@ -81,6 +83,33 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
         c.set("user", user);
         c.set("requestBody", body);
         c.set("modelConfig", modelConfig);
+
+        // 【阶段一】路由前准入检查（不含 vendor_id 的规则）：命中 access_control 抛 403、rate_limit 超限抛 429。
+        // 被拒时写入失败记录（此时 user / modelConfig / requestBody 均在 context），再交给 onError 渲染错误体。
+        try {
+            await ruleService.matchAndCheck(user, modelConfig);
+        } catch (e) {
+            if (e instanceof customError.AccessDeniedError) {
+                await recordService.recordFailedRequest(
+                    user.id,
+                    modelConfig.name,
+                    body,
+                    format,
+                    FailedCode.ACCESS_DENIED,
+                    modelConfig.id,
+                );
+            } else if (e instanceof customError.RateLimitError) {
+                await recordService.recordFailedRequest(
+                    user.id,
+                    modelConfig.name,
+                    body,
+                    format,
+                    FailedCode.RATE_LIMIT_EXCEEDED,
+                    modelConfig.id,
+                );
+            }
+            throw e;
+        }
 
         await next();
     };

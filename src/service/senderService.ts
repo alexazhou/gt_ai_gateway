@@ -19,6 +19,7 @@ import configService from "./configService";
 import upstreamHealthService from "./upstreamHealthService";
 import abortTimeoutUtil from "../util/abortTimeoutUtil";
 import RoutingContext from "./routingService/routingContext";
+import ruleService from "./ruleService";
 
 
 // 可重试的 HTTP 错误响应转成异常，与网络异常汇入同一个失败处理点
@@ -40,6 +41,19 @@ function buildUpstreamFailureResponse(c: Context, error: unknown): Response {
         ? customError.buildLlmErrorResponse(appError, apiFormat)
         : { error: appError.message, code: appError.code };
     return c.json(body, 502);
+}
+
+
+// 供应商级限流合成 429 错误响应（与 onError 一致的协议错误体 + Retry-After 头）。
+// 供阶段二 failover 关闭 / 直接返回时使用；全部耗尽时复用同样的 429 响应。
+function buildRateLimitResponse(c: Context, error: InstanceType<typeof customError.RateLimitError>): Response {
+    const apiFormat = c.get("api_format");
+    const body = apiFormat
+        ? customError.buildLlmErrorResponse(error, apiFormat)
+        : { error: error.message, code: error.code };
+    const response = c.json(body, 429);
+    response.headers.set("Retry-After", String(error.retryAfterSeconds ?? 60));
+    return response;
 }
 
 
@@ -336,6 +350,8 @@ async function sendRequest(
     // 失败切换开关在请求内不变，循环外取一次
     const failoverEnabled = modelConfig.getRoutingConfig().failover.enabled;
     let lastFailure: Response | null = null;
+    // 记录最后一次失败对应的失败码：全部上游耗尽时（lastFailure 非空）用其标记 record，区分「限流耗尽」与「网络/HTTP 失败」
+    let lastFailureCode: string | null = null;
 
     while (true) {
         let routingResult: ModelRoutingResult;
@@ -360,7 +376,9 @@ async function sendRequest(
             const exhausted = lastFailure !== null;
             await recordService.update(recordId, {
                 status: SgRecordStatus.FAILED,
-                ...(exhausted ? {} : { failed_code: FailedCode.NO_AVAILABLE_UPSTREAM }),
+                ...(exhausted
+                    ? (lastFailureCode ? { failed_code: lastFailureCode } : {})
+                    : { failed_code: FailedCode.NO_AVAILABLE_UPSTREAM }),
                 end_at: new Date(),
             });
             await requestActivityService.append(
@@ -395,6 +413,39 @@ async function sendRequest(
                 format: upstreamFormat,
             },
         });
+
+        // 【阶段二】路由后准入检查（含 vendor_id 的规则，实际路由到的供应商已确定）。
+        // inspect 模式（route-test 纯诊断）跳过，不计数、不受限流/访问控制影响。
+        if (!options.inspect) {
+            try {
+                await ruleService.matchAndCheckVendor(user, modelConfig, vendor);
+            } catch (e) {
+                if (e instanceof customError.AccessDeniedError) {
+                    // 403：策略性拒绝与供应商无关，不 failover；标记 record FAILED 后抛出，交给 onError 渲染
+                    await recordService.markFailed(recordId, FailedCode.ACCESS_DENIED, {
+                        message: "访问控制拒绝",
+                        detail: { rule_message: e.message },
+                    });
+                    throw e;
+                }
+                if (e instanceof customError.RateLimitError) {
+                    // 429：视为「该上游繁忙」——failover 开启时把 429 存入 lastFailure 继续尝试下一上游
+                    //（selectUpstream 已 markTried，自动跳过）；关闭时直接返回 429（返回前标记 record FAILED）
+                    if (failoverEnabled) {
+                        lastFailure = buildRateLimitResponse(c, e);
+                        lastFailureCode = FailedCode.RATE_LIMIT_EXCEEDED;
+                        c.status(200);
+                        continue;
+                    }
+                    await recordService.markFailed(recordId, FailedCode.RATE_LIMIT_EXCEEDED, {
+                        message: "限流拒绝",
+                        detail: { rule_message: e.message },
+                    });
+                    return buildRateLimitResponse(c, e);
+                }
+                throw e;
+            }
+        }
 
         try {
             const response = await sendRequestToUpstream(

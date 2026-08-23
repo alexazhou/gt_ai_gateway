@@ -23,6 +23,7 @@ node_modules/
 # logs
 log/
 local.db
+test.db
 
 npm-debug.log*
 yarn-debug.log*

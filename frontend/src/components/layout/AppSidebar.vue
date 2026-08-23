@@ -27,6 +27,10 @@
                     <FileTextOutlined />
                     <span>请求记录</span>
                 </a-menu-item>
+                <a-menu-item key="/rule">
+                    <ControlOutlined />
+                    <span>规则管理</span>
+                </a-menu-item>
                 <a-menu-item v-if="appStore.moduleBillingEnabled" key="/balance">
                     <DollarOutlined />
                     <span>余额管理</span>
@@ -87,7 +91,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { DashboardOutlined, TeamOutlined, CloudUploadOutlined, DatabaseOutlined, FileTextOutlined, ExperimentOutlined, MenuFoldOutlined, MenuUnfoldOutlined, ApiOutlined, DollarOutlined, CodeOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons-vue';
+import { DashboardOutlined, TeamOutlined, CloudUploadOutlined, DatabaseOutlined, FileTextOutlined, ExperimentOutlined, MenuFoldOutlined, MenuUnfoldOutlined, ApiOutlined, DollarOutlined, CodeOutlined, RobotOutlined, SettingOutlined, ControlOutlined } from '@ant-design/icons-vue';
 import { useAppStore } from '@/stores/app';
 import { checkUpdate } from '@/api/system';
 import { getConfig } from '@/api/config';
@@ -108,6 +112,7 @@ const selectedKeys = computed(() => {
     if (path.startsWith('/vendor')) return ['/vendor'];
     if (path.startsWith('/model')) return ['/model'];
     if (path.startsWith('/record')) return ['/record'];
+    if (path.startsWith('/rule')) return ['/rule'];
     if (path.startsWith('/balance')) return ['/balance'];
     if (path.startsWith('/api-test')) return ['/api-test'];
     if (path.startsWith('/integration')) return ['/integration'];

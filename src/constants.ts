@@ -19,8 +19,17 @@ export enum FailedCode {
     UPSTREAM_TIMEOUT = "upstream_timeout",
     // 孤儿记录被手动回收时标记
     RECOVERED_ORPHAN = "recovered_orphan",
+    // 限流拒绝（429，rate_limit 规则命中且超限）
+    RATE_LIMIT_EXCEEDED = "rate_limit_exceeded",
+    // 访问控制拒绝（403，access_control 规则命中）
+    ACCESS_DENIED = "access_denied",
     // 无法归因的兜底失败原因
     UNKNOWN = "unknown_error",
+}
+
+export enum RuleType {
+    RATE_LIMIT = "rate_limit",
+    ACCESS_CONTROL = "access_control",
 }
 
 export enum RequestActivityStage {

@@ -14,6 +14,8 @@ import VendorDetail from '@/views/Vendor/Detail.vue';
 import VendorModels from '@/views/Vendor/VendorModels.vue';
 import ModelIndex from '@/views/Model/Index.vue';
 import ModelList from '@/views/Model/List.vue';
+import RuleIndex from '@/views/Rule/Index.vue';
+import RuleList from '@/views/Rule/List.vue';
 import RecordIndex from '@/views/Record/Index.vue';
 import RecordList from '@/views/Record/List.vue';
 import RecordDetail from '@/views/Record/Detail.vue';
@@ -113,6 +115,19 @@ const routes: RouteRecordRaw[] = [
                         path: ':id',
                         name: 'RecordDetail',
                         component: RecordDetail,
+                    },
+                ],
+            },
+            {
+                path: 'rule',
+                name: 'Rule',
+                component: RuleIndex,
+                meta: { title: '规则管理' },
+                children: [
+                    {
+                        path: '',
+                        name: 'RuleList',
+                        component: RuleList,
                     },
                 ],
             },

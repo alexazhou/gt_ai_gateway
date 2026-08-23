@@ -16,7 +16,9 @@ import statsController from "./controller/statsController";
 import balanceController from "./controller/balanceController";
 import configController from "./controller/configController";
 import clientConfigController from "./controller/clientConfigController";
+import ruleController from "./controller/ruleController";
 import configService from "./service/configService";
+import ruleService from "./service/ruleService";
 import ormService from "./service/ormService";
 import objectStorageService from "./service/objectStorageService";
 import authMiddleware from "./middleware/authMiddleware";
@@ -78,6 +80,11 @@ app.onError((err, c) => {
     const apiFormat = c.get("api_format");
     if (apiFormat) {
         const formatted = customError.buildLlmErrorResponse(err as any, apiFormat);
+        // 限流拒绝：附加 Retry-After 头（固定 60s——滑动窗口两桶加权模型不记录单个请求时间戳，
+        // 客户端等满一个窗口再重试成功率最高）
+        if (error.code === "rate_limit_error") {
+            c.header("Retry-After", "60");
+        }
         return c.json(formatted, statusCode as any);
     }
 
@@ -134,6 +141,13 @@ app.post("/vendor/:id/test.json", authMiddleware.requireAdmin, vendorController.
 app.put("/vendor/:id", authMiddleware.requireAdmin, vendorController.updateVendor);
 app.delete("/vendor/:id", authMiddleware.requireAdmin, vendorController.deleteVendor);
 
+// Rule (需要管理员权限)
+app.get("/rule/list.json", authMiddleware.requireAdmin, ruleController.listRules);
+app.get("/rule/:id", authMiddleware.requireAdmin, ruleController.getRule);
+app.post("/rule/create.json", authMiddleware.requireAdmin, ruleController.createRule);
+app.put("/rule/:id", authMiddleware.requireAdmin, ruleController.updateRule);
+app.delete("/rule/:id", authMiddleware.requireAdmin, ruleController.deleteRule);
+
 // Model (需要管理员权限)
 app.post("/model/create.json", authMiddleware.requireAdmin, modelController.createModel);
 app.post("/model/route-test.json", authMiddleware.requireAdmin, modelController.testModelRoute);
@@ -185,6 +199,7 @@ app.delete("/test/cache/clear", async (c) => {
         return c.notFound();
     }
     configService.clearCache();
+    ruleService.invalidateCache();
     return c.json({ success: true });
 });
 
