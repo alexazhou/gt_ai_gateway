@@ -21,12 +21,12 @@ function matchCondition(actual: number, node: LeafNode): boolean {
 }
 
 
-/** 表达式树求值：and 全真、or 任一真、const 恒真、叶子按维度取值匹配 */
+/** 表达式树求值：and 全真、or 任一真、const 返回固定布尔值、叶子按维度取值匹配 */
 function evalExpr(node: ExprNode, ctx: RequestContext): boolean {
     switch (node.type) {
         case "and":   return node.values.every(child => evalExpr(child, ctx));
         case "or":    return node.values.some(child => evalExpr(child, ctx));
-        case "const": return true;
+        case "const": return node.values[0];
         default:      return matchCondition(ctx[node.type] as number, node);
     }
 }
@@ -70,8 +70,8 @@ function validateScope(node: unknown, depth: number = 0): void {
 
     if (nodeType === "const") {
         const values = candidate.values;
-        if (!Array.isArray(values) || values.length !== 1 || values[0] !== true) {
-            throw new customError.AppError('Scope "const" node must have values = [true]');
+        if (!Array.isArray(values) || values.length !== 1 || typeof values[0] !== "boolean") {
+            throw new customError.AppError('Scope "const" node must have values = [true] or [false]');
         }
         return;
     }

@@ -8,6 +8,10 @@
         <template #title>
             <div class="modal-title">
                 <span>{{ isEdit ? '编辑规则' : '新增规则' }}</span>
+                <div class="rule-status">
+                    <span>启用</span>
+                    <a-switch v-model:checked="formState.enabled" size="small" />
+                </div>
             </div>
         </template>
         <template #footer>
@@ -40,21 +44,7 @@
             </a-form-item>
 
             <a-form-item label="匹配条件（scope）" required>
-                <div class="scope-toolbar">
-                    <span class="scope-toolbar-label">作用范围：</span>
-                    <a-radio-group :value="scopeMode" size="small" @change="handleScopeModeChange">
-                        <a-radio-button value="conditions">指定条件</a-radio-button>
-                        <a-radio-button value="all">全部匹配</a-radio-button>
-                    </a-radio-group>
-                    <span class="scope-hint">
-                        全部匹配 = 所有请求命中该规则（全局兜底）
-                    </span>
-                </div>
-                <div v-if="scopeMode === 'all'" class="scope-all">
-                    <a-tag color="blue">全部匹配</a-tag>
-                    <span class="scope-hint">恒为真：所有请求都会命中此规则</span>
-                </div>
-                <div v-else class="scope-editor">
+                <div class="scope-editor">
                     <ScopeTreeEditor :node="formState.scope" is-root />
                 </div>
             </a-form-item>
@@ -76,13 +66,6 @@
             </a-form-item>
             <a-form-item v-else label="访问控制参数">
                 <span class="config-hint">无需参数：条件命中即拒绝（403），可表达白名单（not in）等场景</span>
-            </a-form-item>
-
-            <a-form-item label="启用">
-                <a-switch v-model:checked="formState.enabled" />
-                <span class="config-hint" style="margin-left: 8px;">
-                    {{ formState.enabled ? '规则生效中' : '规则已停用（保留配置，不生效）' }}
-                </span>
             </a-form-item>
         </a-form>
     </a-modal>
@@ -116,20 +99,6 @@ const formState = reactive({
     config: { rpm: null as number | null },
     enabled: true,
 });
-
-// 根节点是否为「全部匹配」模式（恒真 const 节点）
-const scopeMode = computed<'conditions' | 'all'>(() => {
-    const scope = formState.scope as { type?: string };
-    return scope.type === 'const' ? 'all' : 'conditions';
-});
-
-function handleScopeModeChange(e: { target: { value: 'conditions' | 'all' } }): void {
-    if (e.target.value === 'all') {
-        formState.scope = { type: 'const', values: [true] };
-    } else {
-        formState.scope = createDefaultScope();
-    }
-}
 
 function openCreate(): void {
     resetForm();
@@ -213,7 +182,17 @@ defineExpose({ openCreate, openEdit });
 <style scoped>
 .modal-title {
     display: flex;
+    justify-content: space-between;
     align-items: center;
+    padding-right: 56px;
+}
+
+.rule-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: normal;
 }
 
 .modal-footer {
@@ -227,33 +206,6 @@ defineExpose({ openCreate, openEdit });
     margin-left: 4px;
     color: var(--text-secondary);
     font-size: 12px;
-}
-
-.scope-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
-    flex-wrap: wrap;
-}
-
-.scope-toolbar-label {
-    font-size: 14px;
-}
-
-.scope-hint {
-    color: var(--text-secondary);
-    font-size: 12px;
-}
-
-.scope-all {
-    padding: 12px;
-    border: 1px dashed var(--border-color);
-    border-radius: 8px;
-    background: var(--bg-page);
-    display: flex;
-    align-items: center;
-    gap: 8px;
 }
 
 .scope-editor {

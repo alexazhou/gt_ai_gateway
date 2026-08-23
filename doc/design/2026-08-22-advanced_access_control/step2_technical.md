@@ -102,7 +102,7 @@ create table rule
 ```
 
 - `type` 为开放字符串，内置 `rate_limit`、`access_control`，未来按需注册新类型（`concurrency` / `cost_quota` 等）。
-- `scope` 为**布尔表达式树**，所有节点统一为 `{ type, oper?, values }` 结构：`type` 为节点类型（叶子维度 `user_id` / `model_id` / `vendor_id`、组合 `and` / `or`、恒真 `const`）；`oper` 仅叶子携带；`values` 为取值列表（叶子为比较值、`and` / `or` 为子节点列表、`const` 为 `[true]`）。`and` / `or` 的 `values` 必须**非空**（空数组不合法，避免歧义）。恒真节点 `{ "type": "const", "values": [true] }` 用于全局兜底规则（所有请求命中）。
+- `scope` 为**布尔表达式树**，所有节点统一为 `{ type, oper?, values }` 结构：`type` 为节点类型（叶子维度 `user_id` / `model_id` / `vendor_id`、组合 `and` / `or`、固定布尔值 `const`）；`oper` 仅叶子携带；`values` 为取值列表（叶子为比较值、`and` / `or` 为子节点列表、`const` 为单个布尔值 `[true]` / `[false]`）。`and` / `or` 的 `values` 必须**非空**（空数组不合法，避免歧义）。固定值节点 `{ "type": "const", "values": [true] }` 恒为真（全命中），用于全局兜底规则（所有请求命中）；`[false]` 恒为假（永不命中）。
 - `config` 结构由 `type` 定义：
     - `rate_limit`：`{ rpm }`（`null` / 缺省 = 不限制；`0` = 不可用，所有命中请求 429）。本期仅 RPM，TPM 留待后续。
     - `access_control`：无参数（空 `{}`），树命中即拒绝。
@@ -121,8 +121,8 @@ type ScopeNodeType = ScopeField | "and" | "or" | "const";
 interface LeafNode   { type: ScopeField; oper: ScopeOperator; values: number[] }
 // 组合：type 为 and / or，values 为子节点列表（必须非空）
 interface LogicNode  { type: "and" | "or"; values: ExprNode[] }
-// 恒真：type 为 const，values 固定为 [true]（全命中，全局兜底）
-interface ConstNode  { type: "const"; values: [true] }
+// 固定值：type 为 const，values 为单个布尔值（true 恒真全命中 / false 恒假）
+interface ConstNode  { type: "const"; values: [boolean] }
 type ExprNode = LeafNode | LogicNode | ConstNode;
 
 // 请求上下文：vendor_id 仅在路由选择后可用
@@ -146,7 +146,7 @@ function evalExpr(node: ExprNode, ctx: RequestContext): boolean {
     switch (node.type) {
         case "and":   return node.values.every(child => evalExpr(child, ctx));   // 全真（values 非空）
         case "or":    return node.values.some(child  => evalExpr(child, ctx));    // 任一真（values 非空）
-        case "const": return true;                                                // values === [true]，全命中
+        case "const": return node.values[0];                                      // 返回固定布尔值（true 全命中 / false 不命中）
         default:      return matchCondition(ctx[node.type], node);               // 叶子：按维度取值
     }
 }
@@ -346,7 +346,7 @@ await ruleService.matchAndCheckVendor(user, modelConfig, vendor);
 
 校验（按 `type` 分派）：
 - `type` 必须为已注册类型。
-- `scope` 必须为合法表达式树：所有节点统一为 `{ type, oper?, values }`。`type` ∈ { `user_id`, `model_id`, `vendor_id`, `and`, `or`, `const` }；叶子 `type` 为维度、`oper` ∈ { `=`, `!=`, `in`, `not in` }、`values` 为 number[]（`=`/`!=` 单元素，`in`/`not in` 非空）；`and`/`or` 的 `values` 为非空子节点数组；`const` 的 `values` 必须为 `[true]`；树深度设上限（如 8 层）防滥用。
+- `scope` 必须为合法表达式树：所有节点统一为 `{ type, oper?, values }`。`type` ∈ { `user_id`, `model_id`, `vendor_id`, `and`, `or`, `const` }；叶子 `type` 为维度、`oper` ∈ { `=`, `!=`, `in`, `not in` }、`values` 为 number[]（`=`/`!=` 单元素，`in`/`not in` 非空）；`and`/`or` 的 `values` 为非空子节点数组；`const` 的 `values` 必须为 `[true]` 或 `[false]`（单布尔值）；树深度设上限（如 8 层）防滥用。
 - `rate_limit`：`config.rpm` 为非负整数或 `null`（`null` = 不限制；`0` = 不可用）。
 - `access_control`：`config` 必须为空 `{}`。
 
@@ -364,7 +364,7 @@ await ruleService.matchAndCheckVendor(user, modelConfig, vendor);
 
 - 新增 `src/types/rule.ts`：`Rule`、`ExprNode`（LeafNode / AndNode / OrNode）、`RuleType`、`RuleConfig`（按 type 区分 `RateLimitConfig` / `AccessControlConfig`）类型。
 - 新增 `src/api/rule.ts`：规则 CRUD 请求封装。
-- 新增 `src/views/Rule/`（Index / List / 对话框）：规则列表 + 新增/编辑（名称、启用开关、type、scope **条件树编辑器**、按 type 渲染的 config 表单）。条件树编辑器：叶子行可选维度（用户 / 模型 / 供应商）+ 运算符（`=`/`!=`/`in`/`not in`）+ 取值（标量或逗号分隔 ID 列表），支持「+ AND / + OR 分组」构建嵌套树，并提供「全部匹配」节点（渲染为恒真 `{ "type": "const", "values": [true] }`）；`rate_limit` 的 config 渲染 rpm 输入（`0` = 不可用 / 空 = 不限制），`access_control` 无 config。复用 `useTable` 组合式函数。
+- 新增 `src/views/Rule/`（Index / List / 对话框）：规则列表 + 新增/编辑（名称、启用开关、type、scope **条件树编辑器**、按 type 渲染的 config 表单）。条件树编辑器：整体为树形结构——根节点可添加节点，每个节点可切换类型（`and` / `or` / 叶子条件 / 固定值），`and` / `or` 节点下可添加子节点，「+ 添加条件」挂在父节点上；叶子行可选维度（用户 / 模型 / 供应商）+ 运算符（`=`/`!=`/`in`/`not in`）+ 取值（标量或逗号分隔 ID 列表）；固定值节点渲染为 `{ "type": "const", "values": [true] }` / `[false]`（可选 true / false）。`rate_limit` 的 config 渲染 rpm 输入（`0` = 不可用 / 空 = 不限制），`access_control` 无 config。复用 `useTable` 组合式函数。
 - 侧边栏新增「规则」入口；模型/用户对话框**不加字段**（统一走规则）。
 
 ## 技术要点与边界
@@ -376,7 +376,7 @@ await ruleService.matchAndCheckVendor(user, modelConfig, vendor);
 5. **失败/中断请求口径**：RPM 在准入时即计数（先加后判），失败/中断请求同样计入；供应商级限流的 failover 每次尝试各计一次。与「无请求后记账」的设计一致。
 6. **root 旁路**：`user.type === ROOT` 直接跳过匹配与计数（限流与访问控制一致）。
 7. **访问控制判定**：纯授权判定、无状态（无计数器）；先于限流执行；树命中即 403（deny-wins，fail-closed），不随 failover 切换供应商。
-8. **表达式树**：仅 AND / OR，无 NOT 节点（叶子级 `!=`/`not in` 覆盖取反）；`and` / `or` 的 `values` 必须**非空**（空数组不合法，避免歧义），全局兜底用显式恒真节点 `{ "type": "const", "values": [true] }`；校验时限制树深度。三个维度均为标量。
+8. **表达式树**：仅 AND / OR，无 NOT 节点（叶子级 `!=`/`not in` 覆盖取反）；`and` / `or` 的 `values` 必须**非空**（空数组不合法，避免歧义），恒真 / 恒假用显式固定值节点 `{ "type": "const", "values": [true] }` / `[false]`；校验时限制树深度。三个维度均为标量。
 9. **`vendor_id` 两阶段检查 + 限流 failover**：含 `vendor_id` 条件的规则在路由选择后执行，匹配实际路由到的供应商（标量）；不含 `vendor_id` 的规则在路由前执行。供应商级限流命中视为「该上游繁忙」，failover 开启时切换下一上游，全部耗尽 / 关闭时返回 429；访问控制命中则直接 403，不 failover。管理员的 route-test（inspect 模式）跳过所有规则检查。
 10. **`/llm/v1/models` 不纳入规则**：模型列表既不限流也不按访问控制过滤，访问控制只在调用入口生效。
 11. **缓存一致性**：规则内存缓存需在 create/update/delete 时失效，否则改动不生效。在 worker 多 isolate 模式下，规则缓存同样是单 isolate 级别——某个 isolate 上执行 CRUD 只会失效本地缓存，其他 isolate 需等缓存过期才能感知变更。建议给缓存加一个 TTL（如 60s）作为兜底，确保规则变更在可接受延迟内全局生效。

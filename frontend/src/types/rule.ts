@@ -18,10 +18,10 @@ export interface LogicNode {
     values: ExprNode[];
 }
 
-/** 恒真节点：全部匹配，values 固定为 [true] */
+/** 固定值节点：values 为单个布尔值（true = 恒真/全部匹配，false = 恒假） */
 export interface ConstNode {
     type: 'const';
-    values: [true];
+    values: [boolean];
 }
 
 export type ExprNode = LeafNode | LogicNode | ConstNode;

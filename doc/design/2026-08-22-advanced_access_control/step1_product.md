@@ -25,9 +25,9 @@
 
 **统一节点结构**：所有节点都由 `type`、`oper`（可选）、`values` 三个 key 组成，叶子条件与逻辑节点形态统一：
 
-- `type`：节点类型。叶子为判断维度（`user_id` / `model_id` / `vendor_id`）；组合为 `and` / `or`；恒真为 `const`。注意与规则顶层 `type`（规则类型 `rate_limit` / `access_control`）区分。
+- `type`：节点类型。叶子为判断维度（`user_id` / `model_id` / `vendor_id`）；组合为 `and` / `or`；固定布尔值为 `const`。注意与规则顶层 `type`（规则类型 `rate_limit` / `access_control`）区分。
 - `oper`：运算符，仅叶子节点携带。
-- `values`：统一取值列表。叶子为比较值（number[]）；`and` / `or` 为子节点列表（非空）；`const` 为 `[true]`。
+- `values`：统一取值列表。叶子为比较值（number[]）；`and` / `or` 为子节点列表（非空）；`const` 为单个布尔值 `[true]` / `[false]`。
 
 **叶子条件**：对单一维度的一次判断：
 
@@ -65,7 +65,7 @@
 ]}
 ```
 
-**恒真节点（全局兜底）**：`{ "type": "const", "values": [true] }` 恒为真（全命中），用于「对所有请求施加统一限制」的兜底规则。`and` / `or` 节点的 `values` 必须为**非空**数组——空数组不合法（避免歧义）。
+**固定值节点**：`{ "type": "const", "values": [true] }` 恒为真（全命中），`{ "type": "const", "values": [false] }` 恒为假（永不命中）。`[true]` 用于「对所有请求施加统一限制」的全局兜底规则。`and` / `or` 节点的 `values` 必须为**非空**数组——空数组不合法（避免歧义）。
 
 **维度语义**：
 
@@ -143,7 +143,7 @@
 
 - **本期只做内存限流，且仅 RPM**：计数器存放在进程内存中，限流为「单实例级别」。Cloudflare Workers（多 isolate）、MySQL 多实例部署下无法跨实例精确限额，这是既定取舍，接口已预留，后续可切换为 DB / Durable Object 存储。TPM 限流本期不做。
 - **不新增其它规则类型**：并发数、成本配额、TPM 等逻辑仅预留扩展位，不在本期实现。
-- **表达式树仅支持 AND / OR**：不做 NOT 节点（叶子级 `!=` / `not in` 已覆盖「取反」需求）；`and` / `or` 的 `values` 必须非空，恒真用显式 `{ "type": "const", "values": [true] }` 节点表达。
+- **表达式树仅支持 AND / OR**：不做 NOT 节点（叶子级 `!=` / `not in` 已覆盖「取反」需求）；`and` / `or` 的 `values` 必须非空，恒真 / 恒假用显式固定值节点 `{ "type": "const", "values": [true] }` / `[false]` 表达。
 - **`/llm/v1/models` 不纳入规则**：模型列表既不做限流，也**不按访问控制过滤**——受限模型对无权限用户仍可见，仅在实际调用时返回 403（本迭代只控制调用，不在列表层隐藏）。
 - **root 用户旁路全部规则**（Tauri 桌面自动登录依赖 root token，不能拦截）。
 - **路由测试不应用规则**：管理员的 `/model/route-test.json`（inspect 模式）是纯诊断接口，阶段一（绕过 LLM 中间件）与阶段二（inspect 跳过）都不检查，规则只约束真实 `/llm/v1/*` 请求流量。
@@ -153,7 +153,7 @@
 
 - [ ] 新增 `rule` 表，迁移（`migrate_0031`）在 node（SQLite / MySQL）与 worker（D1）三种形态下均可正确执行
 - [ ] 规则 CRUD API 可用，删除/修改后内存缓存即时失效、规则即时生效
-- [ ] `scope` 表达式树求值正确：叶子运算符 `=`/`!=`/`in`/`not in`、`{ "type": "const", "values": [true] }` 恒真节点、AND / OR 嵌套组合均正确；空 `and` / `or` 的 `values` 被校验拒绝
+- [ ] `scope` 表达式树求值正确：叶子运算符 `=`/`!=`/`in`/`not in`、`{ "type": "const", "values": [true] }` / `[false]` 固定值节点、AND / OR 嵌套组合均正确；空 `and` / `or` 的 `values` 被校验拒绝
 - [ ] `vendor_id` 规则在路由选择后正确执行：匹配实际路由到的供应商，不含 `vendor_id` 的规则在路由前执行
 - [ ] RPM 限流命中即生效：准入自增计数 + 超限返回 429 + `Retry-After`
 - [ ] **供应商级限流 failover**：命中的上游撞限流时切换到下一上游，全部耗尽（或 failover 关闭）时才返回 429

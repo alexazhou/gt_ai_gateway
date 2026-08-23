@@ -42,8 +42,9 @@ describe("scopeExpr", () => {
             expect(scopeExpr.evalExpr({ type: "vendor_id", oper: "=", values: [9] }, { user_id: 1, model_id: 2 })).toBe(false);
         });
 
-        it("const node is always true", () => {
+        it("const node returns the fixed boolean value", () => {
             expect(scopeExpr.evalExpr({ type: "const", values: [true] }, ctx)).toBe(true);
+            expect(scopeExpr.evalExpr({ type: "const", values: [false] }, ctx)).toBe(false);
         });
 
         it("AND requires all children true", () => {
@@ -142,9 +143,13 @@ describe("scopeExpr", () => {
             expect(() => scopeExpr.validateScope({ type: "user_id", oper: "not in", values: [] })).toThrow(/non-empty/);
         });
 
-        it("rejects const with non-[true] values", () => {
-            expect(() => scopeExpr.validateScope({ type: "const", values: [] })).toThrow(/\[true\]/);
-            expect(() => scopeExpr.validateScope({ type: "const", values: [false] })).toThrow(/\[true\]/);
+        it("accepts const with [true] or [false], rejects others", () => {
+            expect(() => scopeExpr.validateScope({ type: "const", values: [true] })).not.toThrow();
+            expect(() => scopeExpr.validateScope({ type: "const", values: [false] })).not.toThrow();
+            expect(() => scopeExpr.validateScope({ type: "const", values: [] })).toThrow(/\[true\] or \[false\]/);
+            expect(() => scopeExpr.validateScope({ type: "const", values: [true, false] })).toThrow(/\[true\] or \[false\]/);
+            expect(() => scopeExpr.validateScope({ type: "const", values: [1] as any })).toThrow(/\[true\] or \[false\]/);
+            expect(() => scopeExpr.validateScope({ type: "const", values: ["true"] as any })).toThrow(/\[true\] or \[false\]/);
         });
 
         it("rejects non-integer values", () => {

@@ -24,10 +24,10 @@ export interface LogicNode {
     values: ExprNode[];
 }
 
-/** 恒真节点：type 为 const，values 固定为 [true]（全命中，全局兜底） */
+/** 固定值节点：type 为 const，values 为单个布尔值（true = 恒真全命中，false = 恒假） */
 export interface ConstNode {
     type: "const";
-    values: [true];
+    values: [boolean];
 }
 
 export type ExprNode = LeafNode | LogicNode | ConstNode;
