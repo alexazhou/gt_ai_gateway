@@ -32,10 +32,11 @@ function raceWithTimeout<T>(task: Promise<T>, timeoutMs: number, onTimeout: () =
 
 
 /**
- * 以文本形式读取响应体，受中止信号控制：中止（超时 / 客户端断开）时取消 body 并 reject。
+ * 以文本形式读取响应体，受中止信号控制：中止时取消 body 并 reject。
  * Response.text() 不接收 signal，由这里统一处理「中止 → body.cancel()」。
+ * 内部原语，供 readTextWithTimeoutAndAbort 使用。
  */
-async function readTextWithAbort(res: Response, signal: AbortSignal): Promise<string> {
+async function readTextWithSignal(res: Response, signal: AbortSignal): Promise<string> {
     return new Promise<string>((resolve, reject) => {
         const onAbort = () => {
             res.body?.cancel().catch(() => {});
@@ -51,16 +52,49 @@ async function readTextWithAbort(res: Response, signal: AbortSignal): Promise<st
 }
 
 
+/** 读取响应体失败时抛出的错误：携带失败原因对应的失败码，供调用方记账与处理 */
+class BodyReadError extends Error {
+    constructor(public readonly failedCode: FailedCode) {
+        super(`upstream response body read failed: ${failedCode}`);
+    }
+}
+
+
+/**
+ * 一次封装「非流式 body 读取」的三类失败兜底：
+ * - 上游断开（连接中断 / 读取失败） → UPSTREAM_DISCONNECTED
+ * - 超时（timeoutMs 内未读完）     → UPSTREAM_TIMEOUT
+ * - 下游断开（客户端 abort）       → CLIENT_DISCONNECTED
+ *
+ * 内部用 TimeoutAbortController 合并「超时 + 客户端信号」，读取失败统一抛 BodyReadError
+ * （e.failedCode 即原因），正常读完返回文本。timeoutMs <= 0 关闭超时；clientAbortSignal 可省略。
+ */
+async function readTextWithTimeoutAndAbort(
+    res: Response,
+    timeoutMs: number,
+    clientAbortSignal?: AbortSignal,
+): Promise<string> {
+    const abortCtrl = new TimeoutAbortController(timeoutMs, clientAbortSignal);
+    try {
+        return await readTextWithSignal(res, abortCtrl.signal);
+    } catch (e) {
+        throw new BodyReadError(abortCtrl.failedCode() ?? FailedCode.UPSTREAM_DISCONNECTED);
+    } finally {
+        abortCtrl.dispose();
+    }
+}
+
+
 /**
  * 合并「超时」与「客户端断连」为统一 AbortSignal，并追踪中止原因，直接给出失败码。
  *
- * 用法：
+ * 用法（fetch 走 signal；读 body 走 readTextWithTimeoutAndAbort 一次性兜底）：
  *   const abort = new TimeoutAbortController(timeoutMs, c.req.raw.signal);
  *   try {
  *       await fetch(url, { signal: abort.signal });
- *       const text = await readTextWithAbort(res, abort.signal);
+ *       const text = await readTextWithTimeoutAndAbort(res, timeoutMs, c.req.raw.signal);
  *   } catch (e) {
- *       const code = abort.failedCode() ?? FailedCode.UPSTREAM_DISCONNECTED;
+ *       const code = e instanceof BodyReadError ? e.failedCode : abort.failedCode();
  *   } finally {
  *       abort.dispose();
  *   }
@@ -106,7 +140,8 @@ class TimeoutAbortController {
 
 export default {
     TimeoutAbortController,
+    BodyReadError,
     onSignalAbort,
     raceWithTimeout,
-    readTextWithAbort,
+    readTextWithTimeoutAndAbort,
 };

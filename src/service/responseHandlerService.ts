@@ -303,21 +303,21 @@ export async function handleNonStreamResponse(
     upstreamFormat: ApiFormat,
     converter: BaseConverter | null = null,
 ): Promise<Response> {
-    // 非流式 body 读取兜底：body 总超时 + 断连监听，异常时显式把 record 标 FAILED 并区分失败码。
-    // Response.text() 不接收 signal，由 readText 统一处理「中止 → body.cancel()」。
+    // 非流式 body 读取兜底：readTextWithTimeoutAndAbort 一次性处理「上游断开 / 超时 / 客户端断开」，
+    // 失败抛 BodyReadError（e.failedCode 即原因），异常时显式把 record 标 FAILED。
     const nonStreamTimeoutMs = await configService.getNumber(ConfigKey.UPSTREAM_NON_STREAM_TIMEOUT_MS);
-    const abortCtrl = new abortTimeoutUtil.TimeoutAbortController(nonStreamTimeoutMs, c.req.raw.signal);
 
     let responseText: string;
     try {
-        responseText = await abortTimeoutUtil.readTextWithAbort(upstreamRes, abortCtrl.signal);
+        responseText = await abortTimeoutUtil.readTextWithTimeoutAndAbort(upstreamRes, nonStreamTimeoutMs, c.req.raw.signal);
     } catch (e) {
-        await recordService.markFailed(record.id, abortCtrl.failedCode() ?? FailedCode.UPSTREAM_DISCONNECTED, {
+        const failedCode = e instanceof abortTimeoutUtil.BodyReadError
+            ? e.failedCode
+            : FailedCode.UPSTREAM_DISCONNECTED;
+        await recordService.markFailed(record.id, failedCode, {
             message: "请求中断",
         });
         throw e;
-    } finally {
-        abortCtrl.dispose();
     }
 
     const statusCode = upstreamRes.status as StatusCode;

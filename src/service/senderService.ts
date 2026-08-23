@@ -252,7 +252,7 @@ async function sendRequestToUpstream(
     // fetch 返回后 dispose 会移除客户端断开监听——body 阶段（流式 / 非流式）由各 handler
     // 自己的 abort 监听兜底，handler 在注册监听时会先检查信号是否已中断。
     const headersTimeoutMs = await configService.getNumber(ConfigKey.UPSTREAM_HEADERS_TIMEOUT_MS);
-    const abortCtrl = new abortTimeoutUtil.TimeoutAbortController(headersTimeoutMs, c.req.raw.signal);
+    const clientAbortCtrl = new abortTimeoutUtil.TimeoutAbortController(headersTimeoutMs, c.req.raw.signal);
 
     let upstreamRes: Response;
     try {
@@ -262,13 +262,13 @@ async function sendRequestToUpstream(
             method: "POST",
             headers: finalHeaders,
             body: upstreamBody,
-            signal: abortCtrl.signal,
+            signal: clientAbortCtrl.signal,
             // dispatcher 是 undici (Node.js) 特有选项，不在 Cloudflare Workers 的 RequestInit 类型定义中
             ...(dispatcher ? { dispatcher: dispatcher } as any : {}),
         });
     } catch (e: any) {
         console.error("Upstream fetch failed:", e);
-        await recordService.markFailed(recordId, abortCtrl.failedCode(), {
+        await recordService.markFailed(recordId, clientAbortCtrl.failedCode(), {
             stage: RequestActivityStage.UPSTREAM_ATTEMPT,
             message: "上游请求失败",
             level: ActivityLevel.ERROR,
@@ -282,7 +282,7 @@ async function sendRequestToUpstream(
         });
         throw e;
     } finally {
-        abortCtrl.dispose();
+        clientAbortCtrl.dispose();
     }
     console.log("upstream response status:", upstreamRes.status);
 
