@@ -17,7 +17,7 @@ import fetchUtil from "../util/fetchUtil";
 import routingService, { type ModelRoutingResult } from "./routingService/core";
 import configService from "./configService";
 import upstreamHealthService from "./upstreamHealthService";
-import { TimeoutAbortController } from "../util/abortTimeoutUtil";
+import abortTimeoutUtil from "../util/abortTimeoutUtil";
 import RoutingContext from "./routingService/routingContext";
 
 
@@ -252,7 +252,7 @@ async function sendRequestToUpstream(
     // fetch 返回后 dispose 会移除客户端断开监听——body 阶段（流式 / 非流式）由各 handler
     // 自己的 abort 监听兜底，handler 在注册监听时会先检查信号是否已中断。
     const headersTimeoutMs = await configService.getNumber(ConfigKey.UPSTREAM_HEADERS_TIMEOUT_MS);
-    const abortCtrl = new TimeoutAbortController(headersTimeoutMs, c.req.raw.signal);
+    const abortCtrl = new abortTimeoutUtil.TimeoutAbortController(headersTimeoutMs, c.req.raw.signal);
 
     let upstreamRes: Response;
     try {

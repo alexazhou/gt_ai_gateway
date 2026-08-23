@@ -11,7 +11,7 @@ import { AccumulatorBase } from "../util/accumulator/accumulatorBase";
 import recordService from "./recordService";
 import requestActivityService from "./requestActivityService";
 import configService from "./configService";
-import { TimeoutAbortController } from "../util/abortTimeoutUtil";
+import abortTimeoutUtil from "../util/abortTimeoutUtil";
 import userService from "./userService";
 import streamLogService from "./streamLogService";
 import usageUtils, { type Dict } from "../util/protocol/usageUtil";
@@ -36,11 +36,13 @@ interface StreamRunResult {
 }
 
 
-interface RunSseLoopOptions {
+interface RunSSELoopOptions {
     accumulator: AccumulatorBase;
     converter: BaseConverter | null;
-    logPrefix: string;
 }
+
+// 流式读循环日志前缀（runSSELoop 只被 handleStreamResponse 一处调用，直接固化）
+const SSE_LOOP_LOG_PREFIX = "[responseHandlerService]";
 
 
 // ====================================================================
@@ -51,12 +53,12 @@ interface RunSseLoopOptions {
  * 消费上游 SSE 流：decode → 拆分事件 → 协议转换 → 累加 → 实时转发给客户端。
  * 返回统一状态供收尾使用（finalizeStreamResult）。
  */
-async function runSseLoop(
+async function runSSELoop(
     c: Context,
     upstreamRes: Response,
     stream: SSEStreamingApi,
     logStream: WriteStream | null,
-    opts: RunSseLoopOptions,
+    opts: RunSSELoopOptions,
 ): Promise<StreamRunResult> {
     const { accumulator } = opts;
     const reader = upstreamRes.body!.getReader();
@@ -70,20 +72,18 @@ async function runSseLoop(
     // 相邻 chunk 空闲超时：超时置 UPSTREAM_TIMEOUT 并取消上游 body
     const idleTimeoutMs = await configService.getNumber(ConfigKey.UPSTREAM_STREAM_IDLE_TIMEOUT_MS);
 
-    const abortHandler = () => {
+    // 客户端断开感知：直接订阅客户端信号，已断开则立即触发
+    const unsubClient = abortTimeoutUtil.onSignalAbort(c.req.raw.signal, () => {
         if (!failedCode) failedCode = FailedCode.CLIENT_DISCONNECTED;
         reader.cancel().catch(() => {});
-    };
-    // 仅需客户端断开感知：timeoutMs=0 关闭超时，onAbort 统一处理「已断开」与「随后断开」
-    const abortCtrl = new TimeoutAbortController(0, c.req.raw.signal);
-    const unsubscribeAbort = abortCtrl.onAbort(abortHandler);
+    });
 
     try {
         while (true) {
             let done: boolean;
             let value: Uint8Array | undefined;
             try {
-                const result = await abortCtrl.raceWithTimeout(
+                const result = await abortTimeoutUtil.raceWithTimeout(
                     reader.read(),
                     idleTimeoutMs,
                     () => {
@@ -100,7 +100,7 @@ async function runSseLoop(
                     // 空闲超时：onTimeout 已置位并 cancel，不再覆盖为 UPSTREAM_DISCONNECTED
                     break;
                 }
-                console.error(`${opts.logPrefix} Upstream read error:`, e);
+                console.error(`${SSE_LOOP_LOG_PREFIX} Upstream read error:`, e);
                 if (failedCode !== FailedCode.CLIENT_DISCONNECTED) {
                     failedCode = FailedCode.UPSTREAM_DISCONNECTED;
                 }
@@ -157,7 +157,7 @@ async function runSseLoop(
                             id: clientEvent.id,
                         });
                     } catch (e: any) {
-                        console.error(`${opts.logPrefix} Client write error (client disconnected):`, e);
+                        console.error(`${SSE_LOOP_LOG_PREFIX} Client write error (client disconnected):`, e);
                         failedCode = FailedCode.CLIENT_DISCONNECTED;
                         clientDisconnected = true;
                         break;
@@ -170,7 +170,7 @@ async function runSseLoop(
             if (clientDisconnected) break;
         }
     } catch (e: any) {
-        console.error(`${opts.logPrefix} Unexpected stream error:`, e);
+        console.error(`${SSE_LOOP_LOG_PREFIX} Unexpected stream error:`, e);
         if (
             failedCode !== FailedCode.CLIENT_DISCONNECTED
             && failedCode !== FailedCode.UPSTREAM_TIMEOUT
@@ -179,8 +179,7 @@ async function runSseLoop(
         }
     }
 
-    unsubscribeAbort();
-    abortCtrl.dispose();
+    unsubClient();
     return { accumulator, firstTokenTime, failedCode, streamErrorData, eventCount };
 }
 
@@ -307,11 +306,11 @@ export async function handleNonStreamResponse(
     // 非流式 body 读取兜底：body 总超时 + 断连监听，异常时显式把 record 标 FAILED 并区分失败码。
     // Response.text() 不接收 signal，由 readText 统一处理「中止 → body.cancel()」。
     const nonStreamTimeoutMs = await configService.getNumber(ConfigKey.UPSTREAM_NON_STREAM_TIMEOUT_MS);
-    const abortCtrl = new TimeoutAbortController(nonStreamTimeoutMs, c.req.raw.signal);
+    const abortCtrl = new abortTimeoutUtil.TimeoutAbortController(nonStreamTimeoutMs, c.req.raw.signal);
 
     let responseText: string;
     try {
-        responseText = await abortCtrl.readText(upstreamRes);
+        responseText = await abortTimeoutUtil.readTextWithAbort(upstreamRes, abortCtrl.signal);
     } catch (e) {
         await recordService.markFailed(record.id, abortCtrl.failedCode() ?? FailedCode.UPSTREAM_DISCONNECTED, {
             message: "请求中断",
@@ -435,10 +434,9 @@ export async function handleStreamResponse(
     }
 
     return streamSSE(c, async (stream: SSEStreamingApi) => {
-        const state = await runSseLoop(c, upstreamRes, stream, logStream, {
+        const state = await runSSELoop(c, upstreamRes, stream, logStream, {
             accumulator,
             converter,
-            logPrefix: "[responseHandlerService]",
         });
         console.log(`[responseHandlerService] Stream ended, events: ${state.eventCount}, completed: ${state.accumulator.isCompleted()}, failedCode: ${state.failedCode}`);
         finalizeStreamResult(c, record, model, user, state);
