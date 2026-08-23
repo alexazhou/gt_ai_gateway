@@ -203,6 +203,10 @@ const FAILED_CODE_LABELS: { [key: string]: string } = {
     upstream_disconnected: '上游断开',
     stream_incomplete: '流不完整',
     upstream_parse_error: '上游错误',
+    upstream_timeout: '上游超时',
+    no_available_upstream: '无可用上游',
+    recovered_orphan: '孤儿回收',
+    unknown_error: '未知错误',
 };
 
 function getStatusText(status: string | null, failedCode?: string | null): string {

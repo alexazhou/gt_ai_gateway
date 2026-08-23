@@ -121,9 +121,9 @@ async function latest(limit: number = 10, summaryOnly: boolean = false) {
     return records;
 }
 
-interface MarkFailedOptions {
-    /** RESULT 活动文案 */
-    message: string;
+export interface MarkFailedOptions {
+    /** 活动文案；省略时默认用 failed_code 本身（中文标签由前端 FAILED_CODE_LABELS 映射） */
+    message?: string;
     /** 活动 stage，默认 result */
     stage?: RequestActivityStage;
     /** 活动级别，默认 warn */
@@ -137,32 +137,37 @@ interface MarkFailedOptions {
 /**
  * 统一「把 record 标为失败」的收尾：更新 FAILED + failed_code + end_at，并追加一条 RESULT 活动。
  * 供各失败路径（上游超时/断连、非成功响应等）复用，避免 update + append 两步重复。
+ * options 传 null 表示无附加参数；message 省略时默认用 failed_code 本身作为活动文案。
  */
 async function markFailed(
     recordId: number,
     failedCode: string | null,
-    options: MarkFailedOptions,
+    options: MarkFailedOptions | null = null,
 ): Promise<void> {
+    const opts = options ?? {};
+
     const updateData: RecordUpdateData = {
         status: SgRecordStatus.FAILED,
         failed_code: failedCode,
         end_at: new Date(),
     };
-    if (options.response_data !== undefined) {
-        updateData.response_data = options.response_data;
+    if (opts.response_data !== undefined) {
+        updateData.response_data = opts.response_data;
     }
     await update(recordId, updateData);
 
+    const label = opts.message ?? failedCode ?? "请求失败";
+
     await requestActivityService.append(
         recordId,
-        options.stage ?? RequestActivityStage.RESULT,
-        options.message,
+        opts.stage ?? RequestActivityStage.RESULT,
+        label,
         {
             status: SgRecordStatus.FAILED,
             ...(failedCode !== null ? { failed_code: failedCode } : {}),
-            ...options.detail,
+            ...opts.detail,
         },
-        options.level ?? ActivityLevel.WARN,
+        opts.level ?? ActivityLevel.ERROR,
     );
 }
 

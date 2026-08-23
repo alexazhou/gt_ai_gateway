@@ -11,7 +11,7 @@ import modelFixtures from "../../fixtures/modelFixtures";
  * Stream Failure Handling Tests
  *
  * Verifies that failed_code is correctly set when a streaming request ends abnormally:
- * - stream_incomplete: upstream closed without [DONE] / message_stop / response.completed
+ * - unknown_error: upstream closed without [DONE] / message_stop / response.completed
  * - upstream_disconnected: upstream destroyed the TCP socket mid-stream
  * - upstream_parse_error: upstream returned a protocol-level SSE error event
  */
@@ -49,7 +49,7 @@ describe("Stream Failure Handling", () => {
         );
         testUserToken = userResponse.body.token;
 
-        // --- OpenAI stream_incomplete vendor/model ---
+        // --- OpenAI unknown_error vendor/model ---
         const openaiIncompleteVendor = await requestHelper.post(
             "/vendor/create.json",
             {
@@ -85,7 +85,7 @@ describe("Stream Failure Handling", () => {
             adminToken,
         );
 
-        // --- Anthropic stream_incomplete vendor/model ---
+        // --- Anthropic unknown_error vendor/model ---
         const anthropicIncompleteVendor = await requestHelper.post(
             "/vendor/create.json",
             {
@@ -103,7 +103,7 @@ describe("Stream Failure Handling", () => {
             adminToken,
         );
 
-        // --- Responses API stream_incomplete vendor/model ---
+        // --- Responses API unknown_error vendor/model ---
         const responsesIncompleteVendor = await requestHelper.post(
             "/vendor/create.json",
             {
@@ -220,7 +220,7 @@ describe("Stream Failure Handling", () => {
 
 
     describe("OpenAI /llm/v1/chat/completions", () => {
-        it("should set failed_code=stream_incomplete when upstream closes without [DONE]", async () => {
+        it("should set failed_code=unknown_error when upstream closes without [DONE]", async () => {
             await requestHelper.post(
                 "/llm/v1/chat/completions",
                 { model: openaiIncompleteModelName, messages: [{ role: "user", content: "hi" }], stream: true },
@@ -231,7 +231,7 @@ describe("Stream Failure Handling", () => {
             const record = records[0];
 
             expect(record.status).toBe("failed");
-            expect(record.failed_code).toBe("stream_incomplete");
+            expect(record.failed_code).toBe("unknown_error");
         }, 15000);
 
         it("should set failed_code=upstream_disconnected when upstream destroys socket mid-stream", async () => {
@@ -283,7 +283,7 @@ describe("Stream Failure Handling", () => {
 
 
     describe("Anthropic /llm/v1/messages", () => {
-        it("should set failed_code=stream_incomplete when upstream closes without message_stop", async () => {
+        it("should set failed_code=unknown_error when upstream closes without message_stop", async () => {
             await requestHelper.post(
                 "/llm/v1/messages",
                 {
@@ -299,13 +299,13 @@ describe("Stream Failure Handling", () => {
             const record = records[0];
 
             expect(record.status).toBe("failed");
-            expect(record.failed_code).toBe("stream_incomplete");
+            expect(record.failed_code).toBe("unknown_error");
         }, 15000);
     });
 
 
     describe("Responses API /llm/v1/responses", () => {
-        it("should set failed_code=stream_incomplete when upstream closes without response.completed", async () => {
+        it("should set failed_code=unknown_error when upstream closes without response.completed", async () => {
             await requestHelper.post(
                 "/llm/v1/responses",
                 { model: responsesIncompleteModelName, input: "hi", stream: true },
@@ -316,7 +316,7 @@ describe("Stream Failure Handling", () => {
             const record = records[0];
 
             expect(record.status).toBe("failed");
-            expect(record.failed_code).toBe("stream_incomplete");
+            expect(record.failed_code).toBe("unknown_error");
         }, 15000);
 
         it("should set failed_code=upstream_parse_error when converted Anthropic stream returns an SSE error event", async () => {

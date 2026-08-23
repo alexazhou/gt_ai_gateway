@@ -8,7 +8,7 @@ import { SgRecord } from "../model/sgRecord";
 import { ApiFormat, FailedCode, SgRecordStatus, RequestActivityStage, ActivityLevel, ConfigKey } from "../constants";
 import { BaseConverter } from "../util/protocolConverter/BaseConverter";
 import { AccumulatorBase } from "../util/accumulator/accumulatorBase";
-import recordService from "./recordService";
+import recordService, { type MarkFailedOptions } from "./recordService";
 import requestActivityService from "./requestActivityService";
 import configService from "./configService";
 import abortTimeoutUtil from "../util/abortTimeoutUtil";
@@ -170,7 +170,7 @@ function finalizeStreamResult(
     user: SgUser,
     state: StreamRunResult,
 ): void {
-    const { accumulator, firstTokenTime, failedCode, streamErrorData } = state;
+    let { accumulator, firstTokenTime, failedCode, streamErrorData } = state;
 
     runInBackgroundUtil.runInBackground(c, async () => {
         // 响应已完整接收（[DONE] / message_stop / response.completed）时优先视为成功：
@@ -204,60 +204,24 @@ function finalizeStreamResult(
             return;
         }
 
-        if (
-            failedCode === FailedCode.CLIENT_DISCONNECTED
-            || failedCode === FailedCode.UPSTREAM_DISCONNECTED
-        ) {
-            await recordService.update(record.id, {
-                status: SgRecordStatus.FAILED,
-                failed_code: failedCode,
-                end_at: new Date(),
-            });
-            await requestActivityService.append(record.id, RequestActivityStage.RESULT, "请求中断", {
-                status: SgRecordStatus.FAILED,
-                failed_code: failedCode,
-            }, ActivityLevel.WARN);
-            return;
+        // 失败收尾：先归一化失败码，再按条件补收尾参数，最后统一写入。
+        // ① 未记录失败码（流结束但归因不到具体原因）→ 兜底未知错误
+        if (failedCode === null) {
+            failedCode = FailedCode.UNKNOWN;
         }
 
-        if (failedCode === FailedCode.UPSTREAM_TIMEOUT) {
-            await recordService.update(record.id, {
-                status: SgRecordStatus.FAILED,
-                failed_code: FailedCode.UPSTREAM_TIMEOUT,
-                end_at: new Date(),
-            });
-            await requestActivityService.append(record.id, RequestActivityStage.RESULT, "上游响应超时", {
-                status: SgRecordStatus.FAILED,
-                failed_code: FailedCode.UPSTREAM_TIMEOUT,
-            }, ActivityLevel.WARN);
-            return;
-        }
-
+        // ② 上游协议解析错误 → 附带 error body（默认 null，仅解析错误时填充）
+        let failedOptions: MarkFailedOptions | null = null;
         if (failedCode === FailedCode.UPSTREAM_PARSE_ERROR || accumulator.isErrored()) {
             const errorData = accumulator.getError() ?? streamErrorData;
-            await recordService.update(record.id, {
-                status: SgRecordStatus.FAILED,
-                failed_code: FailedCode.UPSTREAM_PARSE_ERROR,
+            failedOptions = {
                 response_data: errorData !== null && typeof errorData !== "string"
                     ? JSON.stringify(errorData) : null,
-                end_at: new Date(),
-            });
-            await requestActivityService.append(record.id, RequestActivityStage.RESULT, "上游返回错误", {
-                status: SgRecordStatus.FAILED,
-                failed_code: FailedCode.UPSTREAM_PARSE_ERROR,
-            }, ActivityLevel.ERROR);
-            return;
+            };
         }
 
-        await recordService.update(record.id, {
-            status: SgRecordStatus.FAILED,
-            failed_code: FailedCode.STREAM_INCOMPLETE,
-            end_at: new Date(),
-        });
-        await requestActivityService.append(record.id, RequestActivityStage.RESULT, "流式响应不完整", {
-            status: SgRecordStatus.FAILED,
-            failed_code: FailedCode.STREAM_INCOMPLETE,
-        }, ActivityLevel.WARN);
+        // ③ 统一收尾（null 表示无附加参数，交由 markFailed 默认处理）
+        await recordService.markFailed(record.id, failedCode, failedOptions);
     });
 }
 
@@ -289,9 +253,7 @@ export async function handleNonStreamResponse(
         const failedCode = e instanceof abortTimeoutUtil.BodyReadError
             ? e.failedCode
             : FailedCode.UPSTREAM_DISCONNECTED;
-        await recordService.markFailed(record.id, failedCode, {
-            message: "请求中断",
-        });
+        await recordService.markFailed(record.id, failedCode);
         throw e;
     }
 

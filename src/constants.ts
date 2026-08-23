@@ -16,6 +16,8 @@ export enum FailedCode {
     UPSTREAM_TIMEOUT = "upstream_timeout",
     // 孤儿记录被手动回收时标记
     RECOVERED_ORPHAN = "recovered_orphan",
+    // 无法归因的兜底失败原因
+    UNKNOWN = "unknown_error",
 }
 
 export enum RequestActivityStage {
