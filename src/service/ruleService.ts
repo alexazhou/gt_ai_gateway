@@ -70,22 +70,22 @@ function validateRule(data: Record<string, any>): void {
             throw new customError.AppError("config.rpm must be a non-negative integer or null");
         }
     } else {
-        // access_control：config 必须为空 {}
+        // forbid_access：config 必须为空 {}
         const config = data.config ?? {};
         if (typeof config !== "object" || config === null || Array.isArray(config) || Object.keys(config).length > 0) {
-            throw new customError.AppError("access_control rule requires an empty config {}");
+            throw new customError.AppError("forbid_access rule requires an empty config {}");
         }
     }
 }
 
 
-// 阶段内统一匹配逻辑：access_control 先于 rate_limit（无权限请求不消耗限流计数），deny-wins
+// 阶段内统一匹配逻辑：forbid_access 先于 rate_limit（无权限请求不消耗限流计数），deny-wins
 async function checkMatchedRules(
     rules: SgRule[],
     ctx: RequestContext,
     failoverEligible: boolean,
 ): Promise<void> {
-    // 先判权限：任一命中的 access_control 规则 → 403（不 failover，策略性拒绝与供应商无关）
+    // 先判权限：任一命中的 forbid_access 规则 → 403（不 failover，策略性拒绝与供应商无关）
     for (const rule of rules) {
         if (rule.type === RuleType.ACCESS_CONTROL && scopeExpr.evalExpr(rule.scope, ctx)) {
             throw new customError.AccessDeniedError(`Access denied by rule "${rule.name}"`);

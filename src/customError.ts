@@ -43,7 +43,7 @@ class RateLimitError extends AppError {
 }
 
 
-/** 访问控制拒绝（403）：access_control 规则命中即拒绝（deny-if-true，无白名单模式） */
+/** 访问控制拒绝（403）：forbid_access 规则命中即拒绝（deny-if-true，无白名单模式） */
 class AccessDeniedError extends AppError {
     constructor(message: string) {
         super(message, 403, "access_denied");

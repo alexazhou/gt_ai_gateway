@@ -34,8 +34,8 @@
                             <InfoCircleOutlined class="field-help-icon" />
                         </a-tooltip>
                     </a-radio-button>
-                    <a-radio-button value="access_control">
-                        访问控制
+                    <a-radio-button value="forbid_access">
+                        禁止访问
                         <a-tooltip title="条件命中即拒绝请求（403）">
                             <InfoCircleOutlined class="field-help-icon" />
                         </a-tooltip>
@@ -45,7 +45,7 @@
 
             <a-form-item label="匹配条件（scope）" required>
                 <div class="scope-editor">
-                    <ScopeTreeEditor :node="formState.scope" is-root />
+                    <ScopeTreeEditor :node="formState.scope" :options="scopeOptions" is-root />
                 </div>
             </a-form-item>
 
@@ -64,7 +64,7 @@
                     </span>
                 </div>
             </a-form-item>
-            <a-form-item v-else label="访问控制参数">
+            <a-form-item v-else label="禁止访问参数">
                 <span class="config-hint">无需参数：条件命中即拒绝（403），可表达白名单（not in）等场景</span>
             </a-form-item>
         </a-form>
@@ -75,8 +75,12 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { InfoCircleOutlined } from '@ant-design/icons-vue';
 import { createRule, updateRule } from '@/api/rule';
+import { listModels } from '@/api/model';
+import { listUsers } from '@/api/user';
+import { listVendors } from '@/api/vendor';
 import ScopeTreeEditor from '@/components/rule/ScopeTreeEditor.vue';
-import type { ExprNode, LeafNode, LogicNode, Rule, RuleConfig, RuleType } from '@/types/rule';
+import { normalizeListResponse } from '@/utils/listResponse';
+import type { ExprNode, LeafNode, LogicNode, Rule, RuleConfig, RuleType, ScopeOptions } from '@/types/rule';
 import { notifyError, notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 
 const emit = defineEmits<{
@@ -100,9 +104,31 @@ const formState = reactive({
     enabled: true,
 });
 
+// 条件树叶子下拉选项（模型 / 用户 / 供应商）
+const scopeOptions = ref<ScopeOptions>({ models: [], users: [], vendors: [] });
+
+async function loadScopeOptions(): Promise<void> {
+    try {
+        const [models, users, vendors] = await Promise.all([
+            listModels({ page: 1, pageSize: 1000 }),
+            listUsers({ page: 1, pageSize: 1000 }),
+            listVendors({ page: 1, pageSize: 1000 }),
+        ]);
+        scopeOptions.value = {
+            models: normalizeListResponse(models).list.map(item => ({ id: item.id, name: item.name })),
+            users: normalizeListResponse(users).list.map(item => ({ id: item.id, name: item.name })),
+            vendors: normalizeListResponse(vendors).list.map(item => ({ id: item.id, name: item.name })),
+        };
+    } catch (e) {
+        // 选项加载失败不阻塞编辑：叶子退回文本输入（可手填 ID）
+        console.error('[RuleDialog] Failed to load scope options:', e);
+    }
+}
+
 function openCreate(): void {
     resetForm();
     currentId.value = 0;
+    void loadScopeOptions();
     visible.value = true;
 }
 
@@ -111,7 +137,8 @@ function openEdit(rule: Rule): void {
     currentId.value = rule.id;
     formState.name = rule.name;
     formState.type = rule.type;
-    formState.scope = structuredClone(rule.scope) as ExprNode;
+    // 列表数据的 scope 是 Vue 响应式 Proxy，structuredClone 无法克隆；JSON 深拷贝即可
+    formState.scope = JSON.parse(JSON.stringify(rule.scope)) as ExprNode;
     formState.enabled = Boolean(rule.enabled);
     if (rule.type === 'rate_limit') {
         const rpm = (rule.config as { rpm?: number | null }).rpm;
@@ -119,12 +146,13 @@ function openEdit(rule: Rule): void {
     } else {
         formState.config.rpm = null;
     }
+    void loadScopeOptions();
     visible.value = true;
 }
 
 // type 切换时重置 config
 watch(() => formState.type, () => {
-    if (formState.type === 'access_control') {
+    if (formState.type === 'forbid_access') {
         formState.config.rpm = null;
     }
 });

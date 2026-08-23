@@ -68,7 +68,7 @@ function rateLimitRule(modelId: number, rpm: number) {
 
 function accessControlRule(modelId: number, userId: number) {
     return {
-        type: "access_control",
+        type: "forbid_access",
         name: unique("ac"),
         scope: {
             type: "and",
@@ -156,7 +156,7 @@ describe("Rule API", () => {
 
         const badAccessControl = await requestHelper.post(
             "/rule/create.json",
-            { type: "access_control", name: "bad", scope: { type: "const", values: [true] }, config: { extra: 1 } },
+            { type: "forbid_access", name: "bad", scope: { type: "const", values: [true] }, config: { extra: 1 } },
             adminToken,
         );
         expect(badAccessControl.status).toBe(400);
@@ -216,7 +216,7 @@ describe("Rule API", () => {
         const user = await createUser();
         const otherUser = await createUser();
 
-        // 同一模型上加：access_control 拒绝 user、rate_limit rpm=1
+        // 同一模型上加：forbid_access 拒绝 user、rate_limit rpm=1
         await requestHelper.post(
             "/rule/create.json",
             accessControlRule(model.id, user.id),
@@ -448,10 +448,10 @@ describe("Rule API", () => {
         const vendorId = await createVendor();
         const model = await createModel(unique("root-model"), vendorId);
 
-        // 全量拒绝：access_control const→true（拒绝所有人）+ rate_limit rpm=0（不可用）
+        // 全量拒绝：forbid_access const→true（拒绝所有人）+ rate_limit rpm=0（不可用）
         await requestHelper.post(
             "/rule/create.json",
-            { type: "access_control", name: unique("root-ac"), scope: { type: "const", values: [true] }, config: {} },
+            { type: "forbid_access", name: unique("root-ac"), scope: { type: "const", values: [true] }, config: {} },
             adminToken,
         );
         await requestHelper.post(

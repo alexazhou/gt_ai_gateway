@@ -23,7 +23,7 @@
 - `resource/migrate/migrate_0031/`
 
 **子任务**:
-- [ ] `RuleType` 枚举：`RATE_LIMIT = "rate_limit"`、`ACCESS_CONTROL = "access_control"`
+- [ ] `RuleType` 枚举：`RATE_LIMIT = "rate_limit"`、`ACCESS_CONTROL = "forbid_access"`
 - [ ] `FailedCode` 新增：`RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"`、`ACCESS_DENIED = "access_denied"`
 - [ ] 新建 `migrate_0031`（`mysql.sql` + `sqlite.sql`）：`rule` 表（id / type / name / scope TEXT / config TEXT / enabled / created_at / updated_at），worker D1 走 sqlite 方言
 
@@ -93,7 +93,7 @@
 
 ### 任务 5: ruleService 编排
 
-**描述**: 规则内存缓存 + 匹配编排（access_control 拒绝 + 委托 `rateLimitService` 限流）+ root 旁路 + 失败记录，对外暴露阶段一/阶段二两个入口。
+**描述**: 规则内存缓存 + 匹配编排（forbid_access 拒绝 + 委托 `rateLimitService` 限流）+ root 旁路 + 失败记录，对外暴露阶段一/阶段二两个入口。
 
 **依赖**: 任务 2、3、4
 
@@ -103,12 +103,12 @@
 **子任务**:
 - [ ] 规则内存缓存：首次访问回源 `ruleManager.listEnabled()`，CRUD 时失效；加 TTL（如 60s）兜底 worker 多 isolate 的跨实例缓存过期
 - [ ] 按 `exprReferencesVendor` 将启用规则分为「不含 / 含 vendor_id」两组
-- [ ] `matchAndCheck(user, modelConfig)`（阶段一）：跑「不含 vendor_id」组，对命中的 `access_control` 规则抛 `AccessDeniedError`（403），对命中的 `rate_limit` 规则逐个调 `rateLimitService.checkAndAdmit`；`user.type === ROOT` 直接返回
+- [ ] `matchAndCheck(user, modelConfig)`（阶段一）：跑「不含 vendor_id」组，对命中的 `forbid_access` 规则抛 `AccessDeniedError`（403），对命中的 `rate_limit` 规则逐个调 `rateLimitService.checkAndAdmit`；`user.type === ROOT` 直接返回
 - [ ] `matchAndCheckVendor(user, modelConfig, vendor)`（阶段二）：跑「含 vendor_id」组，`vendor.id` 填入上下文后执行，`rateLimitService.checkAndAdmit` 传 `failoverEligible = true`；root 旁路
 - [ ] 被拒（403/429）时调用 `recordService.recordFailedRequest(...)`（阶段一），`failed_code` = `access_denied` / `rate_limit_exceeded`
 
 **验收标准**:
-- 单测覆盖：树求值匹配、deny-wins（多 access_control 任一命中即拒）、root 旁路、access_control 先于 rate_limit、限流正确委托 `rateLimitService`、两阶段 vendor_id 分流
+- 单测覆盖：树求值匹配、deny-wins（多 forbid_access 任一命中即拒）、root 旁路、forbid_access 先于 rate_limit、限流正确委托 `rateLimitService`、两阶段 vendor_id 分流
 
 ### 任务 6: 接入点（阶段一 + 阶段二 + failover）
 
@@ -161,7 +161,7 @@
 
 **子任务**:
 - [ ] `ruleController`：`list`（分页 + keyword）/ `get` / `create` / `update` / `delete`
-- [ ] 校验：`type` 已注册；`scope` 用 `validateScope`；`rate_limit` 的 `config.rpm` 为非负整数或 `null`；`access_control` 的 `config` 必须为空 `{}`
+- [ ] 校验：`type` 已注册；`scope` 用 `validateScope`；`rate_limit` 的 `config.rpm` 为非负整数或 `null`；`forbid_access` 的 `config` 必须为空 `{}`
 - [ ] `routes.ts` 注册（`authMiddleware.requireAdmin`）：`GET /rule/list.json`、`GET /rule/:id`、`POST /rule/create.json`、`PUT /rule/:id`、`DELETE /rule/:id`
 - [ ] 删除/修改后内存缓存即时失效（经 ruleManager 通知）
 
@@ -185,7 +185,7 @@
 - [ ] `api/rule.ts`：CRUD 请求封装
 - [ ] 规则列表页（复用 `useTable`）+ 新增/编辑对话框：名称、启用开关、type、scope **条件树编辑器**、按 type 渲染 config 表单
 - [ ] 条件树编辑器：叶子行（维度 user/model/vendor + 运算符 + 取值）与「+ AND / + OR 分组」嵌套，提供「全部匹配」节点（渲染为恒真 `{ "type": "const", "values": [true] }`）
-- [ ] `rate_limit` 渲染 rpm 输入（`0` = 不可用 / 空 = 不限制），`access_control` 无 config
+- [ ] `rate_limit` 渲染 rpm 输入（`0` = 不可用 / 空 = 不限制），`forbid_access` 无 config
 - [ ] 侧边栏「规则」入口
 
 **验收标准**:

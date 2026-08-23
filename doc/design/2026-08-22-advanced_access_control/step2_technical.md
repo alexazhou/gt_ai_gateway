@@ -2,9 +2,9 @@
 
 ## 架构概览
 
-规则采用**规则化**设计，一条规则 = 匹配条件（`scope` 表达式树）+ 动作参数（`config`）+ 类型标识（`type`）。请求进入 LLM 入口后，抽出请求上下文，对每棵 `scope` 树求值（`evalExpr`）。**匹配与执行分离**：`ruleService` 负责匹配（并直接处理 access_control 的拒绝），限流执行统一收敛到 service 层的 `rateLimitService`：
+规则采用**规则化**设计，一条规则 = 匹配条件（`scope` 表达式树）+ 动作参数（`config`）+ 类型标识（`type`）。请求进入 LLM 入口后，抽出请求上下文，对每棵 `scope` 树求值（`evalExpr`）。**匹配与执行分离**：`ruleService` 负责匹配（并直接处理 forbid_access 的拒绝），限流执行统一收敛到 service 层的 `rateLimitService`：
 
-- `access_control`（访问控制）：树命中即 403，**先于**限流检查，不随 failover 切换供应商。无状态，由 `ruleService` 匹配后直接拒绝。
+- `forbid_access`（访问控制）：树命中即 403，**先于**限流检查，不随 failover 切换供应商。无状态，由 `ruleService` 匹配后直接拒绝。
 - `rate_limit`（限流）：匹配出的规则交由 `rateLimitService.checkAndAdmit` 执行——RPM 准入计数（先加后判），超限 → 429。本期仅 RPM。
 
 ```
@@ -12,13 +12,13 @@
      → llmApiMiddleware(解析 user + model)
         ├─ 抽取请求上下文 { user_id, model_id }
         ├─ 【阶段一：路由前】匹配不含 vendor_id 的启用规则
-        │   ├─ 命中的 access_control 规则 → 403（记失败记录）
+        │   ├─ 命中的 forbid_access 规则 → 403（记失败记录）
         │   └─ 命中的 rate_limit 规则 → rateLimitService.checkAndAdmit（RPM 自增 → 超限抛 429，记失败记录）
         └─ 通过
      → gatewayController → senderService（路由循环）
         ├─ routingService.selectUpstream（选择上游，确定实际 vendor_id）
         ├─ 【阶段二：路由后、调用上游前】匹配含 vendor_id 的启用规则
-        │   ├─ 命中的 access_control 规则 → 403（记 FAILED，不 failover）
+        │   ├─ 命中的 forbid_access 规则 → 403（记 FAILED，不 failover）
         │   └─ 命中的 rate_limit 规则 → rateLimitService.checkAndAdmit（RPM 自增 → 超限视为「该上游繁忙」，
         │       failover 开启时切换下一上游，全部耗尽 / 关闭时返回 429）
         └─ sendRequestToUpstream → 上游 → responseHandlerService
@@ -81,9 +81,9 @@ create table rule
   "config": { "rpm": 500 }
 }
 
-// type = "access_control"（白名单：模型 5 仅用户 3/4/5 可调用）
+// type = "forbid_access"（白名单：模型 5 仅用户 3/4/5 可调用）
 {
-  "type": "access_control",
+  "type": "forbid_access",
   "name": "gpt-4o 仅内部用户可用",
   "enabled": true,
   "scope": { "type": "and", "values": [
@@ -101,11 +101,11 @@ create table rule
 }
 ```
 
-- `type` 为开放字符串，内置 `rate_limit`、`access_control`，未来按需注册新类型（`concurrency` / `cost_quota` 等）。
+- `type` 为开放字符串，内置 `rate_limit`、`forbid_access`，未来按需注册新类型（`concurrency` / `cost_quota` 等）。
 - `scope` 为**布尔表达式树**，所有节点统一为 `{ type, oper?, values }` 结构：`type` 为节点类型（叶子维度 `user_id` / `model_id` / `vendor_id`、组合 `and` / `or`、固定布尔值 `const`）；`oper` 仅叶子携带；`values` 为取值列表（叶子为比较值、`and` / `or` 为子节点列表、`const` 为单个布尔值 `[true]` / `[false]`）。`and` / `or` 的 `values` 必须**非空**（空数组不合法，避免歧义）。固定值节点 `{ "type": "const", "values": [true] }` 恒为真（全命中），用于全局兜底规则（所有请求命中）；`[false]` 恒为假（永不命中）。
 - `config` 结构由 `type` 定义：
     - `rate_limit`：`{ rpm }`（`null` / 缺省 = 不限制；`0` = 不可用，所有命中请求 429）。本期仅 RPM，TPM 留待后续。
-    - `access_control`：无参数（空 `{}`），树命中即拒绝。
+    - `forbid_access`：无参数（空 `{}`），树命中即拒绝。
 
 ## 匹配与生效语义
 
@@ -163,8 +163,8 @@ function exprReferencesVendor(node: ExprNode): boolean {
 **生效语义（deny-if-true，两种类型统一）**：
 
 - `rate_limit`：`evalExpr(scope) === true` → 命中 → 施加限流（仅 RPM）。命中的规则**全部同时生效**（任一超限即拒绝；不做优先级 / first-match-wins，未来需要 override 时再加 `priority` 字段）。
-- `access_control`：`evalExpr(scope) === true` → 命中 → 抛 `AccessDeniedError`（403）。多规则 fail-closed（deny-wins）。白名单「仅这些用户」用 `not in` 表达。
-- **检查顺序**：`access_control` 先于 `rate_limit`，无权限请求不进入限流计数。
+- `forbid_access`：`evalExpr(scope) === true` → 命中 → 抛 `AccessDeniedError`（403）。多规则 fail-closed（deny-wins）。白名单「仅这些用户」用 `not in` 表达。
+- **检查顺序**：`forbid_access` 先于 `rate_limit`，无权限请求不进入限流计数。
 - 规则列表做内存缓存（首次回源 DB，CRUD 时失效），避免每请求查库。
 
 ## 匹配性能与扩展
@@ -194,7 +194,7 @@ interface RateLimitStore {
 ```
 
 - 键空间按（规则数 × 2 分钟窗口）有界，配一个每分钟定时清扫回收陈旧键（`prevCount` 与 `curCount` 均为 0 且窗口过期即删除）。
-- `access_control` 无计数器（纯授权判定，无状态）。
+- `forbid_access` 无计数器（纯授权判定，无状态）。
 
 ## 限流执行（rateLimitService）
 
@@ -211,12 +211,12 @@ interface RateLimitService {
 - `config.rpm` 为 `null` / 缺省 → 直接放行（不限制）；为 `0` → 直接抛 `RateLimitError`（无请求额度，不可用）；为 `N > 0` → `store.incr("rule:{id}:rpm")` 后判定是否超限（先加后判，RPM check + record 一步完成），超限抛 `RateLimitError`。
 - 阶段二调用时传 `opts.failoverEligible = true`，抛出的 `RateLimitError` 带 failover 标记（见「接入点·阶段二」）。
 
-`access_control` 无状态（纯授权判定，无计数器），不单独成 service，由 `ruleService` 匹配后直接处理：树命中即抛 `AccessDeniedError`（403）。未来新增规则类型（如 `concurrency`）时，在 `ruleService` 增加对应处理分支（或独立 service）即可。
+`forbid_access` 无状态（纯授权判定，无计数器），不单独成 service，由 `ruleService` 匹配后直接处理：树命中即抛 `AccessDeniedError`（403）。未来新增规则类型（如 `concurrency`）时，在 `ruleService` 增加对应处理分支（或独立 service）即可。
 
 ## 代码结构
 
 ```
-src/service/ruleService.ts                  # 规则匹配（scope 树求值）、命中规则缓存、access_control 拒绝、编排限流、root 旁路、抛 403/429
+src/service/ruleService.ts                  # 规则匹配（scope 树求值）、命中规则缓存、forbid_access 拒绝、编排限流、root 旁路、抛 403/429
 src/service/rateLimitService.ts             # 限流执行：RPM 计数（RateLimitStore）、超限抛 429；对外提供 checkAndAdmit
 src/manager/ruleManager.ts                  # DAL：rule CRUD + 内存规则缓存失效
 src/model/sgRule.ts                         # rule 模型（scope/config JSON cast）
@@ -228,7 +228,7 @@ src/constants.ts                            # 新增 RuleType 枚举（RATE_LIMI
 ```
 
 - `ruleService` 维护规则内存缓存：首次访问时回源 `ruleManager.listEnabled()`，CRUD 时 `ruleManager` 通知失效。规则按 `exprReferencesVendor` 分为两组（不含 / 含 vendor_id），分别在路由前后检查。
-- `ruleService.matchAndCheck`（阶段一）：筛选不含 vendor_id 的规则，逐条对命中的 `access_control` 规则抛 `AccessDeniedError`（403），再对命中的 `rate_limit` 规则逐个调 `rateLimitService.checkAndAdmit`（超限抛 429）。RPM 在准入时一步完成、无请求后记账，故无需向上下文传递命中规则。
+- `ruleService.matchAndCheck`（阶段一）：筛选不含 vendor_id 的规则，逐条对命中的 `forbid_access` 规则抛 `AccessDeniedError`（403），再对命中的 `rate_limit` 规则逐个调 `rateLimitService.checkAndAdmit`（超限抛 429）。RPM 在准入时一步完成、无请求后记账，故无需向上下文传递命中规则。
 - `ruleService.matchAndCheckVendor`（阶段二）：筛选含 vendor_id 的规则，补充 `vendor_id` 到上下文后执行，逻辑同上，`rateLimitService.checkAndAdmit` 传 `failoverEligible = true`；在路由循环内、调用上游前调用。
 - 命名/导入遵循项目规范：默认导出、`模块名.方法名`。
 
@@ -240,14 +240,14 @@ src/constants.ts                            # 新增 RuleType 枚举（RATE_LIMI
 
 | 阶段 | 时机 | 位置 | 检查什么 |
 |------|------|------|----------|
-| **阶段一：路由前** | 鉴权 + 模型解析完成、进入路由前（拦截成本最低） | `llmApiMiddleware.requireLlmRequestContext` | 不含 `vendor_id` 的启用规则：`access_control` 命中→403、`rate_limit` 命中→429（先加后判） |
-| **阶段二：路由后** | 每次选出上游后、调用上游前（**每次尝试各查一次**） | `senderService.sendRequest` 路由循环内 | 含 `vendor_id` 的启用规则：`access_control` 命中→403（不 failover）、`rate_limit` 命中→429（触发 failover 换上游） |
+| **阶段一：路由前** | 鉴权 + 模型解析完成、进入路由前（拦截成本最低） | `llmApiMiddleware.requireLlmRequestContext` | 不含 `vendor_id` 的启用规则：`forbid_access` 命中→403、`rate_limit` 命中→429（先加后判） |
+| **阶段二：路由后** | 每次选出上游后、调用上游前（**每次尝试各查一次**） | `senderService.sendRequest` 路由循环内 | 含 `vendor_id` 的启用规则：`forbid_access` 命中→403（不 failover）、`rate_limit` 命中→429（触发 failover 换上游） |
 | **阶段三：响应后** | 上游成功响应后 | `responseHandlerService` | 本期无（原为 TPM 事后记账，已推迟到后续版本） |
 
 阶段推进与约束：
 
 - 阶段一 → 阶段二 → 上游，逐级递进；**任一级拒绝即终止**，后续阶段不再执行。
-- 每个阶段内 `access_control` **先于** `rate_limit`，无权限请求不消耗限流计数。
+- 每个阶段内 `forbid_access` **先于** `rate_limit`，无权限请求不消耗限流计数。
 - root 用户在所有阶段直接旁路（不匹配、不计数）。
 - 阶段二随 failover 每次尝试各执行一次（`selectUpstream` 选出新上游后），供应商级限流按「实际尝试次数」累计。
 
@@ -261,11 +261,11 @@ src/constants.ts                            # 新增 RuleType 枚举（RATE_LIMI
 | 恒真 `{ "type": "const", "values": [true] }`（全局兜底） | 否（不引用任何维度） | **阶段一**（路由前） |
 | 任一节点引用 `vendor_id`（含混合条件，如 `model_id=5 AND vendor_id=9`） | 是 | **阶段二**（路由后，此时实际供应商已确定） |
 
-同一规则在所在阶段按行为执行（access_control 命中即拒 / rate_limit 交由 `rateLimitService` 判定），命中行为差异仅取决于所在阶段：
+同一规则在所在阶段按行为执行（forbid_access 命中即拒 / rate_limit 交由 `rateLimitService` 判定），命中行为差异仅取决于所在阶段：
 
 | 规则 type | 阶段一命中 | 阶段二命中 |
 |-----------|-----------|-----------|
-| `access_control` | 403，拒绝 | 403，拒绝（**不 failover**，策略性拒绝与供应商无关） |
+| `forbid_access` | 403，拒绝 | 403，拒绝（**不 failover**，策略性拒绝与供应商无关） |
 | `rate_limit` | 429，拒绝 | 429，视为「该上游繁忙」：failover 开启时切换下一上游，全部耗尽 / 关闭才回 429 |
 
 常见规则示例：
@@ -288,13 +288,13 @@ src/constants.ts                            # 新增 RuleType 枚举（RATE_LIMI
 await ruleService.matchAndCheck(user, modelConfig);
 ```
 
-此时 `user`（含 id、type）与 `modelConfig`（含 id）均已解析，且尚未进入路由，拦截成本最低；三个 LLM 端点共用同一中间件，天然全覆盖。`matchAndCheck` 内部：筛选 scope 不引用 `vendor_id` 的启用规则，先对命中的 `access_control` 规则抛 403，再对命中的 `rate_limit` 规则逐个调 `rateLimitService.checkAndAdmit`（超限抛 429）。root 用户在此直接旁路（不匹配、不计数）。
+此时 `user`（含 id、type）与 `modelConfig`（含 id）均已解析，且尚未进入路由，拦截成本最低；三个 LLM 端点共用同一中间件，天然全覆盖。`matchAndCheck` 内部：筛选 scope 不引用 `vendor_id` 的启用规则，先对命中的 `forbid_access` 规则抛 403，再对命中的 `rate_limit` 规则逐个调 `rateLimitService.checkAndAdmit`（超限抛 429）。root 用户在此直接旁路（不匹配、不计数）。
 
 阶段一被拒（403/429）时调用 `recordService.recordFailedRequest(user.id, modelConfig.name, body, format, failedCode, modelConfig.id)` 写入一条失败记录（`failed_code` = `access_denied` / `rate_limit_exceeded`），此时 `user`、`modelConfig`、`requestBody` 均已在 context 中。
 
 ### 阶段二：路由后准入检查
 
-位于 `senderService.sendRequest` 的路由循环内、`sendRequestToUpstream` 调用之前（每次选出的上游都检查一次）。此时已确定实际路由到的供应商 `vendor.id`，补充到请求上下文后对含 `vendor_id` 的规则求值。处理逻辑与阶段一一致（access_control 先于 rate_limit）。
+位于 `senderService.sendRequest` 的路由循环内、`sendRequestToUpstream` 调用之前（每次选出的上游都检查一次）。此时已确定实际路由到的供应商 `vendor.id`，补充到请求上下文后对含 `vendor_id` 的规则求值。处理逻辑与阶段一一致（forbid_access 先于 rate_limit）。
 
 ```ts
 // 阶段二：检查含 vendor_id 的规则（路由选择后，vendor_id 已确定）
@@ -335,8 +335,8 @@ await ruleService.matchAndCheckVendor(user, modelConfig, vendor);
   ]},
   "config": { "rpm": 100 } }
 
-// access_control（白名单）
-{ "type": "access_control", "name": "gpt-4o 仅内部用户", "enabled": true,
+// forbid_access（白名单）
+{ "type": "forbid_access", "name": "gpt-4o 仅内部用户", "enabled": true,
   "scope": { "type": "and", "values": [
       { "type": "model_id", "oper": "=", "values": [5] },
       { "type": "user_id",  "oper": "not in", "values": [3, 4, 5] }
@@ -348,7 +348,7 @@ await ruleService.matchAndCheckVendor(user, modelConfig, vendor);
 - `type` 必须为已注册类型。
 - `scope` 必须为合法表达式树：所有节点统一为 `{ type, oper?, values }`。`type` ∈ { `user_id`, `model_id`, `vendor_id`, `and`, `or`, `const` }；叶子 `type` 为维度、`oper` ∈ { `=`, `!=`, `in`, `not in` }、`values` 为 number[]（`=`/`!=` 单元素，`in`/`not in` 非空）；`and`/`or` 的 `values` 为非空子节点数组；`const` 的 `values` 必须为 `[true]` 或 `[false]`（单布尔值）；树深度设上限（如 8 层）防滥用。
 - `rate_limit`：`config.rpm` 为非负整数或 `null`（`null` = 不限制；`0` = 不可用）。
-- `access_control`：`config` 必须为空 `{}`。
+- `forbid_access`：`config` 必须为空 `{}`。
 
 ## 错误响应（429 + 403）
 
@@ -364,7 +364,7 @@ await ruleService.matchAndCheckVendor(user, modelConfig, vendor);
 
 - 新增 `src/types/rule.ts`：`Rule`、`ExprNode`（LeafNode / AndNode / OrNode）、`RuleType`、`RuleConfig`（按 type 区分 `RateLimitConfig` / `AccessControlConfig`）类型。
 - 新增 `src/api/rule.ts`：规则 CRUD 请求封装。
-- 新增 `src/views/Rule/`（Index / List / 对话框）：规则列表 + 新增/编辑（名称、启用开关、type、scope **条件树编辑器**、按 type 渲染的 config 表单）。条件树编辑器：整体为树形结构——根节点可添加节点，每个节点可切换类型（`and` / `or` / 叶子条件 / 固定值），`and` / `or` 节点下可添加子节点，「+ 添加条件」挂在父节点上；叶子行可选维度（用户 / 模型 / 供应商）+ 运算符（`=`/`!=`/`in`/`not in`）+ 取值（标量或逗号分隔 ID 列表）；固定值节点渲染为 `{ "type": "const", "values": [true] }` / `[false]`（可选 true / false）。`rate_limit` 的 config 渲染 rpm 输入（`0` = 不可用 / 空 = 不限制），`access_control` 无 config。复用 `useTable` 组合式函数。
+- 新增 `src/views/Rule/`（Index / List / 对话框）：规则列表 + 新增/编辑（名称、启用开关、type、scope **条件树编辑器**、按 type 渲染的 config 表单）。条件树编辑器：整体为树形结构——根节点可添加节点，每个节点可切换类型（`and` / `or` / 叶子条件 / 固定值），`and` / `or` 节点下可添加子节点，「+ 添加条件」挂在父节点上；叶子行可选维度（用户 / 模型 / 供应商）+ 运算符（`=`/`!=`/`in`/`not in`）+ 取值（标量或逗号分隔 ID 列表）；固定值节点渲染为 `{ "type": "const", "values": [true] }` / `[false]`（可选 true / false）。`rate_limit` 的 config 渲染 rpm 输入（`0` = 不可用 / 空 = 不限制），`forbid_access` 无 config。复用 `useTable` 组合式函数。
 - 侧边栏新增「规则」入口；模型/用户对话框**不加字段**（统一走规则）。
 
 ## 技术要点与边界

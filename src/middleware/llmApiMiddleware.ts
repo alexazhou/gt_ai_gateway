@@ -84,7 +84,7 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
         c.set("requestBody", body);
         c.set("modelConfig", modelConfig);
 
-        // 【阶段一】路由前准入检查（不含 vendor_id 的规则）：命中 access_control 抛 403、rate_limit 超限抛 429。
+        // 【阶段一】路由前准入检查（不含 vendor_id 的规则）：命中 forbid_access 抛 403、rate_limit 超限抛 429。
         // 被拒时写入失败记录（此时 user / modelConfig / requestBody 均在 context），再交给 onError 渲染错误体。
         try {
             await ruleService.matchAndCheck(user, modelConfig);

@@ -1,6 +1,6 @@
 import type { BaseEntity, TableQuery } from './index';
 
-export type RuleType = 'rate_limit' | 'access_control';
+export type RuleType = 'rate_limit' | 'forbid_access';
 
 export type ScopeField = 'user_id' | 'model_id' | 'vendor_id';
 export type ScopeOperator = '=' | '!=' | 'in' | 'not in';
@@ -31,7 +31,7 @@ export interface RateLimitConfig {
     rpm: number | null;
 }
 
-/** access_control 无 config（保留空对象） */
+/** forbid_access 无 config（保留空对象） */
 export interface AccessControlConfig {
     [key: string]: never;
 }
@@ -59,3 +59,16 @@ export interface CreateRuleRequest {
 }
 
 export type UpdateRuleRequest = Partial<CreateRuleRequest>;
+
+/** 条件树叶子下拉选项：id 为条件比较值，name 用于展示 */
+export interface ScopeOption {
+    id: number;
+    name: string;
+}
+
+/** 三个叶子维度（用户 / 模型 / 供应商）的下拉选项集 */
+export interface ScopeOptions {
+    models: ScopeOption[];
+    users: ScopeOption[];
+    vendors: ScopeOption[];
+}

@@ -26,12 +26,11 @@
                     <a-select-option value="in">in</a-select-option>
                     <a-select-option value="not in">not in</a-select-option>
                 </a-select>
-                <a-input
-                    :value="valuesText"
-                    size="small"
-                    :placeholder="valuesPlaceholder"
-                    class="leaf-values-input"
-                    @change="handleValuesChange"
+                <LeafValueSelect
+                    v-model:values="(node as LeafNode).values"
+                    :value-type="(node as LeafNode).type"
+                    :oper="(node as LeafNode).oper"
+                    :options="options"
                 />
             </template>
 
@@ -55,17 +54,22 @@
             <a-button v-if="!isRoot" type="text" size="small" danger @click="emit('remove')">
                 <DeleteOutlined />
             </a-button>
+            <!-- + 添加条件：挂在父节点（and/or 分组）行内、靠右 -->
+            <a-button
+                v-if="isGroup"
+                size="small"
+                type="dashed"
+                class="add-button"
+                @click="addChild"
+            >
+                <PlusOutlined /> 添加条件
+            </a-button>
         </div>
 
-        <!-- and/or 子节点树：+ 添加条件 挂在父节点（本分组）下 -->
+        <!-- and/or 子节点树 -->
         <div v-if="isGroup" class="tree-children">
             <div v-for="(child, index) in (node as LogicNode).values" :key="index" class="tree-child-row">
-                <ScopeTreeEditor :node="child" @remove="removeChild(index)" />
-            </div>
-            <div class="tree-add-row">
-                <a-button size="small" type="dashed" class="add-button" @click="addChild">
-                    <PlusOutlined /> 添加条件
-                </a-button>
+                <ScopeTreeEditor :node="child" :options="options" @remove="removeChild(index)" />
             </div>
         </div>
     </div>
@@ -74,13 +78,16 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons-vue';
-import type { ConstNode, ExprNode, LeafNode, LogicNode } from '@/types/rule';
+import LeafValueSelect from './LeafValueSelect.vue';
+import type { ConstNode, ExprNode, LeafNode, LogicNode, ScopeOptions } from '@/types/rule';
 
 const props = withDefaults(defineProps<{
     node: ExprNode;
     isRoot?: boolean;
+    options?: ScopeOptions;
 }>(), {
     isRoot: false,
+    options: () => ({ models: [], users: [], vendors: [] }),
 });
 
 const emit = defineEmits<{
@@ -143,59 +150,70 @@ function removeChild(index: number): void {
     (props.node as LogicNode).values.splice(index, 1);
 }
 
-const valuesPlaceholder = computed(() => {
-    const oper = (props.node as LeafNode).oper;
-    return oper === '=' || oper === '!=' ? '单个 ID' : '逗号分隔 ID 列表';
-});
-
-const valuesText = computed<string>({
-    get: () => (props.node as LeafNode).values.join(', '),
-    set: (text: string) => {
-        (props.node as LeafNode).values = text
-            .split(',')
-            .map(part => parseInt(part.trim(), 10))
-            .filter(num => !Number.isNaN(num));
-    },
-});
-
-function handleValuesChange(e: Event): void {
-    valuesText.value = (e.target as HTMLInputElement).value;
-}
 </script>
 
 <style scoped>
 .tree-node {
+    --tree-line-color: #8c9ba5;
     width: 100%;
+}
+
+.dark .tree-node,
+:deep(.dark) .tree-node {
+    --tree-line-color: #5c6b77;
 }
 
 .node-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
+    /* 不换行：维度/运算符/value 保持同一行（value 用 flex: 1 填满剩余空间） */
+    flex-wrap: nowrap;
     padding: 6px 8px;
     border-radius: 6px;
 }
 
 /* 树形子节点：左竖线引导 + 缩进，形成分支视觉 */
 .tree-children {
-    margin-left: 18px;
-    padding-left: 14px;
-    border-left: 1px dashed var(--border-color);
+    position: relative;
+    margin-left: 20px;
+    padding-left: 16px;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 
 .tree-child-row {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 2px 0;
 }
 
-.tree-add-row {
-    padding: 4px 0;
+.tree-child-row::before {
+    content: '';
+    position: absolute;
+    left: -16px;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    border-left: 1.5px solid var(--tree-line-color);
+}
+
+.tree-child-row::after {
+    content: '';
+    position: absolute;
+    left: -16px;
+    top: 18px;
+    width: 12px;
+    height: 0;
+    border-top: 1.5px solid var(--tree-line-color);
+}
+
+.tree-child-row:last-child::before {
+    bottom: auto;
+    height: 18px;
 }
 
 .node-type-select {
@@ -204,10 +222,6 @@ function handleValuesChange(e: Event): void {
 
 .leaf-field-select {
     width: 110px;
-}
-
-.leaf-values-input {
-    width: 180px;
 }
 
 .group-hint {
@@ -231,6 +245,9 @@ function handleValuesChange(e: Event): void {
 }
 
 .add-button {
+    /* 靠右：flex auto margin 把按钮推到父节点行右端 */
+    margin-left: auto;
+    flex-shrink: 0;
     color: var(--accent-primary);
 }
 </style>

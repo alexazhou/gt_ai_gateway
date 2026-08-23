@@ -30,11 +30,11 @@
             <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'type'">
                     <a-tag :color="record.type === 'rate_limit' ? 'blue' : 'purple'">
-                        {{ record.type === 'rate_limit' ? '限流' : '访问控制' }}
+                        {{ record.type === 'rate_limit' ? '限流' : '禁止访问' }}
                     </a-tag>
                 </template>
                 <template v-if="column.key === 'scope'">
-                    <span class="scope-preview">{{ scopeSummary(record.scope) }}</span>
+                    <ScopeTreeView :scope="record.scope" :options="scopeOptions" />
                 </template>
                 <template v-if="column.key === 'config'">
                     <span>{{ configSummary(record) }}</span>
@@ -81,15 +81,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import type { TableColumnsType } from 'ant-design-vue';
 import { Modal } from 'ant-design-vue/es';
 import { DeleteOutlined, EditOutlined } from '@ant-design/icons-vue';
 import { deleteRule, listRules } from '@/api/rule';
+import { listModels } from '@/api/model';
+import { listUsers } from '@/api/user';
+import { listVendors } from '@/api/vendor';
 import { useResourceTable } from '@/composables/useResourceTable';
 import { formatDate } from '@/utils/format';
+import { normalizeListResponse } from '@/utils/listResponse';
+import ScopeTreeView from '@/components/rule/ScopeTreeView.vue';
 import DialogForm from './DialogForm.vue';
-import type { ExprNode, Rule, RuleQuery } from '@/types/rule';
+import type { Rule, RuleQuery, ScopeOptions } from '@/types/rule';
 import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 
 const { loading, data, pagination, searchForm, loadData, handleSearch, handleReset, handleTableChange } = useResourceTable<Rule, RuleQuery>({
@@ -103,6 +108,28 @@ const { loading, data, pagination, searchForm, loadData, handleSearch, handleRes
 });
 
 const dialogFormRef = ref<InstanceType<typeof DialogForm>>();
+const scopeOptions = ref<ScopeOptions>({ models: [], users: [], vendors: [] });
+
+async function loadScopeOptions(): Promise<void> {
+    try {
+        const [models, users, vendors] = await Promise.all([
+            listModels({ page: 1, pageSize: 1000 }),
+            listUsers({ page: 1, pageSize: 1000 }),
+            listVendors({ page: 1, pageSize: 1000 }),
+        ]);
+        scopeOptions.value = {
+            models: normalizeListResponse(models).list.map(item => ({ id: item.id, name: item.name })),
+            users: normalizeListResponse(users).list.map(item => ({ id: item.id, name: item.name })),
+            vendors: normalizeListResponse(vendors).list.map(item => ({ id: item.id, name: item.name })),
+        };
+    } catch (e) {
+        console.error('[RuleList] Failed to load scope options:', e);
+    }
+}
+
+onMounted(() => {
+    void loadScopeOptions();
+});
 
 const columns = computed<TableColumnsType<Rule>>(() => [
     { title: 'ID', key: 'id', dataIndex: 'id', width: 80 },
@@ -114,32 +141,6 @@ const columns = computed<TableColumnsType<Rule>>(() => [
     { title: '创建时间', key: 'created_at', dataIndex: 'created_at', width: 160 },
     { title: '操作', key: 'action', width: 100, fixed: 'right' as const },
 ]);
-
-const DIMENSION_LABELS: Record<string, string> = {
-    user_id: '用户',
-    model_id: '模型',
-    vendor_id: '供应商',
-};
-
-const OPERATOR_LABELS: Record<string, string> = {
-    '=': '=',
-    '!=': '≠',
-    in: '∈',
-    'not in': '∉',
-};
-
-function scopeSummary(node: ExprNode): string {
-    if (node.type === 'const') {
-        return '全部匹配';
-    }
-    if (node.type === 'and' || node.type === 'or') {
-        const op = node.type === 'and' ? '且' : '或';
-        return `(${node.values.map(child => scopeSummary(child)).join(` ${op} `)})`;
-    }
-    const leaf = node as Extract<ExprNode, { oper: string }>;
-    const values = leaf.values.join(',');
-    return `${DIMENSION_LABELS[leaf.type] ?? leaf.type} ${OPERATOR_LABELS[leaf.oper] ?? leaf.oper} ${values}`;
-}
 
 function configSummary(rule: Rule): string {
     if (rule.type === 'rate_limit') {
@@ -202,12 +203,5 @@ function handleDelete(record: Rule): void {
 
 .rule-action-button {
     color: var(--accent-primary);
-}
-
-.scope-preview {
-    font-family: var(--font-mono, monospace);
-    font-size: 12px;
-    color: var(--text-secondary);
-    word-break: break-all;
 }
 </style>

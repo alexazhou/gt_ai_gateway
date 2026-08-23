@@ -41,7 +41,7 @@ describe("ruleService (node, real db)", () => {
         return ruleManager.create({ type: RuleType.ACCESS_CONTROL, name, scope, config: {}, enabled: true });
     }
 
-    it("rejects with AccessDeniedError when an access_control tree matches (whitelist via not in)", async () => {
+    it("rejects with AccessDeniedError when an forbid_access tree matches (whitelist via not in)", async () => {
         await createAccessControl({
             type: "and",
             values: [
@@ -58,7 +58,7 @@ describe("ruleService (node, real db)", () => {
         await expect(ruleService.matchAndCheck(user(1), model(6))).resolves.toBeUndefined();
     });
 
-    it("deny-wins: any of multiple access_control rules matching rejects", async () => {
+    it("deny-wins: any of multiple forbid_access rules matching rejects", async () => {
         await createAccessControl({ type: "model_id", oper: "=", values: [5] });
         await createAccessControl({ type: "user_id", oper: "in", values: [1, 2] });
 
@@ -75,7 +75,7 @@ describe("ruleService (node, real db)", () => {
         await expect(ruleService.matchAndCheck(user(1, UserType.ROOT), model(5))).resolves.toBeUndefined();
     });
 
-    it("access_control is checked before rate_limit (denied request consumes no quota)", async () => {
+    it("forbid_access is checked before rate_limit (denied request consumes no quota)", async () => {
         await createRateLimit({ type: "model_id", oper: "=", values: [5] }, 1);
         await createAccessControl({
             type: "and",
@@ -132,9 +132,9 @@ describe("ruleService (node, real db)", () => {
         expect(() => ruleService.validateRule({ type: "rate_limit", scope: { type: "and", values: [] }, config: { rpm: 10 } })).toThrow(/non-empty/);
         expect(() => ruleService.validateRule({ type: "rate_limit", scope: { type: "const", values: [true] }, config: { rpm: -1 } })).toThrow(/rpm/);
         expect(() => ruleService.validateRule({ type: "rate_limit", scope: { type: "const", values: [true] }, config: { rpm: 1.5 } })).toThrow(/rpm/);
-        expect(() => ruleService.validateRule({ type: "access_control", scope: { type: "const", values: [true] }, config: { extra: 1 } })).toThrow(/empty config/);
+        expect(() => ruleService.validateRule({ type: "forbid_access", scope: { type: "const", values: [true] }, config: { extra: 1 } })).toThrow(/empty config/);
         // 合法载荷不抛
         expect(() => ruleService.validateRule({ type: "rate_limit", scope: { type: "const", values: [true] }, config: { rpm: null } })).not.toThrow();
-        expect(() => ruleService.validateRule({ type: "access_control", scope: { type: "const", values: [true] }, config: {} })).not.toThrow();
+        expect(() => ruleService.validateRule({ type: "forbid_access", scope: { type: "const", values: [true] }, config: {} })).not.toThrow();
     });
 });

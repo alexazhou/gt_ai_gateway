@@ -21,7 +21,7 @@ export enum FailedCode {
     RECOVERED_ORPHAN = "recovered_orphan",
     // 限流拒绝（429，rate_limit 规则命中且超限）
     RATE_LIMIT_EXCEEDED = "rate_limit_exceeded",
-    // 访问控制拒绝（403，access_control 规则命中）
+    // 访问控制拒绝（403，forbid_access 规则命中）
     ACCESS_DENIED = "access_denied",
     // 无法归因的兜底失败原因
     UNKNOWN = "unknown_error",
@@ -29,7 +29,7 @@ export enum FailedCode {
 
 export enum RuleType {
     RATE_LIMIT = "rate_limit",
-    ACCESS_CONTROL = "access_control",
+    ACCESS_CONTROL = "forbid_access",
 }
 
 export enum RequestActivityStage {
