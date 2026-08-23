@@ -331,9 +331,6 @@ describe("Stream Failure Handling", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(typeof response.body).toBe("string");
-            expect(response.body).toContain("event: error");
-            expect(response.body).toContain("rate_limit_error");
 
             const records = await requestHelper.getFinalizedRecords(adminToken, 1);
             const record = records[0];

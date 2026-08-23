@@ -40,6 +40,14 @@ interface RunSSELoopOptions {
     converter: BaseConverter | null;
 }
 
+// 写 SSE 到客户端失败（客户端断开）；以错误类型标识，供外层 catch 区分原因
+class ClientWriteError extends Error {
+    constructor(cause: unknown) {
+        super(cause instanceof Error ? cause.message : String(cause));
+        this.name = "ClientWriteError";
+    }
+}
+
 // 流式读循环日志前缀（runSSELoop 只被 handleStreamResponse 一处调用，直接固化）
 const SSE_LOOP_LOG_PREFIX = "[responseHandlerService]";
 
@@ -93,18 +101,10 @@ async function runSSELoop(
             buffer += chunk;
 
             const splitResult = sseEventUtil.splitEvents(buffer);
-            const events = splitResult.events;
             buffer = splitResult.remainingBuffer;
 
-            let clientDisconnected = false;
-            let parseFailed = false;
-            for (const event of events) {
-                if (!event.trim()) continue;
-
+            for (const upstreamEvent of splitResult.events) {
                 eventCount++;
-
-                const upstreamEvent = sseEventUtil.parseEvent(event);
-                if (!upstreamEvent) continue;
 
                 const clientEvents = opts.converter
                     ? opts.converter.convertStreamEvent(upstreamEvent.data, upstreamEvent.event, upstreamEvent.id)
@@ -115,10 +115,13 @@ async function runSSELoop(
 
                     accumulator.addEvent(clientEvent);
 
-                    // 解析失败由累加器判定（JSON.parse 失败时置 parseFailed），此处只消费并收尾
-                    if (accumulator.isParseFailed()) {
-                        if (!failedCode) failedCode = FailedCode.SSE_PARSE_ERROR;
-                        parseFailed = true;
+                    // 出错后不再转发给客户端：记失败码（未记录时）并中止
+                    if (accumulator.isErrored()) {
+                        if (failedCode === null) {
+                            failedCode = accumulator.isParseFailed()
+                                ? FailedCode.SSE_PARSE_ERROR
+                                : FailedCode.UPSTREAM_ERROR;
+                        }
                         break;
                     }
 
@@ -126,11 +129,7 @@ async function runSSELoop(
                         firstTokenTime = Date.now();
                     }
 
-                    if (accumulator.isErrored()) {
-                        // 上游明确返回了错误 → 记上游错误（区别于网关侧解析失败）
-                        if (!failedCode) failedCode = FailedCode.UPSTREAM_ERROR;
-                    }
-
+                    // writeSSE 抛错即客户端断开：包成专用错误，由外层 catch 按类型归类
                     try {
                         await stream.writeSSE({
                             data: clientEvent.data,
@@ -138,25 +137,25 @@ async function runSSELoop(
                             id: clientEvent.id,
                         });
                     } catch (e: any) {
-                        console.error(`${SSE_LOOP_LOG_PREFIX} Client write error (client disconnected):`, e);
-                        failedCode = FailedCode.CLIENT_DISCONNECTED;
-                        clientDisconnected = true;
-                        break;
+                        throw new ClientWriteError(e);
                     }
                 }
 
-                if (parseFailed || clientDisconnected) break;
+                if (failedCode !== null) break;
             }
-
-            if (parseFailed || clientDisconnected) break;
         }
     } catch (e: any) {
         // 统一的收尾：空闲超时是预期停顿，跳过日志；其余（客户端断开 / 上游读取错误 /
-        // 循环体异常）记日志。失败码秉持「先到先得」：一旦记录就不再覆盖。
+        // 写客户端失败 / 循环体异常）记日志。失败码秉持「先到先得」：一旦记录就不再覆盖。
         if (failedCode !== FailedCode.UPSTREAM_TIMEOUT) {
             console.error(`${SSE_LOOP_LOG_PREFIX} Stream error:`, e);
         }
-        if (!failedCode) failedCode = FailedCode.UPSTREAM_DISCONNECTED;
+        // 未记录失败码时按错误类型区分：写客户端失败 → 客户端断开；其余 → 上游断开
+        if (!failedCode) {
+            failedCode = e instanceof ClientWriteError
+                ? FailedCode.CLIENT_DISCONNECTED
+                : FailedCode.UPSTREAM_DISCONNECTED;
+        }
     }
 
     unsubscribeClientAbort();

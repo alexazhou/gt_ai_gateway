@@ -45,9 +45,11 @@ export abstract class AccumulatorBase {
     }
 
     /**
-     * 标记解析上游内容失败（data 无法解析为合法 JSON；区别于「上游返回错误」）
+     * 标记解析上游内容失败（data 无法解析为合法 JSON）；解析失败也算上游内容错误，
+     * 因此同时置 errored（与 markError 的区别仅是这不携带错误 payload）
      */
     protected markParseFailed(): void {
+        this.errored = true;
         this.parseFailed = true;
     }
 

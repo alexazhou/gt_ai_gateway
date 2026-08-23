@@ -8,8 +8,8 @@ describe("sseEventUtil", () => {
         );
 
         expect(result.events).toEqual([
-            "event: one\ndata: 1",
-            "event: two\ndata: 2",
+            { event: "one", data: "1" },
+            { event: "two", data: "2" },
         ]);
         expect(result.remainingBuffer).toBe("data: partial");
     });

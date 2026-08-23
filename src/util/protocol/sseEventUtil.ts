@@ -3,13 +3,17 @@ import type { ProtocolStreamEvent } from "../protocolConverter/protocolTypes";
 interface ParsedSSEEvent extends ProtocolStreamEvent {}
 
 interface SplitSSEEventsResult {
-    events: string[];
+    /** 已按 SSE 解析的事件（无 data 的空白/心跳行已剔除） */
+    events: ParsedSSEEvent[];
     remainingBuffer: string;
 }
 
 function splitEvents(buffer: string): SplitSSEEventsResult {
-    const events = buffer.split("\n\n");
-    const remainingBuffer = events.pop() ?? "";
+    const rawEvents = buffer.split("\n\n");
+    const remainingBuffer = rawEvents.pop() ?? "";
+    const events = rawEvents
+        .map(parseEvent)
+        .filter((event): event is ParsedSSEEvent => event !== null);
     return { events, remainingBuffer };
 }
 
