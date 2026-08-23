@@ -36,6 +36,8 @@ class RateLimitError extends AppError {
         message: string,
         readonly retryAfterSeconds: number = 60,
         readonly failoverEligible: boolean = false,
+        readonly ruleId?: number,
+        readonly ruleName?: string,
     ) {
         super(message, 429, "rate_limit_error");
         this.name = "RateLimitError";
@@ -45,7 +47,7 @@ class RateLimitError extends AppError {
 
 /** 访问控制拒绝（403）：forbid_access 规则命中即拒绝（deny-if-true，无白名单模式） */
 class AccessDeniedError extends AppError {
-    constructor(message: string) {
+    constructor(message: string, readonly ruleId?: number, readonly ruleName?: string) {
         super(message, 403, "access_denied");
         this.name = "AccessDeniedError";
     }

@@ -37,6 +37,8 @@ async function checkAndAdmit(rule: SgRule, ctx: RequestContext, opts: CheckAndAd
             `Rule "${rule.name}" is unavailable (rpm = 0)`,
             RETRY_AFTER_SECONDS,
             failoverEligible,
+            Number(rule.id),
+            rule.name,
         );
     }
 
@@ -48,6 +50,8 @@ async function checkAndAdmit(rule: SgRule, ctx: RequestContext, opts: CheckAndAd
             `Rate limit exceeded for rule "${rule.name}" (rpm = ${rpm})`,
             RETRY_AFTER_SECONDS,
             failoverEligible,
+            Number(rule.id),
+            rule.name,
         );
     }
 }

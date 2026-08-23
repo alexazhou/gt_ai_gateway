@@ -97,6 +97,8 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
                     format,
                     FailedCode.ACCESS_DENIED,
                     modelConfig.id,
+                    "命中规则被拦截",
+                    { rule_id: e.ruleId, rule_name: e.ruleName },
                 );
             } else if (e instanceof customError.RateLimitError) {
                 await recordService.recordFailedRequest(
@@ -106,6 +108,8 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
                     format,
                     FailedCode.RATE_LIMIT_EXCEEDED,
                     modelConfig.id,
+                    "命中规则被拦截",
+                    { rule_id: e.ruleId, rule_name: e.ruleName },
                 );
             }
             throw e;

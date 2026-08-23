@@ -171,13 +171,20 @@ async function markFailed(
     );
 }
 
+/**
+ * 记一条失败记录（创建 + 标记 FAILED + 追加 RESULT 活动）。
+ * 与 markFailed 一致会写活动日志，保证失败时间线可追溯（如阶段一规则拒绝 403/429）。
+ * message 省略时默认用 failedCode 本身作为活动文案。
+ */
 async function recordFailedRequest(
     userId: number,
     modelName: string | null,
     body: string,
     clientFormat: ApiFormat,
     failedCode: string,
-    modelId: number | null = null
+    modelId: number | null = null,
+    message?: string,
+    detail?: Record<string, unknown>,
 ) {
     try {
         const record = await create(
@@ -186,10 +193,9 @@ async function recordFailedRequest(
             body,
             clientFormat
         );
-        await update(record.id, {
-            status: SgRecordStatus.FAILED,
-            failed_code: failedCode,
-            end_at: new Date(),
+        await markFailed(record.id, failedCode, {
+            message: message ?? failedCode,
+            ...(detail ? { detail } : {}),
         });
     } catch (e) {
         console.error("Failed to write failed record:", e);

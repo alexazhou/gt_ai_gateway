@@ -217,7 +217,7 @@ describe("Rule API", () => {
         const otherUser = await createUser();
 
         // 同一模型上加：forbid_access 拒绝 user、rate_limit rpm=1
-        await requestHelper.post(
+        const acRule = await requestHelper.post(
             "/rule/create.json",
             accessControlRule(model.id, user.id),
             adminToken,
@@ -252,6 +252,18 @@ describe("Rule API", () => {
         const records = await requestHelper.getFinalizedRecords(adminToken, 10);
         const deniedRecord = records.find((r: any) => r.failed_code === "access_denied");
         expect(deniedRecord).toBeDefined();
+
+        // 阶段一拒绝的失败记录也应有活动日志（时间线可追溯），并记录命中的规则 id / name
+        const activity = await requestHelper.get(
+            `/record/${deniedRecord.id}/activity.json`,
+            adminToken,
+        );
+        expect(activity.status).toBe(200);
+        expect(activity.body.activities.length).toBeGreaterThan(0);
+        expect(activity.body.activities[0].message).toBe("命中规则被拦截");
+        expect(activity.body.activities[0].details.failed_code).toBe("access_denied");
+        expect(activity.body.activities[0].details.rule_id).toBe(acRule.body.id);
+        expect(activity.body.activities[0].details.rule_name).toBe(acRule.body.name);
     });
 
     it("produces correct 403/429 error bodies across three protocols", async () => {

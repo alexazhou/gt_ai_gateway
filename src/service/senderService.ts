@@ -423,8 +423,12 @@ async function sendRequest(
                 if (e instanceof customError.AccessDeniedError) {
                     // 403：策略性拒绝与供应商无关，不 failover；标记 record FAILED 后抛出，交给 onError 渲染
                     await recordService.markFailed(recordId, FailedCode.ACCESS_DENIED, {
-                        message: "访问控制拒绝",
-                        detail: { rule_message: e.message },
+                        message: "命中规则被拦截",
+                        detail: {
+                            rule_message: e.message,
+                            rule_id: e.ruleId,
+                            rule_name: e.ruleName,
+                        },
                     });
                     throw e;
                 }
@@ -438,8 +442,12 @@ async function sendRequest(
                         continue;
                     }
                     await recordService.markFailed(recordId, FailedCode.RATE_LIMIT_EXCEEDED, {
-                        message: "限流拒绝",
-                        detail: { rule_message: e.message },
+                        message: "命中规则被拦截",
+                        detail: {
+                            rule_message: e.message,
+                            rule_id: e.ruleId,
+                            rule_name: e.ruleName,
+                        },
                     });
                     return buildRateLimitResponse(c, e);
                 }

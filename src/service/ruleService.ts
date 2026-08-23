@@ -88,7 +88,11 @@ async function checkMatchedRules(
     // 先判权限：任一命中的 forbid_access 规则 → 403（不 failover，策略性拒绝与供应商无关）
     for (const rule of rules) {
         if (rule.type === RuleType.ACCESS_CONTROL && scopeExpr.evalExpr(rule.scope, ctx)) {
-            throw new customError.AccessDeniedError(`Access denied by rule "${rule.name}"`);
+            throw new customError.AccessDeniedError(
+                `Access denied by rule "${rule.name}"`,
+                Number(rule.id),
+                rule.name,
+            );
         }
     }
     // 再判限流：命中的 rate_limit 规则逐个准入（任一超限即抛 429）
