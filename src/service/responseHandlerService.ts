@@ -31,7 +31,6 @@ interface StreamRunResult {
     accumulator: AccumulatorBase;
     firstTokenTime: number | null;
     failedCode: string | null;
-    streamErrorData: unknown | null;
     eventCount: number;
 }
 
@@ -66,7 +65,6 @@ async function runSSELoop(
     let buffer = "";
     let eventCount = 0;
     let failedCode: string | null = null;
-    let streamErrorData: unknown | null = null;
     let firstTokenTime: number | null = null;
 
     // 相邻 chunk 空闲超时：超时置 UPSTREAM_TIMEOUT 并取消上游 body
@@ -121,9 +119,8 @@ async function runSSELoop(
                     }
 
                     if (accumulator.isErrored()) {
+                        // 错误载荷统一由累加器给出（markError 总是同时置 errored 与 error）
                         if (!failedCode) failedCode = FailedCode.UPSTREAM_PARSE_ERROR;
-                        streamErrorData = accumulator.getError()
-                            ?? { event: clientEvent.event, data: clientEvent.data };
                     }
 
                     try {
@@ -155,7 +152,7 @@ async function runSSELoop(
     }
 
     unsubscribeClientAbort();
-    return { accumulator, firstTokenTime, failedCode, streamErrorData, eventCount };
+    return { accumulator, firstTokenTime, failedCode, eventCount };
 }
 
 
@@ -170,7 +167,7 @@ function finalizeStreamResult(
     user: SgUser,
     state: StreamRunResult,
 ): void {
-    let { accumulator, firstTokenTime, failedCode, streamErrorData } = state;
+    let { accumulator, firstTokenTime, failedCode } = state;
 
     runInBackgroundUtil.runInBackground(c, async () => {
         // 响应已完整接收（[DONE] / message_stop / response.completed）时优先视为成功：
@@ -210,13 +207,12 @@ function finalizeStreamResult(
             failedCode = FailedCode.UNKNOWN;
         }
 
-        // ② 上游协议解析错误 → 附带 error body（默认 null，仅解析错误时填充）
+        // ② 上游协议解析错误 → 附带 error body（默认 null；仅当错误码与累加器判定一致时填充）
         let failedOptions: MarkFailedOptions | null = null;
-        if (failedCode === FailedCode.UPSTREAM_PARSE_ERROR || accumulator.isErrored()) {
-            const errorData = accumulator.getError() ?? streamErrorData;
+        if (failedCode === FailedCode.UPSTREAM_PARSE_ERROR && accumulator.isErrored()) {
+            const errorData = accumulator.getError();
             failedOptions = {
-                response_data: errorData !== null && typeof errorData !== "string"
-                    ? JSON.stringify(errorData) : null,
+                response_data: errorData === null ? null : JSON.stringify(errorData),
             };
         }
 

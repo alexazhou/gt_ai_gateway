@@ -10,7 +10,7 @@ import type { ProtocolStreamEvent } from "../protocolConverter/protocolTypes";
 export abstract class AccumulatorBase {
     protected completed = false;
     protected errored = false;
-    protected error: unknown | null = null;
+    protected error: object | null = null;
     protected outputStarted = false;
 
     /**
@@ -38,7 +38,7 @@ export abstract class AccumulatorBase {
     /**
      * 标记收到错误事件并保存 payload（子类在识别到错误事件时调用）
      */
-    protected markError(payload: unknown): void {
+    protected markError(payload: object): void {
         this.errored = true;
         this.error = payload;
     }
@@ -74,7 +74,7 @@ export abstract class AccumulatorBase {
     /**
      * 获取流式错误 payload
      */
-    getError(): unknown | null {
+    getError(): object | null {
         return this.error;
     }
 
