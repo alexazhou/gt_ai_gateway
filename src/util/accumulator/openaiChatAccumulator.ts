@@ -68,6 +68,7 @@ export class OpenAIChatAccumulator extends AccumulatorBase {
             parsed = JSON.parse(data);
         } catch (e) {
             console.log("Failed to parse SSE data:", data, e);
+            this.markParseFailed();
             return;
         }
 

@@ -97,30 +97,38 @@ async function runSSELoop(
             buffer = splitResult.remainingBuffer;
 
             let clientDisconnected = false;
+            let parseFailed = false;
             for (const event of events) {
                 if (!event.trim()) continue;
 
                 eventCount++;
 
-                const parsedEvent = sseEventUtil.parseEvent(event);
-                if (!parsedEvent) continue;
+                const upstreamEvent = sseEventUtil.parseEvent(event);
+                if (!upstreamEvent) continue;
 
                 const clientEvents = opts.converter
-                    ? opts.converter.convertStreamEvent(parsedEvent.data, parsedEvent.event, parsedEvent.id)
-                    : [parsedEvent];
+                    ? opts.converter.convertStreamEvent(upstreamEvent.data, upstreamEvent.event, upstreamEvent.id)
+                    : [upstreamEvent];
 
                 for (const clientEvent of clientEvents) {
                     if (!clientEvent.data) continue;
 
                     accumulator.addEvent(clientEvent);
 
+                    // 解析失败由累加器判定（JSON.parse 失败时置 parseFailed），此处只消费并收尾
+                    if (accumulator.isParseFailed()) {
+                        if (!failedCode) failedCode = FailedCode.SSE_PARSE_ERROR;
+                        parseFailed = true;
+                        break;
+                    }
+
                     if (firstTokenTime === null && accumulator.isOutputStarted()) {
                         firstTokenTime = Date.now();
                     }
 
                     if (accumulator.isErrored()) {
-                        // 错误载荷统一由累加器给出（markError 总是同时置 errored 与 error）
-                        if (!failedCode) failedCode = FailedCode.UPSTREAM_PARSE_ERROR;
+                        // 上游明确返回了错误 → 记上游错误（区别于网关侧解析失败）
+                        if (!failedCode) failedCode = FailedCode.UPSTREAM_ERROR;
                     }
 
                     try {
@@ -137,10 +145,10 @@ async function runSSELoop(
                     }
                 }
 
-                if (clientDisconnected) break;
+                if (parseFailed || clientDisconnected) break;
             }
 
-            if (clientDisconnected) break;
+            if (parseFailed || clientDisconnected) break;
         }
     } catch (e: any) {
         // 统一的收尾：空闲超时是预期停顿，跳过日志；其余（客户端断开 / 上游读取错误 /
@@ -207,9 +215,9 @@ function finalizeStreamResult(
             failedCode = FailedCode.UNKNOWN;
         }
 
-        // ② 上游协议解析错误 → 附带 error body（默认 null；仅当错误码与累加器判定一致时填充）
+        // ② 上游返回错误 → 附带 error body（默认 null；仅当错误码与累加器判定一致时填充）
         let failedOptions: MarkFailedOptions | null = null;
-        if (failedCode === FailedCode.UPSTREAM_PARSE_ERROR && accumulator.isErrored()) {
+        if (failedCode === FailedCode.UPSTREAM_ERROR && accumulator.isErrored()) {
             const errorData = accumulator.getError();
             failedOptions = {
                 response_data: errorData === null ? null : JSON.stringify(errorData),

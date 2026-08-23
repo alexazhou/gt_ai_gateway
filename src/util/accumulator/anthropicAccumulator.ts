@@ -82,6 +82,7 @@ export class AnthropicAccumulator extends AccumulatorBase {
             parsed = JSON.parse(clientEvent.data);
         } catch (e) {
             console.log("Failed to parse SSE data:", clientEvent.data, e);
+            this.markParseFailed();
             return;
         }
 

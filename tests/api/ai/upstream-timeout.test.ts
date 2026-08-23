@@ -31,6 +31,7 @@ let hangBodyModelName: string;
 let hangHeadersModelName: string;
 let slowModelName: string;
 let trickleModelName: string;
+let badDataModelName: string;
 
 
 describe("Upstream Timeout & Orphan Recovery", () => {
@@ -131,6 +132,24 @@ describe("Upstream Timeout & Orphan Recovery", () => {
             modelFixtures.createRandomModel(trickleVendor.body.id, trickleModelName),
             adminToken,
         );
+
+        // --- 流式发送非法 JSON data vendor/model ---
+        const badDataVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                type: "other",
+                name: "Mock OpenAI Bad Data",
+                token: "test-token",
+                urls: { openai: `${MOCK_BASE}/chat/completions/bad-data` },
+            },
+            adminToken,
+        );
+        badDataModelName = `openai-bad-data-${Date.now()}`;
+        await requestHelper.post(
+            "/model/create.json",
+            modelFixtures.createRandomModel(badDataVendor.body.id, badDataModelName),
+            adminToken,
+        );
     });
 
 
@@ -192,6 +211,21 @@ describe("Upstream Timeout & Orphan Recovery", () => {
         expect(record.status).toBe("success");
         expect(record.failed_code).toBeNull();
     }, 20000);
+
+
+    it("should set failed_code=sse_parse_error when upstream sends non-JSON data in stream", async () => {
+        await requestHelper.post(
+            "/llm/v1/chat/completions",
+            { model: badDataModelName, messages: [{ role: "user", content: "hi" }], stream: true },
+            testUserToken,
+        );
+
+        const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+        const record = records[0];
+
+        expect(record.status).toBe("failed");
+        expect(record.failed_code).toBe("sse_parse_error");
+    }, 15000);
 
 
     describe.skipIf(config.TEST_MODE === "worker")("Client disconnect", () => {

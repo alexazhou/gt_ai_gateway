@@ -237,6 +237,8 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleHangHeaders(req, res);
     } else if (url.includes("/chat/completions/trickle")) {
         handleOpenAIStreamTrickle(req, res);
+    } else if (url.includes("/chat/completions/bad-data")) {
+        handleOpenAIStreamBadData(req, res);
     } else if (url.includes("/chat/completions/error")) {
         handleOpenAIChatError(req, res);
     } else if (url.includes("/chat/completions/unavailable")) {
@@ -1411,6 +1413,25 @@ function handleOpenAIStreamTrickle(req: IncomingMessage, res: ServerResponse): v
                 clearInterval(interval);
             }
         }, 400);
+    });
+}
+
+
+/**
+ * OpenAI 流式：发送一条无法解析为 JSON 的 data（模拟上游返回垃圾内容）。
+ * 网关应记 failed_code=sse_parse_error 并中止流。
+ */
+function handleOpenAIStreamBadData(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+        res.write("data: this is not valid json\n\n");
+        res.end();
     });
 }
 

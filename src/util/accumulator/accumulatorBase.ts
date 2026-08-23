@@ -11,6 +11,7 @@ export abstract class AccumulatorBase {
     protected completed = false;
     protected errored = false;
     protected error: object | null = null;
+    protected parseFailed = false;
     protected outputStarted = false;
 
     /**
@@ -44,6 +45,13 @@ export abstract class AccumulatorBase {
     }
 
     /**
+     * 标记解析上游内容失败（data 无法解析为合法 JSON；区别于「上游返回错误」）
+     */
+    protected markParseFailed(): void {
+        this.parseFailed = true;
+    }
+
+    /**
      * 标记模型已开始产出内容（子类在识别到首个输出事件时调用）
      */
     protected markOutputStarted(): void {
@@ -62,6 +70,13 @@ export abstract class AccumulatorBase {
      */
     isErrored(): boolean {
         return this.errored;
+    }
+
+    /**
+     * 是否解析上游内容失败（data 不是合法 JSON）
+     */
+    isParseFailed(): boolean {
+        return this.parseFailed;
     }
 
     /**
@@ -85,6 +100,7 @@ export abstract class AccumulatorBase {
         this.completed = false;
         this.errored = false;
         this.error = null;
+        this.parseFailed = false;
         this.outputStarted = false;
     }
 }

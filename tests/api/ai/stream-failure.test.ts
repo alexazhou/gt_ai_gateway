@@ -13,7 +13,7 @@ import modelFixtures from "../../fixtures/modelFixtures";
  * Verifies that failed_code is correctly set when a streaming request ends abnormally:
  * - unknown_error: upstream closed without [DONE] / message_stop / response.completed
  * - upstream_disconnected: upstream destroyed the TCP socket mid-stream
- * - upstream_parse_error: upstream returned a protocol-level SSE error event
+ * - upstream_error: upstream returned a protocol-level SSE error event
  */
 
 const MOCK_BASE = config.UPSTREAM_CONFIG.mock.url; // e.g. http://localhost:9999
@@ -319,7 +319,7 @@ describe("Stream Failure Handling", () => {
             expect(record.failed_code).toBe("unknown_error");
         }, 15000);
 
-        it("should set failed_code=upstream_parse_error when converted Anthropic stream returns an SSE error event", async () => {
+        it("should set failed_code=upstream_error when converted Anthropic stream returns an SSE error event", async () => {
             const response = await requestHelper.post(
                 "/llm/v1/responses",
                 {
@@ -339,7 +339,7 @@ describe("Stream Failure Handling", () => {
             const record = records[0];
 
             expect(record.status).toBe("failed");
-            expect(record.failed_code).toBe("upstream_parse_error");
+            expect(record.failed_code).toBe("upstream_error");
             expect(record.response_data).toBeTruthy();
             expect(JSON.parse(record.response_data)).toMatchObject({
                 type: "error",

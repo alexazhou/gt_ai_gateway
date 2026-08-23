@@ -78,6 +78,7 @@ export class ResponsesAccumulator extends AccumulatorBase {
         try {
             event = JSON.parse(clientEvent.data) as ResponsesStreamEvent as Record<string, any>;
         } catch {
+            this.markParseFailed();
             return;
         }
         const eventName = clientEvent.event;

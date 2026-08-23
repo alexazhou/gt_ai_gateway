@@ -1,7 +1,7 @@
 import type { BaseEntity, PaginationParams } from './index';
 
 export type RequestStatus = 'init' | 'processing' | 'success' | 'failed';
-export type FailedCode = 'client_disconnected' | 'upstream_disconnected' | 'stream_incomplete' | 'upstream_parse_error' | 'upstream_timeout' | 'recovered_orphan' | 'unknown_error' | null;
+export type FailedCode = 'client_disconnected' | 'upstream_disconnected' | 'stream_incomplete' | 'upstream_error' | 'sse_parse_error' | 'upstream_timeout' | 'recovered_orphan' | 'unknown_error' | null;
 
 /** 记录的 token 用量（后端已按展示口径归一化：prompt_tokens = 非缓存输入，cache_read_tokens 独立返回；上游未返回的字段为 null，返回 0 则为 0） */
 export interface RecordUsage {
