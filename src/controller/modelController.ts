@@ -58,10 +58,11 @@ function createModelFromRequest(body: unknown): SgModel {
 
 
 async function createModel(c: Context) {
+    const scope = c.get("tenantScope")!;
     const model = createModelFromRequest(await c.req.json());
     console.log("[modelController] Creating model:", model);
 
-    const instance = await modelService.createModel(model);
+    const instance = await modelService.createModel(model, scope);
 
     console.log("[modelController] Model created successfully:", instance);
     return c.json(instance);
@@ -69,6 +70,7 @@ async function createModel(c: Context) {
 
 
 async function listModels(c: Context) {
+    const scope = c.get("tenantScope")!;
     const query = c.req.query();
     const { pageSize, offset } = parsePaginationQuery(query);
     const vendorId = query.vendor_id ? parseInt(query.vendor_id, 10) : undefined;
@@ -77,13 +79,14 @@ async function listModels(c: Context) {
         keyword: query.keyword,
         pageSize,
         offset,
-    });
+    }, scope);
     return c.json(createListResponse(result.list, result.total));
 }
 
 
 async function listLlmModels(c: Context) {
-    const models = await modelManager.listEnabledModels();
+    const scope = c.get("tenantScope");
+    const models = await modelManager.listEnabledModels(scope);
     return c.json({
         object: "list",
         data: models,
@@ -92,6 +95,7 @@ async function listLlmModels(c: Context) {
 
 
 async function getModel(c: Context) {
+    const scope = c.get("tenantScope")!;
     const id = c.req.param("id");
     const modelId = parseInt(id, 10);
 
@@ -99,7 +103,7 @@ async function getModel(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const model = await modelManager.findById(modelId);
+    const model = await modelManager.findByIdInTenant(modelId, scope);
 
     if (!model) {
         throw new customError.NotFoundError("Model not found");
@@ -109,9 +113,10 @@ async function getModel(c: Context) {
 }
 
 async function getModelsByIds(c: Context) {
+    const scope = c.get("tenantScope")!;
     const body = await c.req.json();
     const ids = body.ids;
-    
+
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
         return c.json([]);
     }
@@ -121,7 +126,7 @@ async function getModelsByIds(c: Context) {
         return c.json([]);
     }
 
-    const models = await modelManager.getByIds(idList);
+    const models = await modelManager.getByIds(idList, scope.tenantId);
     return c.json(models);
 }
 
@@ -142,15 +147,14 @@ async function testModelRoute(c: Context) {
     }
     const format = formatRaw as ApiFormat;
 
-    // requireAdmin 中间件只设置了 user_type，这里从 token 解析完整用户（与 llmApiMiddleware 做法一致）
-    const authHeader = c.req.header("Authorization");
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    const user = await userService.getUserByToken(token, c.env.ROOT_TOKEN);
+    // requireAdmin 已注入完整 user（含租户）；模型按当前视角租户解析（本租户优先、共享兜底）
+    const user = c.get("user");
     if (!user) {
         throw new customError.NotFoundError("User not found");
     }
+    const scope = c.get("tenantScope")!;
 
-    const modelConfig = await modelManager.getModel(modelName, true);
+    const modelConfig = await modelManager.getModel(modelName, true, scope);
     if (!modelConfig) {
         return c.json({
             success: false,
@@ -211,6 +215,7 @@ async function testModelRoute(c: Context) {
 
 
 async function updateModel(c: Context) {
+    const scope = c.get("tenantScope")!;
     const id = c.req.param("id");
     const modelId = parseInt(id, 10);
 
@@ -222,7 +227,7 @@ async function updateModel(c: Context) {
     model.id = modelId;
     console.log("[modelController] Updating model:", model);
 
-    const updatedModel = await modelService.updateModel(model);
+    const updatedModel = await modelService.updateModel(model, scope);
 
     if (!updatedModel) {
         throw new customError.NotFoundError("Model not found");
@@ -234,6 +239,7 @@ async function updateModel(c: Context) {
 
 
 async function deleteModel(c: Context) {
+    const scope = c.get("tenantScope")!;
     const id = c.req.param("id");
     const modelId = Number(id);
 
@@ -241,7 +247,16 @@ async function deleteModel(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const deleted = await modelManager.deleteModel(modelId);
+    const model = await modelManager.findByIdInTenant(modelId, scope);
+    if (!model) {
+        throw new customError.NotFoundError("Model not found");
+    }
+    // 共享模型只读：非属主租户（非 main 视角删除 main 共享模型）→ 403
+    if (model.tenant_id !== scope.tenantId) {
+        throw new customError.AppError("Shared model is read-only", 403);
+    }
+
+    const deleted = await modelManager.deleteModel(modelId, scope.tenantId);
 
     if (!deleted) {
         throw new customError.NotFoundError("Model not found");

@@ -77,9 +77,12 @@
                     </a-space>
                 </template>
                 <template v-if="column.key === 'enable'">
-                    <a-tag :color="Boolean(record.enable) ? 'green' : 'red'">
-                        {{ Boolean(record.enable) ? '启用' : '禁用' }}
-                    </a-tag>
+                    <a-space :size="4">
+                        <a-tag :color="Boolean(record.enable) ? 'green' : 'red'">
+                            {{ Boolean(record.enable) ? '启用' : '禁用' }}
+                        </a-tag>
+                        <a-tag v-if="isSharedModel(record)" color="purple">共享</a-tag>
+                    </a-space>
                 </template>
                 <template v-if="column.key === 'price'">
                     <a-tag 
@@ -100,6 +103,7 @@
                                 size="small"
                                 class="model-action-button"
                                 aria-label="编辑"
+                                :disabled="isSharedModel(record)"
                                 @click="handleEdit(record)"
                             >
                                 <EditOutlined />
@@ -133,6 +137,7 @@
                                 type="text"
                                 size="small"
                                 aria-label="删除"
+                                :disabled="isSharedModel(record)"
                                 @click="handleDelete(record)"
                             >
                                 <DeleteOutlined />
@@ -163,6 +168,8 @@ import { deleteModel, listModels } from '@/api/model';
 import { listVendors, fetchVendorModelsByIds } from '@/api/vendor';
 import { getConfig } from '@/api/config';
 import { useResourceTable } from '@/composables/useResourceTable';
+import { useTenantStore } from '@/stores/tenant';
+import { useAppStore } from '@/stores/app';
 import { formatDate } from '@/utils/format';
 import { normalizeListResponse } from '@/utils/listResponse';
 import DialogForm from './DialogForm.vue';
@@ -171,6 +178,20 @@ import UpstreamModel from './UpstreamModel.vue';
 import type { Model, ModelQuery } from '@/types/model';
 import type { Vendor as VendorType, VendorModel } from '@/types/vendor';
 import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
+
+const tenantStore = useTenantStore();
+const appStore = useAppStore();
+
+// 当前视角租户 id（root 取切换的视角；admin 取自身租户；root 未切换时缺省 main）
+const myTenantId = computed(() => tenantStore.currentTenantIdNum ?? appStore.tenantId ?? appStore.mainTenantId);
+
+// 共享模型识别：main 租户模型 cross_tenant=1，且不属于当前视角租户 → 只读
+function isSharedModel(record: Model): boolean {
+    return Boolean(record.cross_tenant)
+        && typeof record.tenant_id === 'number'
+        && myTenantId.value !== null
+        && record.tenant_id !== myTenantId.value;
+}
 
 const { loading, data, pagination, searchForm, loadData, handleSearch, handleReset, handleTableChange } = useResourceTable<Model, ModelQuery>({
     initialSearchForm: {

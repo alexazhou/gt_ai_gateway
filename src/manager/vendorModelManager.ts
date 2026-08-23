@@ -101,11 +101,16 @@ async function remove(recordId: number, vendorId: number): Promise<boolean> {
     return true;
 }
 
-async function getByIds(ids: number[]): Promise<SgVendorModel[]> {
+async function getByIds(ids: number[], tenantId?: number): Promise<SgVendorModel[]> {
     if (ids.length === 0) {
         return [];
     }
-    return (await SgVendorModel.query().whereIn("id", ids).get()).all();
+    const q = SgVendorModel.query().whereIn("id", ids);
+    if (tenantId !== undefined) {
+        // vendor_model 经 vendor 间接隔离
+        q.whereRaw("vendor_id IN (SELECT id FROM vendor WHERE tenant_id = ?)", [tenantId]);
+    }
+    return (await q.get()).all();
 }
 
 /**

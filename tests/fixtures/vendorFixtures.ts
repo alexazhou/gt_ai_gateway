@@ -5,12 +5,14 @@ import config from "../config";
  * Vendor Test Data Fixtures
  */
 
+// 多租户隔离下供应商名租户内唯一：mock 模式每次调用生成唯一 name/token，
+// 避免同一文件内多次建 vendor 时撞名（真实模式仍用固定供应商名）
 const VENDOR_FIXTURES = {
     openai: () => {
         const upstreamConfig = config.getCurrentUpstreamConfig();
         return {
             type: "other",
-            name: config.isRealMode ? "OpenAI" : "Mock OpenAI",
+            name: config.isRealMode ? "OpenAI" : `Mock OpenAI ${randomUUID().slice(0, 8)}`,
             token: config.isRealMode
                 ? upstreamConfig.openai.apiKey
                 : `openai-token-${randomUUID()}`,
@@ -23,7 +25,7 @@ const VENDOR_FIXTURES = {
         const upstreamConfig = config.getCurrentUpstreamConfig();
         return {
             type: "other",
-            name: config.isRealMode ? "Anthropic" : "Mock Anthropic",
+            name: config.isRealMode ? "Anthropic" : `Mock Anthropic ${randomUUID().slice(0, 8)}`,
             token: config.isRealMode
                 ? upstreamConfig.anthropic.apiKey
                 : `anthropic-token-${randomUUID()}`,

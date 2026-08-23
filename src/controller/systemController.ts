@@ -6,6 +6,7 @@ import vendorManager from "../manager/vendorManager";
 import modelManager from "../manager/modelManager";
 import recordManager from "../manager/recordManager";
 import hostService from "../service/hostService";
+import tenantService from "../service/tenantService";
 import versionUtil from "../util/versionUtil";
 import { RunMode, ConfigKey } from "../constants";
 
@@ -129,11 +130,18 @@ async function status(c: Context) {
         const moduleBilling = (await configService.getConfig(ConfigKey.MODULE_BILLING_ENABLED)).getBoolean();
         const moduleApiPlayground = (await configService.getConfig(ConfigKey.MODULE_API_PLAYGROUND_ENABLED)).getBoolean();
         const moduleClientConfig = (await configService.getConfig(ConfigKey.MODULE_CLIENT_CONFIG_ENABLED)).getBoolean();
+        const multiTenantEnabled = await configService.isMultiTenantEnabled();
+        const user = c.get("user");
 
         return c.json({
             status: "ok",
             mode: ormService.mode,
             user_type: c.get("user_type"),
+            tenant: {
+                id: user?.tenant_id ?? null,
+                main_id: multiTenantEnabled ? await tenantService.getMainTenantId() : null,
+                multi_tenant_enabled: multiTenantEnabled,
+            },
             statistics: {
                 users: userCount,
                 vendors: vendorCount,

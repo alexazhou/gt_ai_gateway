@@ -1,8 +1,10 @@
 import { Context } from "hono";
 import { SgVendorModel } from "../model/sgVendorModel";
+import { SgVendor } from "../model/sgVendor";
 import vendorManager from "../manager/vendorManager";
 import vendorModelManager from "../manager/vendorModelManager";
 import vendorService from "../service/vendorService";
+import type { TenantScope } from "../middleware/tenantScopeMiddleware";
 import customError from "../customError";
 import { ApiFormat } from "../constants";
 
@@ -15,11 +17,24 @@ function serializeVendorModel(m: SgVendorModel) {
 }
 
 
+// vendor_model 经 vendor 间接隔离：vendor 必须在当前视角租户内
+async function getScopedVendor(c: Context, vendorId: number): Promise<SgVendor> {
+    const scope = c.get("tenantScope")!;
+    const vendor = await vendorManager.findByIdInTenant(vendorId, scope.tenantId);
+    if (!vendor) {
+        throw new customError.NotFoundError("Vendor not found");
+    }
+    return vendor;
+}
+
+
 async function listVendorModels(c: Context) {
+    const scope = c.get("tenantScope")!;
     const vendorId = parseInt(c.req.param("id"), 10);
     if (isNaN(vendorId)) {
         throw new customError.AppError("Invalid ID format");
     }
+    await getScopedVendor(c, vendorId);
 
     const models = await vendorModelManager.listByVendor(vendorId);
 
@@ -33,10 +48,7 @@ async function fetchVendorModels(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const vendor = await vendorManager.findById(vendorId);
-    if (!vendor) {
-        throw new customError.NotFoundError("Vendor not found");
-    }
+    const vendor = await getScopedVendor(c, vendorId);
 
     const models = await vendorService.fetchUpstreamModels(vendor);
     return c.json({ models });
@@ -49,10 +61,7 @@ async function syncVendorModels(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const vendor = await vendorManager.findById(vendorId);
-    if (!vendor) {
-        throw new customError.NotFoundError("Vendor not found");
-    }
+    await getScopedVendor(c, vendorId);
 
     const body = await c.req.json();
     const { model_ids } = body;
@@ -73,10 +82,7 @@ async function addVendorModel(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const vendor = await vendorManager.findById(vendorId);
-    if (!vendor) {
-        throw new customError.NotFoundError("Vendor not found");
-    }
+    await getScopedVendor(c, vendorId);
 
     const body = await c.req.json();
     const { model_id } = body;
@@ -94,6 +100,7 @@ async function addVendorModel(c: Context) {
 
 
 async function getVendorModelsByIds(c: Context) {
+    const scope = c.get("tenantScope")!;
     const body = await c.req.json();
     const ids = body.ids;
 
@@ -106,7 +113,7 @@ async function getVendorModelsByIds(c: Context) {
         return c.json([]);
     }
 
-    const models = await vendorModelManager.getByIds(idList);
+    const models = await vendorModelManager.getByIds(idList, scope.tenantId);
     return c.json(models.map(serializeVendorModel));
 }
 
@@ -118,6 +125,8 @@ async function updateVendorModel(c: Context) {
     if (isNaN(vendorId) || isNaN(recordId)) {
         throw new customError.AppError("Invalid ID format");
     }
+
+    await getScopedVendor(c, vendorId);
 
     const body = await c.req.json();
     const { allowed_formats } = body;
@@ -145,6 +154,8 @@ async function deleteVendorModel(c: Context) {
     if (isNaN(vendorId) || isNaN(recordId)) {
         throw new customError.AppError("Invalid ID format");
     }
+
+    await getScopedVendor(c, vendorId);
 
     const removed = await vendorModelManager.remove(recordId, vendorId);
     if (!removed) {

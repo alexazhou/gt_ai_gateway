@@ -30,6 +30,7 @@ function serializeRecord(record: SgRecord) {
 }
 
 async function listRecords(c: Context) {
+    const scope = c.get("tenantScope")!;
     const query = c.req.query();
     const { pageSize, offset } = parsePaginationQuery(query);
     const { status, start_time, end_time } = query;
@@ -47,7 +48,7 @@ async function listRecords(c: Context) {
         pageSize,
         offset,
         summaryOnly: true,
-    });
+    }, scope.tenantId);
 
     return c.json({
         list: records.map(serializeRecord),
@@ -56,13 +57,15 @@ async function listRecords(c: Context) {
 }
 
 async function latestRecords(c: Context) {
+    const scope = c.get("tenantScope")!;
     const query = c.req.query();
     const { pageSize } = parsePaginationQuery(query, 10);
-    const records = await recordService.latest(pageSize, false);
+    const records = await recordService.latest(pageSize, false, scope.tenantId);
     return c.json(records.map(serializeRecord));
 }
 
 async function getRecord(c: Context) {
+    const scope = c.get("tenantScope")!;
     const id = c.req.param("id");
     const recordId = parseInt(id, 10);
     console.log("id", id, "recordId", recordId);
@@ -71,7 +74,7 @@ async function getRecord(c: Context) {
         return c.json({ error: "Invalid ID format" }, 400);
     }
 
-    const record = await recordManager.findById(recordId);
+    const record = await recordManager.findByIdInTenant(recordId, scope.tenantId);
 
     if (!record) {
         return c.json({ error: "Record not found" }, 404);
@@ -83,12 +86,13 @@ async function getRecord(c: Context) {
 }
 
 async function deleteRecord(c: Context) {
+    const scope = c.get("tenantScope")!;
     const id = parseInt(c.req.param("id"), 10);
     if (isNaN(id)) {
         return c.json({ error: "Invalid ID" }, 400);
     }
 
-    const deleted = await recordManager.deleteById(id);
+    const deleted = await recordManager.deleteById(id, scope.tenantId);
     if (!deleted) {
         return c.json({ error: "Record not found" }, 404);
     }
@@ -97,20 +101,23 @@ async function deleteRecord(c: Context) {
 }
 
 async function clearPayload(c: Context) {
-    const cleared = await recordService.clearPayloads();
+    const scope = c.get("tenantScope")!;
+    const cleared = await recordService.clearPayloads(scope.tenantId);
     return c.json({ success: true, cleared });
 }
 
 async function clearAll(c: Context) {
-    const count = await recordManager.count();
-    await recordManager.deleteAll();
+    const scope = c.get("tenantScope")!;
+    const count = await recordManager.count(scope.tenantId);
+    await recordManager.deleteAll(scope.tenantId);
     return c.json({ success: true, deleted: count });
 }
 
 async function recoverOrphans(c: Context) {
+    const scope = c.get("tenantScope")!;
     const thresholdMs = await configService.getNumber(ConfigKey.ORPHAN_RECOVER_THRESHOLD_MS);
     // getNumber() 对未配置/非法值返回 0，回退默认阈值 10 分钟
-    const recovered = await recordManager.recoverOrphans(thresholdMs > 0 ? thresholdMs : 600000);
+    const recovered = await recordManager.recoverOrphans(thresholdMs > 0 ? thresholdMs : 600000, scope.tenantId);
     return c.json({ success: true, recovered });
 }
 

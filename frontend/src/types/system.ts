@@ -33,10 +33,19 @@ export interface StorageStatus {
     r2_unavailable_reason?: string;
 }
 
+export interface TenantStatus {
+    /** 调用方用户归属租户（root 为 null） */
+    id?: number | null;
+    /** main 主租户 id（功能开关关闭时为 null） */
+    main_id?: number | null;
+    multi_tenant_enabled?: boolean;
+}
+
 export interface StatusResponse {
     status?: string;
     mode?: RunMode;
     user_type?: string;
+    tenant?: TenantStatus;
     system?: SystemStatusInfo;
     statistics?: SystemStatistics;
     modules?: {

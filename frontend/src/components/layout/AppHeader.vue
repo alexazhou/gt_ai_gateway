@@ -3,6 +3,20 @@
         <div class="header-left">
             <img src="/favicon.svg" alt="Logo" class="logo" @click="handleLogoClick">
             <span class="title">{{ title }}</span>
+            <a-dropdown v-if="isRoot && tenantStore.multiTenantEnabled">
+                <a-button type="text" class="tenant-btn">
+                    <ApartmentOutlined />
+                    <span>{{ currentTenantName }}</span>
+                </a-button>
+                <template #overlay>
+                    <a-menu :selected-keys="[currentTenantKey]" @click="handleTenantSelect">
+                        <a-menu-item v-for="t in tenantStore.tenants" :key="String(t.id)">
+                            <span>{{ t.name }}</span>
+                            <a-tag v-if="t.name === 'main'" color="blue" style="margin-left: 8px;">主</a-tag>
+                        </a-menu-item>
+                    </a-menu>
+                </template>
+            </a-dropdown>
         </div>
         <div class="header-right">
             <a-button type="text" class="theme-btn" @click="toggleTheme">
@@ -27,21 +41,44 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h } from 'vue';
+import { computed, h, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { message } from 'ant-design-vue/es';
 import {
     UserOutlined,
     LogoutOutlined,
+    ApartmentOutlined,
 } from '@ant-design/icons-vue';
 import { useAuthStore } from '@/stores/auth';
 import { useThemeStore } from '@/stores/theme';
 import { useAppStore } from '@/stores/app';
+import { useTenantStore } from '@/stores/tenant';
 
 const router = useRouter();
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
-const appStore = useAppStore(); // import useAppStore
+const appStore = useAppStore();
+const tenantStore = useTenantStore();
+
+const isRoot = computed(() => authStore.userType === 'root');
+const currentTenantName = computed(() => {
+    const view = tenantStore.currentTenantIdNum;
+    const tenant = tenantStore.tenants.find(t => t.id === view);
+    return tenant ? tenant.name : '主视角';
+});
+const currentTenantKey = computed(() => tenantStore.currentTenantId || '');
+
+onMounted(() => {
+    if (isRoot.value && tenantStore.multiTenantEnabled) {
+        tenantStore.loadTenants();
+    }
+});
+
+function handleTenantSelect({ key }: { key: string }) {
+    if (key === tenantStore.currentTenantId) return;
+    tenantStore.setTenant(key);
+    message.success('已切换租户视角');
+}
 
 let logoClickCount = 0;
 let logoClickTimer: number | null = null;
@@ -96,6 +133,7 @@ const title = computed(() => 'GT AI Gateway');
 
 function handleLogout() {
     authStore.logout();
+    tenantStore.reset();
     message.success('已退出登录');
     router.push('/login');
 }
@@ -170,6 +208,30 @@ function handleLogoClick() {
     height: 36px;
     padding: 0;
     font-size: 20px;
+}
+
+.tenant-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 12px;
+    padding-inline: 10px;
+    height: 30px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--text-primary);
+    background: var(--bg-hover, rgba(128, 128, 128, 0.12));
+    border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2));
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.tenant-btn:hover {
+    background: var(--sidebar-hover, rgba(128, 128, 128, 0.2));
+}
+
+.tenant-btn :deep(.anticon) {
+    font-size: 14px;
 }
 
 .theme-btn :deep(svg) {

@@ -1,4 +1,6 @@
 import SgRule from "../model/sgRule";
+import type { TenantScope } from "../middleware/tenantScopeMiddleware";
+import customError from "../customError";
 
 interface RuleListOptions {
     keyword?: string;
@@ -26,8 +28,18 @@ function notifyInvalidate(): void {
 }
 
 
-async function listEnabled(): Promise<SgRule[]> {
-    const rules = await SgRule.query().where("enabled", 1).get();
+// 「本租户规则 ∪ main 租户共享规则」候选条件
+function ruleScopeCondition(tenantId: number, mainTenantId: number): string {
+    return `(tenant_id = ${Number(tenantId)} OR (tenant_id = ${Number(mainTenantId)} AND cross_tenant = 1))`;
+}
+
+
+/** 规则求值候选：本租户启用规则 ∪ main 共享启用规则（限流计数按 rule.id 全局统计，语义见设计文档） */
+async function listEnabled(tenantId: number, mainTenantId: number): Promise<SgRule[]> {
+    const rules = await SgRule.query()
+        .where("enabled", 1)
+        .whereRaw(ruleScopeCondition(tenantId, mainTenantId))
+        .get();
     return rules.all();
 }
 
@@ -37,8 +49,19 @@ async function findById(ruleId: number): Promise<SgRule | null> {
 }
 
 
-async function listRules(options: RuleListOptions) {
+async function findByIdInTenant(ruleId: number, tenantId: number, mainTenantId: number): Promise<SgRule | null> {
+    return await SgRule.query()
+        .where("id", ruleId)
+        .whereRaw(ruleScopeCondition(tenantId, mainTenantId))
+        .first();
+}
+
+
+async function listRules(options: RuleListOptions, scope?: TenantScope) {
     const query = SgRule.query().orderBy("id", "desc");
+    if (scope) {
+        query.whereRaw(ruleScopeCondition(scope.tenantId, scope.mainTenantId));
+    }
     if (options.keyword) {
         query.where("name", "like", `%${options.keyword}%`);
     }
@@ -52,37 +75,51 @@ async function listRules(options: RuleListOptions) {
 }
 
 
-async function create(data: Record<string, any>): Promise<SgRule> {
-    const rule = await SgRule.query().create(data);
+async function create(data: Record<string, any>, tenantId: number): Promise<SgRule> {
+    const rule = await SgRule.query().create({
+        ...data,
+        tenant_id: tenantId,
+    });
     notifyInvalidate();
     return rule;
 }
 
 
-async function update(ruleId: number, data: Record<string, any>): Promise<SgRule | null> {
-    const rule = await SgRule.query().find(ruleId);
+async function update(ruleId: number, data: Record<string, any>, scope: TenantScope): Promise<SgRule | null> {
+    const rule = await findByIdInTenant(ruleId, scope.tenantId, scope.mainTenantId);
     if (!rule) {
         return null;
     }
+    assertWritable(rule, scope);
     await rule.update(data);
     notifyInvalidate();
     return rule;
 }
 
 
-async function deleteRule(ruleId: number): Promise<boolean> {
-    const rule = await SgRule.query().find(ruleId);
+async function deleteRule(ruleId: number, scope: TenantScope): Promise<boolean> {
+    const rule = await findByIdInTenant(ruleId, scope.tenantId, scope.mainTenantId);
     if (!rule) {
         return false;
     }
+    assertWritable(rule, scope);
     await rule.delete();
     notifyInvalidate();
     return true;
 }
 
+
+/** 共享规则只读：非属主租户（非 main 视角编辑 main 共享规则）一律 403 */
+function assertWritable(rule: SgRule, scope: TenantScope): void {
+    if (rule.tenant_id !== scope.tenantId) {
+        throw new customError.AppError("Shared rule is read-only", 403);
+    }
+}
+
 export default {
     listEnabled,
     findById,
+    findByIdInTenant,
     listRules,
     create,
     update,

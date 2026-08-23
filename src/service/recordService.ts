@@ -52,8 +52,18 @@ async function attachPayload(record: SgRecord): Promise<SgRecord> {
     return record;
 }
 
-async function clearPayloads(): Promise<number> {
-    return objectStorageService.deleteByPrefix(RECORD_PAYLOAD_PREFIX);
+/** 按租户清空 payload：先查该租户 record id 列表再逐个删 key（recordId 全局唯一，天然无跨租户冲突） */
+async function clearPayloads(tenantId?: number): Promise<number> {
+    if (tenantId === undefined) {
+        return objectStorageService.deleteByPrefix(RECORD_PAYLOAD_PREFIX);
+    }
+    const ids = await recordManager.listIdsByTenant(tenantId);
+    let cleared = 0;
+    for (const id of ids) {
+        await objectStorageService.delete(storageKey(id));
+        cleared += 1;
+    }
+    return cleared;
 }
 
 // 一条用户请求 = 一条 record：进入路由循环前创建，此时还不知道命中的上游
@@ -63,6 +73,7 @@ async function create(
     modelId: number | null,
     requestData: string | null,
     clientFormat: string | null = null,
+    tenantId?: number,
 ) {
     if (isLogEnabled()) {
         console.log(`[RecordService] Creating record: user=${userId}, model=${modelId}`);
@@ -83,6 +94,7 @@ async function create(
         start_at: new Date(),
         end_at: null,
         cost: 0,
+        tenant_id: tenantId ?? null,
     });
 
     if (await isPayloadRecordingEnabled()) {
@@ -112,8 +124,8 @@ async function update(recordId: number, data: RecordUpdateData) {
     return recordManager.update(recordId, data);
 }
 
-async function latest(limit: number = 10, summaryOnly: boolean = false) {
-    const records = await recordManager.latest(limit, summaryOnly);
+async function latest(limit: number = 10, summaryOnly: boolean = false, tenantId?: number) {
+    const records = await recordManager.latest(limit, summaryOnly, tenantId);
 
     if (!summaryOnly) {
         await Promise.all(records.map((r: SgRecord) => attachPayload(r)));
@@ -185,13 +197,15 @@ async function recordFailedRequest(
     modelId: number | null = null,
     message?: string,
     detail?: Record<string, unknown>,
+    tenantId?: number,
 ) {
     try {
         const record = await create(
             userId,
             modelId,
             body,
-            clientFormat
+            clientFormat,
+            tenantId,
         );
         await markFailed(record.id, failedCode, {
             message: message ?? failedCode,

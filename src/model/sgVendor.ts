@@ -64,6 +64,7 @@ class SgVendor extends Model {
     token!: string;
     urls!: Record<string, string>;
     config!: SgVendorConfig;
+    tenant_id!: number | null;
 
     casts = {
         urls: 'json',

@@ -129,6 +129,8 @@ class SgRecord extends Model {
     model_id!: number | null;
     vendor_id!: number | null;
     vendor_model_name!: string | null;
+    /** 请求租户作用域冗余（root 取 X-Tenant-ID 视角 / 缺失 main；非 root 取自身 user.tenant_id） */
+    tenant_id!: number | null;
 
     request_data!: string | null;
     response_data!: string | null;
@@ -160,7 +162,7 @@ const RECORD_SUMMARY_COLUMNS = [
     "id", "user_id", "model_id", "vendor_id", "vendor_model_name",
     "status", "failed_code", "client_format", "upstream_format",
     "usage", "first_token_latency", "start_at", "end_at", "cost",
-    "created_at", "updated_at"
+    "created_at", "updated_at", "tenant_id",
 ];
 
 export { SgRecord, SgRecordUsage, RECORD_SUMMARY_COLUMNS };

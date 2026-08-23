@@ -38,11 +38,15 @@ export interface Model extends BaseEntity {
     routing_config: ModelRoutingConfig;
     enable: boolean;
     prices?: ModelPrices | null;
+    /** 归属租户 id（非 main 视角列表可见 main 共享模型时，用于识别只读） */
+    tenant_id?: number | null;
+    /** 跨租户共享标记：1 = 跨租户共享（仅 main 租户模型可置 1） */
+    cross_tenant?: boolean;
 }
 
 export type CreateModelRequest = Pick<
     Model,
-    'name' | 'enable' | 'prices' | 'routing_mode' | 'routing_config'
+    'name' | 'enable' | 'prices' | 'routing_mode' | 'routing_config' | 'cross_tenant'
 >;
 
 export type UpdateModelRequest = CreateModelRequest;

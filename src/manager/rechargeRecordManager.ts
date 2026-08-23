@@ -13,12 +13,17 @@ interface RechargeRecordCreateData {
     type: string;
     remark?: string | null;
     operator?: string | null;
+    tenant_id?: number | null;
 }
 
-async function listRechargeRecords(query: RechargeRecordsQuery = {}) {
+async function listRechargeRecords(query: RechargeRecordsQuery = {}, tenantId?: number) {
     const { user_id, type, limit = 100, offset = 0 } = query;
 
     const dbQuery = SgRechargeRecord.query();
+
+    if (tenantId !== undefined) {
+        dbQuery.where("tenant_id", tenantId);
+    }
 
     if (user_id !== undefined) {
         dbQuery.where("user_id", user_id);
@@ -37,8 +42,12 @@ async function listRechargeRecords(query: RechargeRecordsQuery = {}) {
     };
 }
 
-async function getRechargeRecord(id: number) {
-    return await SgRechargeRecord.query().find(id);
+async function getRechargeRecord(id: number, tenantId?: number) {
+    const q = SgRechargeRecord.query();
+    if (tenantId !== undefined) {
+        q.where("tenant_id", tenantId);
+    }
+    return await q.find(id);
 }
 
 async function create(data: RechargeRecordCreateData): Promise<SgRechargeRecord> {
@@ -48,6 +57,7 @@ async function create(data: RechargeRecordCreateData): Promise<SgRechargeRecord>
         type: data.type,
         remark: data.remark ?? null,
         operator: data.operator ?? null,
+        tenant_id: data.tenant_id ?? null,
     });
 }
 

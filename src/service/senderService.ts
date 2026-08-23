@@ -325,6 +325,11 @@ async function sendRequest(
         c.set("inspectUpstream", true);
     }
 
+    // 租户作用域（LLM 路径由 llmApiMiddleware 注入；缺失时兜底不落租户）
+    const scope = c.get("tenantScope");
+    const tenantId = scope?.tenantId;
+    const mainTenantId = scope?.mainTenantId;
+
     // 预检：仅全局计费开启时检查余额（module_billing_enabled 关闭则完全不拦）。
     // 余额为负的用户阻止请求，不向上游发起（负余额在完成时扣减产生，充值前不再放行）
     // balance 为整数微元，负值即欠费；但未启用计费（价格未设置或为 0）的模型不拦截
@@ -337,12 +342,15 @@ async function sendRequest(
             clientFormat,
             FailedCode.INSUFFICIENT_BALANCE,
             modelConfig.id,
+            undefined,
+            undefined,
+            tenantId,
         );
         throw new customError.AppError("Insufficient balance", 400);
     }
 
     // 一条用户请求 = 一条 record：进入路由循环前创建一次，跨上游尝试更新同一条记录
-    const record = await recordService.create(user.id, modelConfig.id, body, clientFormat);
+    const record = await recordService.create(user.id, modelConfig.id, body, clientFormat, tenantId);
     const recordId = Number(record.id);
 
     // 每个原始请求一个路由上下文，记录已用后端，避免重试循环
@@ -418,7 +426,13 @@ async function sendRequest(
         // inspect 模式（route-test 纯诊断）跳过，不计数、不受限流/访问控制影响。
         if (!options.inspect) {
             try {
-                await ruleService.matchAndCheckVendor(user, modelConfig, vendor);
+                await ruleService.matchAndCheckVendor(
+                    user,
+                    modelConfig,
+                    vendor,
+                    tenantId ?? -1,
+                    mainTenantId ?? tenantId ?? -1,
+                );
             } catch (e) {
                 if (e instanceof customError.AccessDeniedError) {
                     // 403：策略性拒绝与供应商无关，不 failover；标记 record FAILED 后抛出，交给 onError 渲染

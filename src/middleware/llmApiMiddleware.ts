@@ -6,6 +6,7 @@ import recordService from "../service/recordService";
 import ruleService from "../service/ruleService";
 import { SgUser } from "../model/sgUser";
 import customError from "../customError";
+import { resolveScopeForUser } from "./tenantScopeMiddleware";
 
 
 function extractLlmToken(c: Context): string {
@@ -71,6 +72,10 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
         c.set("api_format", format);
         const user = await authenticateLlmUser(c);
 
+        // 租户作用域：root 取 X-Tenant-ID（缺失默认 main），非 root 固定自身租户
+        const scope = await resolveScopeForUser(user, c.req.header("X-Tenant-ID"));
+        c.set("tenantScope", scope);
+
         const body = await c.req.text();
         const modelName = parseLlmRequestBody(body);
         const { modelConfig } = await llmRequestService.resolveContext(
@@ -78,6 +83,7 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
             modelName,
             body,
             format,
+            scope,
         );
 
         c.set("user", user);
@@ -87,7 +93,7 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
         // 【阶段一】路由前准入检查（不含 vendor_id 的规则）：命中 forbid_access 抛 403、rate_limit 超限抛 429。
         // 被拒时写入失败记录（此时 user / modelConfig / requestBody 均在 context），再交给 onError 渲染错误体。
         try {
-            await ruleService.matchAndCheck(user, modelConfig);
+            await ruleService.matchAndCheck(user, modelConfig, scope.tenantId, scope.mainTenantId);
         } catch (e) {
             if (e instanceof customError.AccessDeniedError) {
                 await recordService.recordFailedRequest(
@@ -99,6 +105,7 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
                     modelConfig.id,
                     "命中规则被拦截",
                     { rule_id: e.ruleId, rule_name: e.ruleName },
+                    scope.tenantId,
                 );
             } else if (e instanceof customError.RateLimitError) {
                 await recordService.recordFailedRequest(
@@ -110,6 +117,7 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
                     modelConfig.id,
                     "命中规则被拦截",
                     { rule_id: e.ruleId, rule_name: e.ruleName },
+                    scope.tenantId,
                 );
             }
             throw e;
@@ -124,6 +132,8 @@ const requireLlmModelsAuth: MiddlewareHandler = async (c: Context, next) => {
     c.set("api_format", ApiFormat.OPENAI);
     const user = await authenticateLlmUser(c);
     c.set("user", user);
+    const scope = await resolveScopeForUser(user, c.req.header("X-Tenant-ID"));
+    c.set("tenantScope", scope);
     await next();
 };
 

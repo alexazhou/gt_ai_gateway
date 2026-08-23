@@ -21,31 +21,38 @@ interface RuleCache {
     loadedAt: number;
 }
 
-let ruleCache: RuleCache | null = null;
+// 规则缓存按租户区分（key = tenantId:mainTenantId），避免跨租户串计数
+const ruleCacheMap = new Map<string, RuleCache>();
+
+function cacheKey(tenantId: number, mainTenantId: number): string {
+    return `${tenantId}:${mainTenantId}`;
+}
 
 // 规则 CRUD 后即时失效本地缓存（ruleManager 在写入后触发监听器）
 ruleManager.onInvalidate(() => {
-    ruleCache = null;
+    ruleCacheMap.clear();
 });
 
-async function getEnabledRules(): Promise<RuleCache> {
+async function getEnabledRules(tenantId: number, mainTenantId: number): Promise<RuleCache> {
     const now = Date.now();
-    if (ruleCache && now - ruleCache.loadedAt < RULE_CACHE_TTL_MS) {
-        return ruleCache;
+    const key = cacheKey(tenantId, mainTenantId);
+    const cached = ruleCacheMap.get(key);
+    if (cached && now - cached.loadedAt < RULE_CACHE_TTL_MS) {
+        return cached;
     }
 
-    const rules = await ruleManager.listEnabled();
+    const rules = await ruleManager.listEnabled(tenantId, mainTenantId);
     const cache: RuleCache = {
         nonVendorRules: rules.filter(rule => !scopeExpr.exprReferencesVendor(rule.scope)),
         vendorRules: rules.filter(rule => scopeExpr.exprReferencesVendor(rule.scope)),
         loadedAt: now,
     };
-    ruleCache = cache;
+    ruleCacheMap.set(key, cache);
     return cache;
 }
 
 function invalidateCache(): void {
-    ruleCache = null;
+    ruleCacheMap.clear();
 }
 
 
@@ -108,11 +115,11 @@ async function checkMatchedRules(
  * 阶段一：路由前准入检查（不含 vendor_id 的规则，此时尚未路由、vendor_id 未知）。
  * root 用户直接旁路（不匹配、不计数）。命中拒绝时抛 AccessDeniedError（403）/ RateLimitError（429）。
  */
-async function matchAndCheck(user: SgUser, modelConfig: SgModel): Promise<void> {
+async function matchAndCheck(user: SgUser, modelConfig: SgModel, tenantId: number, mainTenantId: number): Promise<void> {
     if (user.type === UserType.ROOT) {
         return;
     }
-    const { nonVendorRules } = await getEnabledRules();
+    const { nonVendorRules } = await getEnabledRules(tenantId, mainTenantId);
     if (nonVendorRules.length === 0) {
         return;
     }
@@ -128,11 +135,11 @@ async function matchAndCheck(user: SgUser, modelConfig: SgModel): Promise<void> 
  * 阶段二：路由后准入检查（含 vendor_id 的规则，实际路由到的供应商已确定）。
  * root 用户直接旁路。rate_limit 传 failoverEligible = true（超限视为该上游繁忙，可切换其它供应商）。
  */
-async function matchAndCheckVendor(user: SgUser, modelConfig: SgModel, vendor: SgVendor): Promise<void> {
+async function matchAndCheckVendor(user: SgUser, modelConfig: SgModel, vendor: SgVendor, tenantId: number, mainTenantId: number): Promise<void> {
     if (user.type === UserType.ROOT) {
         return;
     }
-    const { vendorRules } = await getEnabledRules();
+    const { vendorRules } = await getEnabledRules(tenantId, mainTenantId);
     if (vendorRules.length === 0) {
         return;
     }

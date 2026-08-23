@@ -21,6 +21,7 @@ const strategies: Record<ModelRoutingMode, BaseRoutingStrategy> = {
 
 async function validateConfig(
     model: SgModel,
+    tenantId?: number,
 ): Promise<void> {
     if (typeof model.name !== "string" || !model.name.trim()) {
         throw new customError.AppError("Model name is required");
@@ -68,6 +69,14 @@ async function validateConfig(
         const vendor = await vendorManager.findById(upstream.vendor_id);
         if (!vendor) {
             throw new customError.NotFoundError("Vendor not found");
+        }
+
+        // 同租户校验：模型上游 vendor 必须属于模型归属租户（共享模型的上游则必须属于 main）
+        if (tenantId !== undefined && vendor.tenant_id !== tenantId) {
+            throw new customError.AppError(
+                `Vendor ${upstream.vendor_id} does not belong to the model's tenant`,
+                400,
+            );
         }
 
         if (upstream.vendor_model_id) {

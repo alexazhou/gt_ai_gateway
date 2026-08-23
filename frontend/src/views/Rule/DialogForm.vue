@@ -11,6 +11,12 @@
                 <div class="rule-status">
                     <span>启用</span>
                     <a-switch v-model:checked="formState.enabled" size="small" />
+                    <template v-if="tenantStore.multiTenantEnabled">
+                        <a-tooltip title="跨租户共享仅 main 租户规则可开启；开启后对所有租户生效（非 main 租户规则不可勾选）">
+                            <span style="margin-left: 12px;">跨租户共享</span>
+                        </a-tooltip>
+                        <a-switch v-model:checked="formState.cross_tenant" size="small" :disabled="!isMainView" />
+                    </template>
                 </div>
             </div>
         </template>
@@ -75,6 +81,7 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { InfoCircleOutlined } from '@ant-design/icons-vue';
 import { createRule, updateRule } from '@/api/rule';
+import { useTenantStore } from '@/stores/tenant';
 import { listModels } from '@/api/model';
 import { listUsers } from '@/api/user';
 import { listVendors } from '@/api/vendor';
@@ -102,7 +109,11 @@ const formState = reactive({
     scope: createDefaultScope() as ExprNode,
     config: { rpm: null as number | null },
     enabled: true,
+    cross_tenant: false,
 });
+
+const tenantStore = useTenantStore();
+const isMainView = computed(() => tenantStore.isMainView);
 
 // 条件树叶子下拉选项（模型 / 用户 / 供应商）
 const scopeOptions = ref<ScopeOptions>({ models: [], users: [], vendors: [] });
@@ -140,6 +151,7 @@ function openEdit(rule: Rule): void {
     // 列表数据的 scope 是 Vue 响应式 Proxy，structuredClone 无法克隆；JSON 深拷贝即可
     formState.scope = JSON.parse(JSON.stringify(rule.scope)) as ExprNode;
     formState.enabled = Boolean(rule.enabled);
+    formState.cross_tenant = Boolean(rule.cross_tenant);
     if (rule.type === 'rate_limit') {
         const rpm = (rule.config as { rpm?: number | null }).rpm;
         formState.config.rpm = rpm ?? null;
@@ -163,6 +175,7 @@ function resetForm(): void {
     formState.scope = createDefaultScope();
     formState.config.rpm = null;
     formState.enabled = true;
+    formState.cross_tenant = false;
 }
 
 async function handleOk(): Promise<void> {
@@ -181,6 +194,7 @@ async function handleOk(): Promise<void> {
         scope: formState.scope,
         config,
         enabled: formState.enabled,
+        cross_tenant: formState.cross_tenant,
     };
 
     loading.value = true;

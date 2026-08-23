@@ -85,9 +85,10 @@ describe("AI Chat API (Negative)", () => {
         );
 
         // Insert an invalid routing config to verify unavailable-upstream handling.
+        // tenant_id 落 main：多租户隔离下模型需归属租户才可被调用
         await dbHelper.execute(
-            `INSERT INTO model (name, enable, routing_mode, routing_config)
-             VALUES ('vendor-not-found-model', 1, 'single', '{"upstreams":[{"vendor_id":999999,"enabled":true}]}')`,
+            `INSERT INTO model (name, enable, routing_mode, routing_config, tenant_id)
+             VALUES ('vendor-not-found-model', 1, 'single', '{"upstreams":[{"vendor_id":999999,"enabled":true}]}', (SELECT id FROM tenant WHERE name = 'main'))`,
         );
     });
 

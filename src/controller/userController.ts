@@ -6,6 +6,7 @@ import { createListResponse, parsePaginationQuery } from "../util/paginationUtil
 import maskUtil from "../util/maskUtil";
 
 async function listUsers(c: Context) {
+    const scope = c.get("tenantScope")!;
     const query = c.req.query();
     const { pageSize, offset } = parsePaginationQuery(query);
 
@@ -14,11 +15,12 @@ async function listUsers(c: Context) {
         keyword: query.keyword,
         pageSize,
         offset,
-    });
+    }, scope);
     return c.json(createListResponse(users, total));
 }
 
 async function getUser(c: Context) {
+    const scope = c.get("tenantScope")!;
     const id = c.req.param("id");
     const userId = parseInt(id, 10);
 
@@ -26,7 +28,7 @@ async function getUser(c: Context) {
         return c.json({ error: "Invalid ID format" }, 400);
     }
 
-    const user = await userManager.findById(userId);
+    const user = await userManager.findByIdInTenant(userId, scope.tenantId);
 
     if (!user) {
         return c.json({ error: "User not found" }, 404);
@@ -36,6 +38,7 @@ async function getUser(c: Context) {
 }
 
 async function getUsersByIds(c: Context) {
+    const scope = c.get("tenantScope")!;
     const body = await c.req.json();
     const ids = body.ids;
 
@@ -48,11 +51,12 @@ async function getUsersByIds(c: Context) {
         return c.json([]);
     }
 
-    const users = await userManager.getByIds(idList);
+    const users = await userManager.getByIds(idList, scope.tenantId);
     return c.json(users);
 }
 
 async function createUser(c: Context) {
+    const scope = c.get("tenantScope")!;
     try {
         const body = await c.req.json();
         let { name, token, type } = body;
@@ -68,7 +72,7 @@ async function createUser(c: Context) {
             name,
             token,
             type: type || UserType.NORMAL,
-        });
+        }, scope.tenantId);
 
         console.log("[userController] User created successfully:", { id: instance.id, name: instance.name, type: instance.type, token: maskUtil.maskToken(instance.token) });
         return c.json(instance);
@@ -82,6 +86,7 @@ async function createUser(c: Context) {
 }
 
 async function updateUser(c: Context) {
+    const scope = c.get("tenantScope")!;
     const id = c.req.param("id");
     const userId = parseInt(id, 10);
 
@@ -89,7 +94,7 @@ async function updateUser(c: Context) {
         return c.json({ error: "Invalid ID format" }, 400);
     }
 
-    const user = await userManager.findById(userId);
+    const user = await userManager.findByIdInTenant(userId, scope.tenantId);
 
     if (!user) {
         return c.json({ error: "User not found" }, 404);
@@ -118,11 +123,17 @@ async function updateUser(c: Context) {
 }
 
 async function adjustBalance(c: Context) {
+    const scope = c.get("tenantScope")!;
     const id = c.req.param("id");
     const userId = parseInt(id, 10);
 
     if (isNaN(userId)) {
         return c.json({ error: "Invalid ID format" }, 400);
+    }
+
+    const user = await userManager.findByIdInTenant(userId, scope.tenantId);
+    if (!user) {
+        return c.json({ error: "User not found" }, 404);
     }
 
     const body = await c.req.json();

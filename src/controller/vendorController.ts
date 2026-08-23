@@ -28,6 +28,7 @@ function formatVendor(vendor: SgVendor, modelCount = 0) {
 
 
 async function listVendors(c: Context) {
+    const scope = c.get("tenantScope")!;
     const query = c.req.query();
     const { pageSize, offset } = parsePaginationQuery(query);
 
@@ -36,7 +37,7 @@ async function listVendors(c: Context) {
         keyword: query.keyword,
         pageSize,
         offset,
-    });
+    }, scope);
 
     const formattedVendors = vendors.map(v => formatVendor(v, modelCounts[v.id] ?? 0));
     return c.json(createListResponse(formattedVendors, total));
@@ -44,6 +45,7 @@ async function listVendors(c: Context) {
 
 
 async function getVendor(c: Context) {
+    const scope = c.get("tenantScope")!;
     const id = c.req.param("id");
     const vendorId = parseInt(id, 10);
 
@@ -51,7 +53,7 @@ async function getVendor(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const vendor = await vendorManager.findById(vendorId);
+    const vendor = await vendorManager.findByIdInTenant(vendorId, scope.tenantId);
 
     if (!vendor) {
         throw new customError.NotFoundError("Vendor not found");
@@ -61,9 +63,10 @@ async function getVendor(c: Context) {
 }
 
 async function getVendorsByIds(c: Context) {
+    const scope = c.get("tenantScope")!;
     const body = await c.req.json();
     const ids = body.ids;
-    
+
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
         return c.json([]);
     }
@@ -73,19 +76,27 @@ async function getVendorsByIds(c: Context) {
         return c.json([]);
     }
 
-    const vendors = await vendorManager.getByIds(idList);
+    const vendors = await vendorManager.getByIds(idList, scope.tenantId);
     const formattedVendors = vendors.map(formatVendor);
     return c.json(formattedVendors);
 }
 
 
 async function createVendor(c: Context) {
+    const scope = c.get("tenantScope")!;
     const body = await c.req.json();
     const vendor = new SgVendor(body);
 
     // Validation - 不验证 urls，允许为空
     if (!vendor.type || !vendor.name || !vendor.token) {
         throw new customError.AppError("Missing required fields");
+    }
+
+    // 归属由服务端写入，客户端 body 中的 tenant_id 忽略；供应商名租户内唯一
+    vendor.tenant_id = scope.tenantId;
+    const dup = await vendorManager.findByName(vendor.name, scope.tenantId);
+    if (dup) {
+        throw new customError.AppError("A vendor with this name already exists", 409);
     }
 
     vendorService.validateProxyConfig(vendor.config);
@@ -97,6 +108,7 @@ async function createVendor(c: Context) {
 
 
 async function updateVendor(c: Context) {
+    const scope = c.get("tenantScope")!;
     const id = c.req.param("id");
     const vendorId = parseInt(id, 10);
 
@@ -113,7 +125,7 @@ async function updateVendor(c: Context) {
         token,
         urls,
         config,
-    });
+    }, scope.tenantId);
 
     if (!updatedVendor) {
         throw new customError.NotFoundError("Vendor not found");
@@ -124,6 +136,7 @@ async function updateVendor(c: Context) {
 
 
 async function deleteVendor(c: Context) {
+    const scope = c.get("tenantScope")!;
     const id = c.req.param("id");
     const vendorId = parseInt(id, 10);
 
@@ -131,17 +144,17 @@ async function deleteVendor(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const vendor = await vendorManager.findById(vendorId);
+    const vendor = await vendorManager.findByIdInTenant(vendorId, scope.tenantId);
 
     if (!vendor) {
         throw new customError.NotFoundError("Vendor not found");
     }
 
-    if (await modelManager.hasModelsUsingVendor(vendorId)) {
+    if (await modelManager.hasModelsUsingVendor(vendorId, scope.tenantId)) {
         throw new customError.AppError("Cannot delete vendor with associated models");
     }
 
-    const deleted = await vendorManager.deleteById(vendorId);
+    const deleted = await vendorManager.deleteById(vendorId, scope.tenantId);
     if (!deleted) {
         throw new customError.NotFoundError("Vendor not found");
     }
@@ -150,6 +163,7 @@ async function deleteVendor(c: Context) {
 }
 
 async function testVendor(c: Context) {
+    const scope = c.get("tenantScope")!;
     const id = c.req.param("id");
     const vendorId = parseInt(id, 10);
 
@@ -157,7 +171,7 @@ async function testVendor(c: Context) {
         throw new customError.AppError("Invalid ID format");
     }
 
-    const vendor = await vendorManager.findById(vendorId);
+    const vendor = await vendorManager.findByIdInTenant(vendorId, scope.tenantId);
     if (!vendor) {
         throw new customError.NotFoundError("Vendor not found");
     }

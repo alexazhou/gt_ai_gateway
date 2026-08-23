@@ -1,5 +1,6 @@
 import { SgVendor } from "../model/sgVendor";
 import ormService from "../service/ormService";
+import type { TenantScope } from "../middleware/tenantScopeMiddleware";
 
 interface VendorListOptions {
     type?: string;
@@ -12,20 +13,32 @@ async function findById(vendorId: number): Promise<SgVendor | null> {
     return await SgVendor.query().find(vendorId);
 }
 
-async function findByName(name: string): Promise<SgVendor | null> {
+async function findByIdInTenant(vendorId: number, tenantId: number): Promise<SgVendor | null> {
+    return await SgVendor.query().where("id", vendorId).where("tenant_id", tenantId).first();
+}
+
+async function findByName(name: string, tenantId?: number): Promise<SgVendor | null> {
     if (name == null) {
         return null;
     }
 
-    return await SgVendor.query().where("name", name).first();
+    const q = SgVendor.query().where("name", name);
+    if (tenantId !== undefined) {
+        q.where("tenant_id", tenantId);
+    }
+    return await q.first();
 }
 
 async function listAll(): Promise<SgVendor[]> {
     return (await SgVendor.query().get()).all();
 }
 
-async function list(options: VendorListOptions) {
+async function list(options: VendorListOptions, scope?: TenantScope) {
     const dbQuery = SgVendor.query().orderBy("id", "desc");
+
+    if (scope) {
+        dbQuery.where("tenant_id", scope.tenantId);
+    }
 
     if (options.type) {
         dbQuery.where("type", options.type);
@@ -60,11 +73,15 @@ async function list(options: VendorListOptions) {
     };
 }
 
-async function getByIds(ids: number[]): Promise<SgVendor[]> {
+async function getByIds(ids: number[], tenantId?: number): Promise<SgVendor[]> {
     if (ids.length === 0) {
         return [];
     }
-    return (await SgVendor.query().whereIn("id", ids).get()).all();
+    const q = SgVendor.query().whereIn("id", ids);
+    if (tenantId !== undefined) {
+        q.where("tenant_id", tenantId);
+    }
+    return (await q.get()).all();
 }
 
 async function create(vendor: SgVendor): Promise<SgVendor> {
@@ -72,8 +89,15 @@ async function create(vendor: SgVendor): Promise<SgVendor> {
     return vendor;
 }
 
-async function update(vendorId: number, updateData: Record<string, any>): Promise<SgVendor | null> {
-    await SgVendor.query().where("id", vendorId).update(updateData);
+async function update(vendorId: number, updateData: Record<string, any>, tenantId?: number): Promise<SgVendor | null> {
+    const q = SgVendor.query();
+    if (tenantId !== undefined) {
+        q.where("tenant_id", tenantId);
+    }
+    const affected = await q.where("id", vendorId).update(updateData);
+    if (affected === 0) {
+        return null;
+    }
     return await SgVendor.query().find(vendorId);
 }
 
@@ -81,9 +105,17 @@ async function count(): Promise<number> {
     return Number(await SgVendor.query().count() || 0);
 }
 
+async function countByTenant(tenantId: number): Promise<number> {
+    return Number(await SgVendor.query().where("tenant_id", tenantId).count() || 0);
+}
 
-async function deleteById(vendorId: number): Promise<boolean> {
-    const vendor = await SgVendor.query().find(vendorId);
+
+async function deleteById(vendorId: number, tenantId?: number): Promise<boolean> {
+    const q = SgVendor.query();
+    if (tenantId !== undefined) {
+        q.where("tenant_id", tenantId);
+    }
+    const vendor = await q.where("id", vendorId).first();
     if (!vendor) {
         return false;
     }
@@ -94,6 +126,7 @@ async function deleteById(vendorId: number): Promise<boolean> {
 
 export default {
     findById,
+    findByIdInTenant,
     findByName,
     listAll,
     list,
@@ -101,5 +134,6 @@ export default {
     create,
     update,
     count,
+    countByTenant,
     deleteById,
 };

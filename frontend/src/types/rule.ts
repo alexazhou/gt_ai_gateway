@@ -44,6 +44,10 @@ export interface Rule extends BaseEntity {
     scope: ExprNode;
     config: RuleConfig;
     enabled: boolean;
+    /** 归属租户 id（非 main 视角列表可见 main 共享规则时，用于识别只读） */
+    tenant_id?: number | null;
+    /** 跨租户共享标记：1 = 所有租户生效（仅 main 租户规则可置 1） */
+    cross_tenant?: boolean;
 }
 
 export interface RuleQuery extends TableQuery {
@@ -56,6 +60,7 @@ export interface CreateRuleRequest {
     scope: ExprNode;
     config: RuleConfig;
     enabled: boolean;
+    cross_tenant?: boolean;
 }
 
 export type UpdateRuleRequest = Partial<CreateRuleRequest>;

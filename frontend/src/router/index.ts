@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
+import { useTenantStore } from '@/stores/tenant';
 
 // 静态导入所有页面组件
 import Login from '@/views/Login.vue';
@@ -14,6 +15,7 @@ import VendorDetail from '@/views/Vendor/Detail.vue';
 import VendorModels from '@/views/Vendor/VendorModels.vue';
 import ModelIndex from '@/views/Model/Index.vue';
 import ModelList from '@/views/Model/List.vue';
+import TenantIndex from '@/views/Tenant/Index.vue';
 import RuleIndex from '@/views/Rule/Index.vue';
 import RuleList from '@/views/Rule/List.vue';
 import RecordIndex from '@/views/Record/Index.vue';
@@ -119,6 +121,12 @@ const routes: RouteRecordRaw[] = [
                 ],
             },
             {
+                path: 'tenant',
+                name: 'Tenant',
+                component: TenantIndex,
+                meta: { title: '租户管理', requiresRoot: true },
+            },
+            {
                 path: 'rule',
                 name: 'Rule',
                 component: RuleIndex,
@@ -178,6 +186,7 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
     const authStore = useAuthStore();
+    const tenantStore = useTenantStore();
 
     if (to.meta.requiresAuth !== false) {
         if (!authStore.isAuthenticated) {
@@ -191,7 +200,17 @@ router.beforeEach(async (to) => {
             }
         }
 
+        // requiresRoot 路由（如租户管理）仅 root 可访问
+        if (to.meta.requiresRoot && authStore.userType !== 'root') {
+            return { name: 'Dashboard' };
+        }
+
         return true;
+    }
+
+    // 进入登录页时清空租户视角
+    if (to.name === 'Login') {
+        tenantStore.reset();
     }
 
     if (authStore.isAuthenticated && to.name === 'Login') {

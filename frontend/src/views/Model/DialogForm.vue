@@ -11,6 +11,12 @@
                 <div class="model-status">
                     <span>启用</span>
                     <a-switch v-model:checked="formState.enable" size="small" :disabled="isView" />
+                    <template v-if="tenantStore.multiTenantEnabled">
+                        <a-tooltip title="跨租户共享仅 main 租户模型可开启；开启后所有租户均可调用（非 main 租户模型不可勾选）">
+                            <span style="margin-left: 12px;">跨租户共享</span>
+                        </a-tooltip>
+                        <a-switch v-model:checked="formState.cross_tenant" size="small" :disabled="isView || !isMainView" />
+                    </template>
                 </div>
             </div>
         </template>
@@ -154,6 +160,7 @@ import type { FormInstance } from 'ant-design-vue/es';
 import { InfoCircleOutlined } from '@ant-design/icons-vue';
 import { createModel, updateModel } from '@/api/model';
 import { getConfig } from '@/api/config';
+import { useTenantStore } from '@/stores/tenant';
 import type {
     CreateModelRequest,
     LoadBalanceStrategy,
@@ -201,6 +208,7 @@ const formState = reactive({
     upstreams: [createUpstream()] as ModelUpstreamFormValue[],
     failoverEnabled: true,
     enable: true,
+    cross_tenant: false,
     prices: {
         input: undefined as number | undefined,
         output: undefined as number | undefined,
@@ -213,6 +221,10 @@ const rules = {
 };
 
 const moduleBillingEnabled = ref(false);
+
+// 跨租户共享仅 main 视角可勾选（以后端校验为准，前端按视角禁用）
+const tenantStore = useTenantStore();
+const isMainView = computed(() => tenantStore.isMainView);
 
 function handleRoutingModeChange() {
     if (formState.routing_mode !== 'single') {
@@ -260,6 +272,7 @@ function openModel(model: Model, mode: 'edit' | 'view') {
         enabled: upstream.enabled,
     }));
     formState.enable = Boolean(model.enable);
+    formState.cross_tenant = Boolean(model.cross_tenant);
     formState.failoverEnabled = model.routing_config.failover?.enabled ?? true;
     formState.prices = {
         input: model.prices?.input || undefined,
@@ -305,6 +318,7 @@ async function handleOk() {
         const requestData: CreateModelRequest = {
             name: formState.name,
             enable: formState.enable,
+            cross_tenant: formState.cross_tenant,
             routing_mode: formState.routing_mode,
             routing_config: routingConfig,
             prices: {
@@ -338,6 +352,7 @@ function resetForm() {
     formState.upstreams = [createUpstream()];
     formState.failoverEnabled = true;
     formState.enable = true;
+    formState.cross_tenant = false;
     formState.prices = {
         input: undefined,
         output: undefined,

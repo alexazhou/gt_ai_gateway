@@ -40,9 +40,12 @@
                     <span>{{ configSummary(record) }}</span>
                 </template>
                 <template v-if="column.key === 'enabled'">
-                    <a-tag :color="Boolean(record.enabled) ? 'green' : 'red'">
-                        {{ Boolean(record.enabled) ? '启用' : '停用' }}
-                    </a-tag>
+                    <a-space :size="4">
+                        <a-tag :color="Boolean(record.enabled) ? 'green' : 'red'">
+                            {{ Boolean(record.enabled) ? '启用' : '停用' }}
+                        </a-tag>
+                        <a-tag v-if="isSharedRule(record)" color="purple">共享</a-tag>
+                    </a-space>
                 </template>
                 <template v-if="column.key === 'created_at'">
                     {{ formatDate(record.created_at) }}
@@ -55,6 +58,7 @@
                                 size="small"
                                 class="rule-action-button"
                                 aria-label="编辑"
+                                :disabled="isSharedRule(record)"
                                 @click="handleEdit(record)"
                             >
                                 <EditOutlined />
@@ -66,6 +70,7 @@
                                 type="text"
                                 size="small"
                                 aria-label="删除"
+                                :disabled="isSharedRule(record)"
                                 @click="handleDelete(record)"
                             >
                                 <DeleteOutlined />
@@ -90,12 +95,28 @@ import { listModels } from '@/api/model';
 import { listUsers } from '@/api/user';
 import { listVendors } from '@/api/vendor';
 import { useResourceTable } from '@/composables/useResourceTable';
+import { useTenantStore } from '@/stores/tenant';
+import { useAppStore } from '@/stores/app';
 import { formatDate } from '@/utils/format';
 import { normalizeListResponse } from '@/utils/listResponse';
 import ScopeTreeView from '@/components/rule/ScopeTreeView.vue';
 import DialogForm from './DialogForm.vue';
 import type { Rule, RuleQuery, ScopeOptions } from '@/types/rule';
 import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
+
+const tenantStore = useTenantStore();
+const appStore = useAppStore();
+
+// 当前视角租户 id（root 取切换的视角；admin 取自身租户；root 未切换时缺省 main）
+const myTenantId = computed(() => tenantStore.currentTenantIdNum ?? appStore.tenantId ?? appStore.mainTenantId);
+
+// 共享规则识别：main 租户规则 cross_tenant=1，且不属于当前视角租户 → 只读
+function isSharedRule(record: Rule): boolean {
+    return Boolean(record.cross_tenant)
+        && typeof record.tenant_id === 'number'
+        && myTenantId.value !== null
+        && record.tenant_id !== myTenantId.value;
+}
 
 const { loading, data, pagination, searchForm, loadData, handleSearch, handleReset, handleTableChange } = useResourceTable<Rule, RuleQuery>({
     initialSearchForm: {

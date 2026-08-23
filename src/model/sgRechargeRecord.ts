@@ -17,6 +17,8 @@ class SgRechargeRecord extends Model {
     type!: string; // 'recharge' or 'adjustment'
     remark!: string | null;
     operator!: string | null;
+    /** 被充值用户的归属租户 */
+    tenant_id!: number | null;
 
     created_at!: Date;
     updated_at!: Date;

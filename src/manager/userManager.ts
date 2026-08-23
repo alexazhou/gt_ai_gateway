@@ -1,5 +1,6 @@
 import { SgUser } from "../model/sgUser";
 import { UserStatus } from "../constants";
+import type { TenantScope } from "../middleware/tenantScopeMiddleware";
 
 interface UserListOptions {
     type?: string;
@@ -18,15 +19,27 @@ async function findById(userId: number): Promise<SgUser | null> {
     return await SgUser.query().find(userId);
 }
 
-async function getByIds(ids: number[]): Promise<SgUser[]> {
+async function findByIdInTenant(userId: number, tenantId: number): Promise<SgUser | null> {
+    return await SgUser.query().where("id", userId).where("tenant_id", tenantId).first();
+}
+
+async function getByIds(ids: number[], tenantId?: number): Promise<SgUser[]> {
     if (ids.length === 0) {
         return [];
     }
-    return (await SgUser.query().whereIn("id", ids).get()).all();
+    const q = SgUser.query().whereIn("id", ids);
+    if (tenantId !== undefined) {
+        q.where("tenant_id", tenantId);
+    }
+    return (await q.get()).all();
 }
 
-async function list(options: UserListOptions) {
+async function list(options: UserListOptions, scope?: TenantScope) {
     const dbQuery = SgUser.query().orderBy("id", "desc");
+
+    if (scope) {
+        dbQuery.where("tenant_id", scope.tenantId);
+    }
 
     if (options.type) {
         dbQuery.where("type", options.type);
@@ -44,9 +57,10 @@ async function list(options: UserListOptions) {
     };
 }
 
-async function create(data: Pick<SgUser, "name" | "token" | "type">) {
+async function create(data: Pick<SgUser, "name" | "token" | "type">, tenantId?: number) {
     return await SgUser.query().create({
         ...data,
+        tenant_id: tenantId ?? null,
         balance: 0,                    // 新用户余额固定 0，由 manager 兜底
         status: UserStatus.ACTIVE,     // 新用户状态固定 ACTIVE，由 manager 兜底
     });
@@ -66,13 +80,19 @@ async function count(): Promise<number> {
     return Number(await SgUser.query().count() || 0);
 }
 
+async function countByTenant(tenantId: number): Promise<number> {
+    return Number(await SgUser.query().where("tenant_id", tenantId).count() || 0);
+}
+
 export default {
     findByToken,
     findById,
+    findByIdInTenant,
     getByIds,
     list,
     create,
     update,
     incrementBalance,
     count,
+    countByTenant,
 };

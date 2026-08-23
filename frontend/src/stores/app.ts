@@ -18,6 +18,10 @@ export const useAppStore = defineStore('app', () => {
     const moduleBillingEnabled = ref(false);
     const moduleApiPlaygroundEnabled = ref(false);
     const moduleClientConfigEnabled = ref(false);
+    // 多租户隔离
+    const multiTenantEnabled = ref(false);
+    const tenantId = ref<number | null>(null);
+    const mainTenantId = ref<number | null>(null);
 
     function toggleSidebar() {
         sidebarCollapsed.value = !sidebarCollapsed.value;
@@ -41,6 +45,9 @@ export const useAppStore = defineStore('app', () => {
             moduleBillingEnabled.value = data.modules?.billing ?? false;
             moduleApiPlaygroundEnabled.value = data.modules?.api_playground ?? false;
             moduleClientConfigEnabled.value = data.modules?.client_config ?? false;
+            multiTenantEnabled.value = data.tenant?.multi_tenant_enabled ?? false;
+            tenantId.value = data.tenant?.id ?? null;
+            mainTenantId.value = data.tenant?.main_id ?? null;
             r2StorageAvailable.value = data.storage?.r2_available ?? false;
             r2StorageUnavailableReason.value = data.storage?.r2_unavailable_reason || '';
         } catch (error) {
@@ -58,6 +65,9 @@ export const useAppStore = defineStore('app', () => {
         moduleBillingEnabled,
         moduleApiPlaygroundEnabled,
         moduleClientConfigEnabled,
+        multiTenantEnabled,
+        tenantId,
+        mainTenantId,
         toggleSidebar,
         enableDeveloperMode,
         disableDeveloperMode,

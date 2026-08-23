@@ -3,6 +3,12 @@ import userService from "../service/userService";
 import { UserType, ROOT_USER_ID, UserStatus } from "../constants";
 
 const requireAdmin: MiddlewareHandler = async (c, next) => {
+    // requireAdmin 可能经 app.use 与路由声明双挂：已注入 user 时短路，避免重复查库
+    if (c.get("user")) {
+        await next();
+        return;
+    }
+
     const authHeader = c.req.header("Authorization");
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -21,6 +27,8 @@ const requireAdmin: MiddlewareHandler = async (c, next) => {
     }
 
     c.set("user_type", user.type);
+    // 注入完整 user（含 tenant_id），供 tenantScopeMiddleware 解析租户作用域
+    c.set("user", user);
 
     if (user.type !== UserType.ADMIN && user.type !== UserType.ROOT) {
         return c.json({ error: "Admin access required" }, 403);

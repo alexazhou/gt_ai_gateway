@@ -1,6 +1,7 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import type { ApiTestRequest, StreamChunk } from '@/types/gateway';
 import { getAuthToken } from '@/utils/authSession';
+import { getTenantViewId } from '@/utils/tenantSession';
 import { createHttpError, toAppRequestError } from '@/utils/requestError';
 
 interface StreamCallbacks {
@@ -73,16 +74,22 @@ export async function chatCompletions(
     };
 
     const token = getAuthToken();
+    // playground 原生 fetch 不走 axios 拦截器，需单独带上当前租户视角
+    const tenantViewId = getTenantViewId();
+    const llmHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+    };
+    if (tenantViewId) {
+        llmHeaders['X-Tenant-ID'] = tenantViewId;
+    }
 
     if (!stream) {
         // 非流式请求
         try {
             const response = await fetch(`${API_BASE_URL}/llm/v1/chat/completions`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': token ? `Bearer ${token}` : '',
-                },
+                headers: llmHeaders,
                 body: JSON.stringify(requestBody),
             });
 
@@ -107,10 +114,7 @@ export async function chatCompletions(
     try {
         await fetchEventSource(`${API_BASE_URL}/llm/v1/chat/completions`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': token ? `Bearer ${token}` : '',
-            },
+            headers: llmHeaders,
             body: JSON.stringify(requestBody),
             async onopen(response) {
                 await ensureOk(response, httpErrorFallback(response.status));

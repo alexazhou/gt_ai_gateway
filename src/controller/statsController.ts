@@ -10,9 +10,12 @@ function toSafeNumber(value: unknown): number {
 }
 
 async function dashboardStats(c: Context) {
+    const scope = c.get("tenantScope")!;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayCutoff = today.toISOString().slice(0, 19).replace("T", " ");
+    // tenantId 为经解析的整数，直接内联安全（与 status 内联同套路）
+    const tenantCond = ` AND tenant_id = ${scope.tenantId}`;
 
     // 拆成两条 SQL：
     // 1. 今日数据：WHERE 过滤后走 idx_record_created_at 索引，只回表今天的少量行
@@ -25,9 +28,9 @@ async function dashboardStats(c: Context) {
             COUNT(DISTINCT user_id) AS active_users,
             COUNT(DISTINCT model_id) AS active_models
         FROM record
-        WHERE created_at >= '${todayCutoff}'
+        WHERE created_at >= '${todayCutoff}'${tenantCond}
     `;
-    const totalSql = `SELECT COUNT(*) AS total_requests FROM record`;
+    const totalSql = `SELECT COUNT(*) AS total_requests FROM record WHERE tenant_id = ${scope.tenantId}`;
 
     const [todayRow, totalRow] = await Promise.all([
         Promise.resolve(ormService.dbAdapter.prepare(todaySql).first()),
@@ -54,10 +57,11 @@ async function dashboardStats(c: Context) {
 }
 
 async function recentRecords(c: Context) {
+    const scope = c.get("tenantScope")!;
     const query = c.req.query();
     const { pageSize } = parsePaginationQuery(query, 10);
 
-    const records = await recordManager.recent(pageSize);
+    const records = await recordManager.recent(pageSize, scope.tenantId);
 
     // 简化返回数据
     const simplified = records.map(r => ({

@@ -6,6 +6,7 @@ import config from "../config";
 import { DBAdapter } from "../../src/util/db/dbAdapter";
 import { migrate as runMigrations } from "../../src/service/dbMigrationService";
 import configService from "../../src/service/configService";
+import tenantService from "../../src/service/tenantService";
 
 // Worker mode configuration - use test database
 const TEST_DB_NAME = "gt_ai_gateway_test";
@@ -428,6 +429,22 @@ async function cleanup(): Promise<void> {
 }
 
 /**
+ * 清表后重建 main 主租户（多租户隔离）：truncate 会清掉 tenant 表，不重建则
+ * tenantService.getMainTenantId() 失败，所有租户逻辑在测试里不可用。
+ */
+function seedMainTenant(): void {
+    const sql = "INSERT INTO tenant (name, description) VALUES ('main', '主租户（迁移生成）')";
+    if (isWorkerMode) {
+        runD1Command([`--command="${sql.replace(/"/g, '\\"')}"`]);
+    } else if (isMysql) {
+        getMysqlPool().query(sql).catch((err: unknown) => console.error("Failed to seed main tenant:", err));
+    } else {
+        adapter!.exec(sql);
+    }
+    tenantService.clearMainTenantCache();
+}
+
+/**
  * Truncate tables - remove all data but keep structure
  */
 async function truncate(): Promise<void> {
@@ -450,6 +467,8 @@ async function truncate(): Promise<void> {
 
         // Clear in-memory config cache so tests don't leak state across runs
         configService.clearCache();
+
+        seedMainTenant();
 
         return;
     }
@@ -478,6 +497,9 @@ async function truncate(): Promise<void> {
             }
         }
     }
+
+    // 多租户隔离：重建 main 主租户
+    seedMainTenant();
 
     // Clear config cache to ensure test isolation
     configService.clearCache();

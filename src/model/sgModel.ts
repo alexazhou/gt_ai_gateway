@@ -106,6 +106,10 @@ class SgModel extends Model {
 
     name!: string | null;
     enable!: boolean;
+    /** 归属租户（回填后应用层强制非空） */
+    tenant_id!: number | null;
+    /** 全局共享标记：1 = 对所有租户可见；0 = 租户私有。仅 main 租户下的模型可置 1 */
+    cross_tenant!: boolean;
     prices!: { input?: number, output?: number, cache_read?: number } | null;
     routing_mode!: ModelRoutingMode;
     routing_config!: ModelRoutingConfig;

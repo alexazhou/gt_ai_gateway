@@ -12,6 +12,10 @@ class SgRule extends Model {
     scope!: ExprNode;
     config!: Record<string, any>;
     enabled!: boolean;
+    /** 归属租户（存量回填 main） */
+    tenant_id!: number | null;
+    /** 全局共享标记：1 = 对所有租户生效；0 = 租户私有。仅 main 租户规则可置 1 */
+    cross_tenant!: boolean;
 
     casts = {
         scope: "json",

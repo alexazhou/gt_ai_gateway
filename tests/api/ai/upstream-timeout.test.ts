@@ -281,8 +281,8 @@ describe("Upstream Timeout & Orphan Recovery", () => {
         const oneHourAgo = formatDbDatetime(new Date(Date.now() - 3600_000));
         const now = formatDbDatetime(new Date());
         await dbHelper.execute(
-            `INSERT INTO record (user_id, model_id, status, start_at, created_at, updated_at)
-             VALUES (${testUserId}, ${hangBodyModelId}, 'processing', '${oneHourAgo}', '${now}', '${now}')`,
+            `INSERT INTO record (user_id, model_id, status, tenant_id, start_at, created_at, updated_at)
+             VALUES (${testUserId}, ${hangBodyModelId}, 'processing', (SELECT id FROM tenant WHERE name = 'main'), '${oneHourAgo}', '${now}', '${now}')`,
         );
 
         const recoverResponse = await requestHelper.post(

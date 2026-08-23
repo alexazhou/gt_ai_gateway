@@ -21,7 +21,14 @@ const CONFIG_DEFAULTS: Record<string, string> = {
     [ConfigKey.UPSTREAM_NON_STREAM_TIMEOUT_MS]: "180000",
     [ConfigKey.UPSTREAM_STREAM_IDLE_TIMEOUT_MS]: "180000",
     [ConfigKey.ORPHAN_RECOVER_THRESHOLD_MS]: "600000",
+    // 多租户隔离默认关闭（存量单租户部署迁移后行为与迁移前一致）
+    [ConfigKey.MULTI_TENANT_ENABLED]: "false",
 };
+
+/** 多租户隔离是否开启（false = 逻辑单租户，所有请求固定 main） */
+async function isMultiTenantEnabled(): Promise<boolean> {
+    return (await getConfig(ConfigKey.MULTI_TENANT_ENABLED)).getBoolean();
+}
 
 function getDefault(name: string): string {
     return CONFIG_DEFAULTS[name] ?? "";
@@ -129,4 +136,5 @@ export default {
     updateAll,
     clearCache,
     isModuleBillingEnabled,
+    isMultiTenantEnabled,
 };

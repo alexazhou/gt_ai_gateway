@@ -108,6 +108,9 @@ export enum UserStatus {
 
 export const ROOT_USER_ID = -1;
 
+// 主租户名：迁移生成、不可删除；多租户隔离关闭时所有请求固定落入该租户
+export const DEFAULT_TENANT_NAME = "main";
+
 export enum ConfigKey {
     CCH_REWRITE_ENABLED = "cch_rewrite_enabled",
     RESPONSES_PROMPT_CACHE_KEY_ENABLED = "responses_prompt_cache_key_enabled",
@@ -129,4 +132,6 @@ export enum ConfigKey {
     UPSTREAM_STREAM_IDLE_TIMEOUT_MS = "upstream_stream_idle_timeout_ms",
     // 孤儿记录回收阈值，距 start_at 超过该值且未结束的记录视为孤儿（默认 10 分钟）
     ORPHAN_RECOVER_THRESHOLD_MS = "orphan_recover_threshold_ms",
+    // 多租户隔离开关：false = 逻辑单租户（所有请求固定 main）；true = 完整多租户隔离
+    MULTI_TENANT_ENABLED = "multi_tenant_enabled",
 }

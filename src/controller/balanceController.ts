@@ -3,6 +3,7 @@ import rechargeRecordManager from "../manager/rechargeRecordManager";
 import { parsePaginationQuery } from "../util/paginationUtil";
 
 async function listRechargeRecords(c: Context) {
+    const scope = c.get("tenantScope")!;
     const query = c.req.query();
     const userId = query.user_id ? parseInt(query.user_id, 10) : undefined;
     const type = query.type;
@@ -14,7 +15,7 @@ async function listRechargeRecords(c: Context) {
             type,
             limit: pageSize,
             offset,
-        });
+        }, scope.tenantId);
         return c.json(records);
     } catch (error: any) {
         console.error("[balanceController] Error listing recharge records:", error);
@@ -26,6 +27,7 @@ async function listRechargeRecords(c: Context) {
 }
 
 async function getRechargeRecord(c: Context) {
+    const scope = c.get("tenantScope")!;
     const id = c.req.param("id");
     const recordId = parseInt(id, 10);
 
@@ -34,7 +36,7 @@ async function getRechargeRecord(c: Context) {
     }
 
     try {
-        const record = await rechargeRecordManager.getRechargeRecord(recordId);
+        const record = await rechargeRecordManager.getRechargeRecord(recordId, scope.tenantId);
         if (!record) {
             return c.json({ error: "Recharge record not found" }, 404);
         }

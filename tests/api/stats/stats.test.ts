@@ -7,6 +7,7 @@ let adminToken: string;
 
 // 构造 record 插入语句，created_at/updated_at 按驱动生成：
 // sqlite 用 datetime('now', '-N day')，mysql 用 NOW() - INTERVAL N DAY
+// tenant_id 落 main 主租户（多租户隔离：统计按当前视角租户过滤）
 async function insertRecords(rows: [number, number, string, number][]): Promise<void> {
     const isMysql = process.env.DB_DRIVER === "mysql";
     const values = rows
@@ -19,11 +20,11 @@ async function insertRecords(rows: [number, number, string, number][]): Promise<
                     : isMysql
                         ? `NOW() - INTERVAL ${dayOffset} DAY`
                         : `datetime('now', '-${dayOffset} day')`;
-            return `(${u}, ${m}, '${s}', ${dt}, ${dt})`;
+            return `(${u}, ${m}, '${s}', (SELECT id FROM tenant WHERE name = 'main'), ${dt}, ${dt})`;
         })
         .join(",\n");
     await dbHelper.execute(
-        `INSERT INTO record (user_id, model_id, status, created_at, updated_at)\nVALUES\n${values}`,
+        `INSERT INTO record (user_id, model_id, status, tenant_id, created_at, updated_at)\nVALUES\n${values}`,
     );
 }
 
