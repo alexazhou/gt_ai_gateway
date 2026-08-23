@@ -9,7 +9,7 @@ export enum FailedCode {
     CLIENT_DISCONNECTED = "client_disconnected",
     UPSTREAM_DISCONNECTED = "upstream_disconnected",
     STREAM_INCOMPLETE = "stream_incomplete",
-    UPSTREAM_ERROR = "upstream_error",
+    UPSTREAM_PARSE_ERROR = "upstream_parse_error",
     NO_AVAILABLE_UPSTREAM = "no_available_upstream",
     INSUFFICIENT_BALANCE = "insufficient_balance",
     // 上游在响应头/响应体阶段僵死（长时间无数据），触发超时兜底

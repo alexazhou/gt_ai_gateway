@@ -121,7 +121,7 @@ async function runSSELoop(
                     }
 
                     if (accumulator.isErrored()) {
-                        if (!failedCode) failedCode = FailedCode.UPSTREAM_ERROR;
+                        if (!failedCode) failedCode = FailedCode.UPSTREAM_PARSE_ERROR;
                         streamErrorData = accumulator.getError()
                             ?? { event: clientEvent.event, data: clientEvent.data };
                     }
@@ -233,18 +233,18 @@ function finalizeStreamResult(
             return;
         }
 
-        if (failedCode === FailedCode.UPSTREAM_ERROR || accumulator.isErrored()) {
+        if (failedCode === FailedCode.UPSTREAM_PARSE_ERROR || accumulator.isErrored()) {
             const errorData = accumulator.getError() ?? streamErrorData;
             await recordService.update(record.id, {
                 status: SgRecordStatus.FAILED,
-                failed_code: FailedCode.UPSTREAM_ERROR,
+                failed_code: FailedCode.UPSTREAM_PARSE_ERROR,
                 response_data: errorData !== null && typeof errorData !== "string"
                     ? JSON.stringify(errorData) : null,
                 end_at: new Date(),
             });
             await requestActivityService.append(record.id, RequestActivityStage.RESULT, "上游返回错误", {
                 status: SgRecordStatus.FAILED,
-                failed_code: FailedCode.UPSTREAM_ERROR,
+                failed_code: FailedCode.UPSTREAM_PARSE_ERROR,
             }, ActivityLevel.ERROR);
             return;
         }
