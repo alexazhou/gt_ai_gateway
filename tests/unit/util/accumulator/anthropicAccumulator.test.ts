@@ -109,12 +109,13 @@ describe("AnthropicAccumulator stream state", () => {
         expect(usage.cache_write_tokens).toBe(15);
     });
 
-    it("ignores invalid JSON payloads without changing state", () => {
+    it("marks parse failure on invalid JSON payloads", () => {
         const acc = new anthropicAccumulator.AnthropicAccumulator();
         acc.addEvent({ data: "this is not json", event: "message_start" });
 
         expect(acc.isCompleted()).toBe(false);
-        expect(acc.isErrored()).toBe(false);
+        expect(acc.isErrored()).toBe(true);
+        expect(acc.isParseFailed()).toBe(true);
         expect(acc.isOutputStarted()).toBe(false);
         expect(acc.getError()).toBeNull();
     });

@@ -2,6 +2,7 @@ import { Context } from "hono";
 import { streamSSE, SSEStreamingApi } from "hono/streaming";
 import { StatusCode } from "hono/utils/http-status";
 import type { WriteStream } from "fs";
+import type { ProtocolStreamEvent } from "../util/protocolConverter/protocolTypes";
 import { SgModel } from "../model/sgModel";
 import { SgUser } from "../model/sgUser";
 import { SgRecord } from "../model/sgRecord";
@@ -45,6 +46,32 @@ const SSE_LOOP_LOG_PREFIX = "[responseHandlerService]";
 // ====================================================================
 // 内部方法
 // ====================================================================
+
+/**
+ * 向客户端写入一个事件块：
+ * - 心跳注释块（comment 有值）→ stream.write 原样透传（writeSSE 只能输出 data: 行，注释需原样写）
+ * - 数据事件 → writeSSE 输出 data:/event:/id:
+ * 任一路写失败都视为客户端断开，统一包成 ClientWriteError 由外层 catch 按类型归类。
+ */
+async function writeEventToClient(
+    stream: SSEStreamingApi,
+    event: ProtocolStreamEvent & { comment?: string },
+): Promise<void> {
+    try {
+        if (event.comment) {
+            await stream.write(event.comment + "\n\n");
+        } else {
+            await stream.writeSSE({
+                data: event.data,
+                event: event.event,
+                id: event.id,
+            });
+        }
+    } catch (e: any) {
+        throw new customError.ClientWriteError(e);
+    }
+}
+
 
 /**
  * 消费上游 SSE 流：decode → 拆分事件 → 协议转换 → 累加 → 实时转发给客户端。
@@ -92,6 +119,12 @@ async function runSSELoop(
             buffer = splitResult.remainingBuffer;
 
             for (const upstreamEvent of splitResult.events) {
+                // 心跳等注释事件：无 data、不做协议转换与累加，原样透传保持下游 SSE 连接活跃
+                if (upstreamEvent.comment) {
+                    await writeEventToClient(stream, upstreamEvent);
+                    continue;
+                }
+
                 const clientEvents = opts.converter
                     ? opts.converter.convertStreamEvent(upstreamEvent.data, upstreamEvent.event, upstreamEvent.id)
                     : [upstreamEvent];
@@ -111,16 +144,7 @@ async function runSSELoop(
                         break;
                     }
 
-                    // writeSSE 抛错即客户端断开：包成专用错误，由外层 catch 按类型归类
-                    try {
-                        await stream.writeSSE({
-                            data: clientEvent.data,
-                            event: clientEvent.event,
-                            id: clientEvent.id,
-                        });
-                    } catch (e: any) {
-                        throw new customError.ClientWriteError(e);
-                    }
+                    await writeEventToClient(stream, clientEvent);
                 }
 
                 if (failedCode !== null) break;

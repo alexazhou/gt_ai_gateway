@@ -239,6 +239,8 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleOpenAIStreamTrickle(req, res);
     } else if (url.includes("/chat/completions/bad-data")) {
         handleOpenAIStreamBadData(req, res);
+    } else if (url.includes("/chat/completions/heartbeat")) {
+        handleOpenAIStreamHeartbeat(req, res);
     } else if (url.includes("/chat/completions/error")) {
         handleOpenAIChatError(req, res);
     } else if (url.includes("/chat/completions/unavailable")) {
@@ -1431,6 +1433,40 @@ function handleOpenAIStreamBadData(req: IncomingMessage, res: ServerResponse): v
             Connection: "keep-alive",
         });
         res.write("data: this is not valid json\n\n");
+        res.end();
+    });
+}
+
+
+/**
+ * OpenAI 流式：CRLF 帧 + 数据块之间夹注释行心跳（: hb）。
+ * 用于验证网关兼容 \r\n 换行，并把心跳原样透传给下游客户端做 keep-alive。
+ */
+function handleOpenAIStreamHeartbeat(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+
+        const makeChunk = (i: number, content: string) => ({
+            id: `chatcmpl-${Date.now()}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: data.model || "gpt-3.5-turbo",
+            choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }],
+        });
+
+        res.write(`data: ${JSON.stringify(makeChunk(0, "Hello"))}\r\n\r\n`);
+        res.write(": hb\r\n\r\n");
+        res.write(`data: ${JSON.stringify(makeChunk(1, " world"))}\r\n\r\n`);
+        res.write(": hb\r\n\r\n");
+        res.write("data: [DONE]\r\n\r\n");
         res.end();
     });
 }

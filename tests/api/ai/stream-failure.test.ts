@@ -279,6 +279,61 @@ describe("Stream Failure Handling", () => {
             expect(record.status).toBe("success");
             expect(record.failed_code).toBeNull();
         }, 15000);
+
+        it("should relay upstream heartbeat comment lines to the client (CRLF stream)", async () => {
+            const vendor = await requestHelper.post(
+                "/vendor/create.json",
+                {
+                    type: "other",
+                    name: "Mock OpenAI Heartbeat",
+                    token: "test-token",
+                    urls: { openai: `${MOCK_BASE}/chat/completions/heartbeat` },
+                },
+                adminToken,
+            );
+            const heartbeatModelName = `openai-heartbeat-${Date.now()}`;
+            await requestHelper.post(
+                "/model/create.json",
+                modelFixtures.createRandomModel(vendor.body.id, heartbeatModelName),
+                adminToken,
+            );
+
+            const baseUrl = config.SERVER_CONFIG.baseUrl;
+            const res = await fetch(`${baseUrl}/llm/v1/chat/completions`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${testUserToken}`,
+                },
+                body: JSON.stringify({
+                    model: heartbeatModelName,
+                    messages: [{ role: "user", content: "hi" }],
+                    stream: true,
+                }),
+            } as any);
+            expect(res.status).toBe(200);
+
+            const reader = res.body!.getReader();
+            const decoder = new TextDecoder();
+            let sseText = "";
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                sseText += decoder.decode(value, { stream: true });
+            }
+
+            // CRLF 帧被正确解析：数据事件正常转发
+            expect(sseText).toContain("\"content\":\"Hello\"");
+            expect(sseText).toContain("\"content\":\" world\"");
+            expect(sseText).toContain("data: [DONE]");
+            // 心跳注释行原样透传到下游客户端
+            expect(sseText).toContain(": hb\n\n");
+
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
+            expect(record.status).toBe("success");
+            expect(record.failed_code).toBeNull();
+        }, 15000);
     });
 
 

@@ -101,12 +101,13 @@ describe("ResponsesAccumulator", () => {
     });
 
     describe("stream state", () => {
-        it("ignores invalid JSON payloads without changing state", () => {
+        it("marks parse failure on invalid JSON payloads", () => {
             const acc = new responsesAccumulator.ResponsesAccumulator();
             acc.addEvent({ data: "this is not json" });
 
             expect(acc.isCompleted()).toBe(false);
-            expect(acc.isErrored()).toBe(false);
+            expect(acc.isErrored()).toBe(true);
+            expect(acc.isParseFailed()).toBe(true);
             expect(acc.isOutputStarted()).toBe(false);
             expect(acc.getError()).toBeNull();
         });

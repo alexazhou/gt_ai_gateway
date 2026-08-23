@@ -41,4 +41,38 @@ describe("sseEventUtil", () => {
         expect(sseEventUtil.parseEvent("event: ping")).toBeNull();
         expect(sseEventUtil.parseEvent("data:   ")).toBeNull();
     });
+
+    it("should split CRLF-framed events (\\r\\n line endings)", () => {
+        const result = sseEventUtil.splitEvents("data: {\"a\":1}\r\n\r\ndata: {\"b\":2}\r\n\r\n");
+
+        expect(result.events).toEqual([
+            { data: "{\"a\":1}" },
+            { data: "{\"b\":2}" },
+        ]);
+        expect(result.remainingBuffer).toBe("");
+    });
+
+    it("should parse comment-only lines as heartbeat events", () => {
+        expect(sseEventUtil.parseEvent(": ping")).toEqual({ data: "", comment: ": ping" });
+        expect(sseEventUtil.parseEvent(": ping\n: hb")).toEqual({ data: "", comment: ": ping\n: hb" });
+    });
+
+    it("should keep heartbeat comment events and split CRLF between real events", () => {
+        const result = sseEventUtil.splitEvents(
+            "data: {\"a\":1}\r\n\r\n: hb\r\n\r\ndata: {\"b\":2}\r\n\r\n",
+        );
+
+        expect(result.events).toEqual([
+            { data: "{\"a\":1}" },
+            { data: "", comment: ": hb" },
+            { data: "{\"b\":2}" },
+        ]);
+        expect(result.remainingBuffer).toBe("");
+    });
+
+    it("should ignore comment lines inside data events", () => {
+        const event = sseEventUtil.parseEvent("data: hello\n: hb");
+
+        expect(event).toEqual({ data: "hello" });
+    });
 });
