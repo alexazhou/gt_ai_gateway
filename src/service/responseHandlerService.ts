@@ -61,7 +61,7 @@ async function runSSELoop(
     opts: RunSSELoopOptions,
 ): Promise<StreamRunResult> {
     const { accumulator } = opts;
-    const reader = upstreamRes.body!.getReader();
+    const upstreamReader = upstreamRes.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     let eventCount = 0;
@@ -73,21 +73,19 @@ async function runSSELoop(
     const idleTimeoutMs = await configService.getNumber(ConfigKey.UPSTREAM_STREAM_IDLE_TIMEOUT_MS);
 
     // 客户端断开感知：直接订阅客户端信号，已断开则立即触发
-    const unsubClient = abortTimeoutUtil.onSignalAbort(c.req.raw.signal, () => {
+    const unsubscribeClientAbort = abortTimeoutUtil.onSignalAbort(c.req.raw.signal, () => {
         if (!failedCode) failedCode = FailedCode.CLIENT_DISCONNECTED;
-        reader.cancel().catch(() => {});
+        upstreamReader.cancel().catch(() => {});
     });
 
     try {
         while (true) {
             const result = await abortTimeoutUtil.raceWithTimeout(
-                reader.read(),
+                upstreamReader.read(),
                 idleTimeoutMs,
                 () => {
-                    if (failedCode !== FailedCode.CLIENT_DISCONNECTED) {
-                        failedCode = FailedCode.UPSTREAM_TIMEOUT;
-                    }
-                    reader.cancel().catch(() => {});
+                    if (!failedCode) failedCode = FailedCode.UPSTREAM_TIMEOUT;
+                    upstreamReader.cancel().catch(() => {});
                 },
             );
             if (result.done) break;
@@ -123,13 +121,7 @@ async function runSSELoop(
                     }
 
                     if (accumulator.isErrored()) {
-                        if (
-                            failedCode !== FailedCode.CLIENT_DISCONNECTED
-                            && failedCode !== FailedCode.UPSTREAM_DISCONNECTED
-                            && failedCode !== FailedCode.UPSTREAM_TIMEOUT
-                        ) {
-                            failedCode = FailedCode.UPSTREAM_ERROR;
-                        }
+                        if (!failedCode) failedCode = FailedCode.UPSTREAM_ERROR;
                         streamErrorData = accumulator.getError()
                             ?? { event: clientEvent.event, data: clientEvent.data };
                     }
@@ -154,20 +146,15 @@ async function runSSELoop(
             if (clientDisconnected) break;
         }
     } catch (e: any) {
-        // 统一的收尾：空闲超时（onTimeout 已置位并 cancel）跳过日志，其余（客户端断开 /
-        // 上游读取错误 / 循环体异常）记日志；已有失败码不被覆盖。
+        // 统一的收尾：空闲超时是预期停顿，跳过日志；其余（客户端断开 / 上游读取错误 /
+        // 循环体异常）记日志。失败码秉持「先到先得」：一旦记录就不再覆盖。
         if (failedCode !== FailedCode.UPSTREAM_TIMEOUT) {
             console.error(`${SSE_LOOP_LOG_PREFIX} Stream error:`, e);
         }
-        if (
-            failedCode !== FailedCode.CLIENT_DISCONNECTED
-            && failedCode !== FailedCode.UPSTREAM_TIMEOUT
-        ) {
-            failedCode = FailedCode.UPSTREAM_DISCONNECTED;
-        }
+        if (!failedCode) failedCode = FailedCode.UPSTREAM_DISCONNECTED;
     }
 
-    unsubClient();
+    unsubscribeClientAbort();
     return { accumulator, firstTokenTime, failedCode, streamErrorData, eventCount };
 }
 
