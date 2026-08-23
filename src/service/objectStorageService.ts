@@ -2,7 +2,7 @@ import ormService from "./ormService";
 import configService from "./configService";
 import storageManager from "../manager/storageManager";
 import { ConfigKey, RecordPayloadStorage } from "../constants";
-import customError from "../util/customErrorUtil";
+import customError from "../customError";
 
 let r2Bucket: R2Bucket | null = null;
 

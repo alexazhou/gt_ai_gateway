@@ -8,7 +8,7 @@ import { OpenAIToAnthropicConverter } from "../../../src/util/protocolConverter/
 import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterFactory";
 import { BaseConverter } from "../../../src/util/protocolConverter/BaseConverter";
 import { ApiFormat } from "../../../src/constants";
-import customError from "../../../src/util/customErrorUtil";
+import customError from "../../../src/customError";
 import type { ProtocolStreamEvent } from "../../../src/util/protocolConverter/protocolTypes";
 
 function parseStreamEventData(events: ProtocolStreamEvent[], index: number = 0): any {

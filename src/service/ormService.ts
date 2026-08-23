@@ -3,7 +3,7 @@ import { DatabaseAdapter, D1Adapter, SQLiteAdapter, MySQLAdapter } from "../util
 import { MySQLDBAdapter } from "../util/db/mysqlDBAdapter";
 import { SQLiteDBAdapter } from "../util/db/sqliteDBAdapter";
 import dbMigrationService from "./dbMigrationService";
-import customError from "../util/customErrorUtil";
+import customError from "../customError";
 import { RunMode } from "../constants";
 
 interface ORMOptions {

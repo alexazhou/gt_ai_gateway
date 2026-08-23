@@ -5,7 +5,7 @@ import vendorService from "../service/vendorService";
 import vendorDefaultUrls from "../util/vendorDefaultUrlsUtil";
 import vendorTestService from "../service/vendorTestService";
 import modelManager from "../manager/modelManager";
-import customError from "../util/customErrorUtil";
+import customError from "../customError";
 import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
 
 

@@ -22,7 +22,7 @@ import objectStorageService from "./service/objectStorageService";
 import authMiddleware from "./middleware/authMiddleware";
 import llmApiMiddleware from "./middleware/llmApiMiddleware";
 import corsMiddleware from "./middleware/corsMiddleware";
-import customError from "./util/customErrorUtil";
+import customError from "./customError";
 
 interface Env {
     DB: D1Database;

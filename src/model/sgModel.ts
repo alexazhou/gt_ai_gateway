@@ -1,7 +1,7 @@
 import { CastsAttributes, Model } from "sutando";
 import { inspect, InspectOptions } from "util";
 import { ModelRoutingMode, MIN_MODEL_PRICE, PRICE_UNIT_TOKENS } from "../constants";
-import customError from "../util/customErrorUtil";
+import customError from "../customError";
 
 class ModelUpstreamConfig {
     vendor_id: number = 0;

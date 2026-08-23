@@ -1,5 +1,5 @@
 import { Context } from "hono";
-import { ApiFormat } from "../constants";
+import { ApiFormat } from "./constants";
 
 // 使用 Symbol 标记来识别 AppError 实例
 const APP_ERROR_SYMBOL = Symbol.for("AppError");

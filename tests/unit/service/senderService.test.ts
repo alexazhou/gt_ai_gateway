@@ -11,7 +11,7 @@ import usageUtils from "../../../src/util/protocol/usageUtil";
 import protocolUtils from "../../../src/util/protocol/protocolUtil";
 import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterFactory";
 import { ApiFormat } from "../../../src/constants";
-import customError from "../../../src/util/customErrorUtil";
+import customError from "../../../src/customError";
 
 function convertRequestBody(body: string, clientFormat: ApiFormat, upstreamFormat: ApiFormat): string {
     if (clientFormat !== upstreamFormat && (clientFormat === ApiFormat.RESPONSES || upstreamFormat === ApiFormat.RESPONSES)) {

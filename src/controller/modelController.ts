@@ -5,7 +5,7 @@ import modelManager from "../manager/modelManager";
 import modelService from "../service/modelService";
 import sender from "../service/senderService";
 import userService from "../service/userService";
-import customError from "../util/customErrorUtil";
+import customError from "../customError";
 import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
 
 

@@ -1,6 +1,6 @@
 import { ApiFormat } from "../constants";
 import { SgModel } from "../model/sgModel";
-import customError from "../util/customErrorUtil";
+import customError from "../customError";
 import modelManager from "../manager/modelManager";
 import recordService from "./recordService";
 

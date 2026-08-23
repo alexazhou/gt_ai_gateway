@@ -1,6 +1,6 @@
 import { SgModel } from "../model/sgModel";
 import modelManager from "../manager/modelManager";
-import customError from "../util/customErrorUtil";
+import customError from "../customError";
 import routingService from "./routingService/core";
 
 

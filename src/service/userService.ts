@@ -3,7 +3,7 @@ import { ROOT_USER_ID, UserType, BALANCE_SCALE } from "../constants";
 import userManager from "../manager/userManager";
 import rechargeRecordManager from "../manager/rechargeRecordManager";
 import configService from "./configService";
-import customError from "../util/customErrorUtil";
+import customError from "../customError";
 
 // 元 → 整数微元（DB 余额存整数微元，避免浮点）
 function toUnits(yuan: number): number {

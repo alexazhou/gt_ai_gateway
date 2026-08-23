@@ -1,6 +1,6 @@
 import { SgVendor } from "../model/sgVendor";
 import { ApiFormat } from "../constants";
-import customError from "../util/customErrorUtil";
+import customError from "../customError";
 import vendorManager from "../manager/vendorManager";
 
 

@@ -20,7 +20,7 @@ import anthropicAccumulator from "../util/accumulator/anthropicAccumulator";
 import responsesAccumulator from "../util/accumulator/responsesAccumulator";
 import sseEventUtil from "../util/protocol/sseEventUtil";
 import runInBackgroundUtil from "../util/runInBackgroundUtil";
-import customError from "../util/customErrorUtil";
+import customError from "../customError";
 
 
 // ====================================================================

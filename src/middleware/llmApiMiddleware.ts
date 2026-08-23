@@ -3,7 +3,7 @@ import { ApiFormat, UserStatus } from "../constants";
 import userService from "../service/userService";
 import llmRequestService from "../service/llmRequestService";
 import { SgUser } from "../model/sgUser";
-import customError from "../util/customErrorUtil";
+import customError from "../customError";
 
 
 function extractLlmToken(c: Context): string {

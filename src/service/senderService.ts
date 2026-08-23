@@ -10,7 +10,7 @@ import pluginService from "./pluginService";
 import hostService from "./hostService";
 import { ConverterFactory } from "../util/protocolConverter/ConverterFactory";
 import type { BaseConverter } from "../util/protocolConverter/BaseConverter";
-import customError from "../util/customErrorUtil";
+import customError from "../customError";
 import streamLogService from "./streamLogService";
 import responseHandlerService from "./responseHandlerService";
 import fetchUtil from "../util/fetchUtil";

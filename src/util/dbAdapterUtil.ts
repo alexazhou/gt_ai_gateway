@@ -1,4 +1,4 @@
-import customError from "./customErrorUtil";
+import customError from "../customError";
 
 // 数据库适配器接口
 export interface DatabaseAdapter {
