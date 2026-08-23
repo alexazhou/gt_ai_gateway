@@ -18,8 +18,8 @@ async function dashboardStats(c: Context) {
     const tenantCond = ` AND tenant_id = ${scope.tenantId}`;
 
     // 拆成两条 SQL：
-    // 1. 今日数据：WHERE 过滤后走 idx_record_created_at 索引，只回表今天的少量行
-    // 2. 总请求数：单独 COUNT(*) 走覆盖索引，不读主表
+    // 1. 今日数据：WHERE 过滤后走 idx_record_tenant_created_at 索引，只回表今天的少量行
+    // 2. 总请求数：单独 COUNT(*) 走 idx_record_tenant_id 覆盖索引，不读主表
     const todaySql = `
         SELECT
             COUNT(*) AS today_requests,
