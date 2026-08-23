@@ -115,6 +115,17 @@ const formattedValues = computed(() => {
     display: inline-flex;
     align-items: center;
     position: relative;
+    padding-bottom: 2px;
+}
+
+.sv-group-header::after {
+    content: '';
+    position: absolute;
+    left: 12px;
+    top: 20px;
+    bottom: 0;
+    width: 0;
+    border-left: 1.5px solid var(--tree-line-color);
 }
 
 /* 分组 Tag (AND / OR) */

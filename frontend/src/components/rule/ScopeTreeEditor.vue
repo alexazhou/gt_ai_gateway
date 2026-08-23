@@ -1,5 +1,5 @@
 <template>
-    <div class="tree-node">
+    <div class="tree-node" :class="{ 'is-group': isGroup }">
         <div class="node-row">
             <a-select
                 :value="nodeKind"
@@ -164,13 +164,25 @@ function removeChild(index: number): void {
 }
 
 .node-row {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 8px;
     /* 不换行：维度/运算符/value 保持同一行（value 用 flex: 1 填满剩余空间） */
     flex-wrap: nowrap;
-    padding: 6px 8px;
+    padding: 4px 8px;
     border-radius: 6px;
+}
+
+/* 分组节点延伸至子节点区域的连线段 */
+.tree-node.is-group > .node-row::after {
+    content: '';
+    position: absolute;
+    left: 20px;
+    top: 28px;
+    bottom: 0;
+    width: 0;
+    border-left: 1.5px solid var(--tree-line-color);
 }
 
 /* 树形子节点：左竖线引导 + 缩进，形成分支视觉 */
@@ -180,17 +192,18 @@ function removeChild(index: number): void {
     padding-left: 16px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
 }
 
 .tree-child-row {
     position: relative;
     display: flex;
-    align-items: center;
+    align-items: stretch;
     gap: 8px;
-    padding: 2px 0;
+    padding: 0;
+    margin: 0;
 }
 
+/* 垂直主干线：贯穿子节点项（与相邻行无缝相接） */
 .tree-child-row::before {
     content: '';
     position: absolute;
@@ -201,19 +214,21 @@ function removeChild(index: number): void {
     border-left: 1.5px solid var(--tree-line-color);
 }
 
+/* 水平分支线：指向子节点行中心 */
 .tree-child-row::after {
     content: '';
     position: absolute;
     left: -16px;
-    top: 18px;
+    top: 16px;
     width: 12px;
     height: 0;
     border-top: 1.5px solid var(--tree-line-color);
 }
 
+/* 最后一个子节点：垂直线精确止于水平分支线，形成 └── 拐角 */
 .tree-child-row:last-child::before {
     bottom: auto;
-    height: 18px;
+    height: 16px;
 }
 
 .node-type-select {
