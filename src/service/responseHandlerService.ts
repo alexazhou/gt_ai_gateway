@@ -18,8 +18,8 @@ import usageUtils, { type Dict } from "../util/protocol/usageUtil";
 import openaiChatAccumulator from "../util/accumulator/openaiChatAccumulator";
 import anthropicAccumulator from "../util/accumulator/anthropicAccumulator";
 import responsesAccumulator from "../util/accumulator/responsesAccumulator";
-import sseEvent from "../util/protocol/sseEventUtil";
-import { runInBackground } from "../util/runInBackgroundUtil";
+import sseEventUtil from "../util/protocol/sseEventUtil";
+import runInBackgroundUtil from "../util/runInBackgroundUtil";
 import customError from "../util/customErrorUtil";
 
 
@@ -80,39 +80,23 @@ async function runSSELoop(
 
     try {
         while (true) {
-            let done: boolean;
-            let value: Uint8Array | undefined;
-            try {
-                const result = await abortTimeoutUtil.raceWithTimeout(
-                    reader.read(),
-                    idleTimeoutMs,
-                    () => {
-                        if (failedCode !== FailedCode.CLIENT_DISCONNECTED) {
-                            failedCode = FailedCode.UPSTREAM_TIMEOUT;
-                        }
-                        reader.cancel().catch(() => {});
-                    },
-                );
-                done = result.done;
-                value = result.value;
-            } catch (e: any) {
-                if (failedCode === FailedCode.UPSTREAM_TIMEOUT) {
-                    // 空闲超时：onTimeout 已置位并 cancel，不再覆盖为 UPSTREAM_DISCONNECTED
-                    break;
-                }
-                console.error(`${SSE_LOOP_LOG_PREFIX} Upstream read error:`, e);
-                if (failedCode !== FailedCode.CLIENT_DISCONNECTED) {
-                    failedCode = FailedCode.UPSTREAM_DISCONNECTED;
-                }
-                break;
-            }
-            if (done) break;
+            const result = await abortTimeoutUtil.raceWithTimeout(
+                reader.read(),
+                idleTimeoutMs,
+                () => {
+                    if (failedCode !== FailedCode.CLIENT_DISCONNECTED) {
+                        failedCode = FailedCode.UPSTREAM_TIMEOUT;
+                    }
+                    reader.cancel().catch(() => {});
+                },
+            );
+            if (result.done) break;
 
-            const chunk = decoder.decode(value, { stream: true });
+            const chunk = decoder.decode(result.value, { stream: true });
             streamLogService.appendStreamLog(logStream, chunk);
             buffer += chunk;
 
-            const splitResult = sseEvent.splitEvents(buffer);
+            const splitResult = sseEventUtil.splitEvents(buffer);
             const events = splitResult.events;
             buffer = splitResult.remainingBuffer;
 
@@ -122,7 +106,7 @@ async function runSSELoop(
 
                 eventCount++;
 
-                const parsedEvent = sseEvent.parseEvent(event);
+                const parsedEvent = sseEventUtil.parseEvent(event);
                 if (!parsedEvent) continue;
 
                 const clientEvents = opts.converter
@@ -170,7 +154,11 @@ async function runSSELoop(
             if (clientDisconnected) break;
         }
     } catch (e: any) {
-        console.error(`${SSE_LOOP_LOG_PREFIX} Unexpected stream error:`, e);
+        // 统一的收尾：空闲超时（onTimeout 已置位并 cancel）跳过日志，其余（客户端断开 /
+        // 上游读取错误 / 循环体异常）记日志；已有失败码不被覆盖。
+        if (failedCode !== FailedCode.UPSTREAM_TIMEOUT) {
+            console.error(`${SSE_LOOP_LOG_PREFIX} Stream error:`, e);
+        }
         if (
             failedCode !== FailedCode.CLIENT_DISCONNECTED
             && failedCode !== FailedCode.UPSTREAM_TIMEOUT
@@ -197,7 +185,7 @@ function finalizeStreamResult(
 ): void {
     const { accumulator, firstTokenTime, failedCode, streamErrorData } = state;
 
-    runInBackground(c, async () => {
+    runInBackgroundUtil.runInBackground(c, async () => {
         // 响应已完整接收（[DONE] / message_stop / response.completed）时优先视为成功：
         // 即使随后客户端或上游连接断开，也可能只是客户端拿到完整结果后提前关闭了连接
         if (accumulator.isCompleted()) {

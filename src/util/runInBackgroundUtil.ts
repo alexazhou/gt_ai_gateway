@@ -4,7 +4,7 @@ import { Context } from "hono";
  * Safely execute background tasks after the response finishes.
  * Wraps Cloudflare Worker's executionCtx.waitUntil, and gracefully falls back in environments without it (e.g. Node.js).
  */
-export function runInBackground(c: Context, task: () => Promise<void>) {
+function runInBackground(c: Context, task: () => Promise<void>) {
     let waitUntilFn: ((promise: Promise<unknown>) => void) | undefined;
     try {
         if (c.executionCtx && typeof c.executionCtx.waitUntil === "function") {
@@ -20,3 +20,7 @@ export function runInBackground(c: Context, task: () => Promise<void>) {
         task().catch(e => console.error("[runInBackground] Error in background task:", e));
     }
 }
+
+export default {
+    runInBackground,
+};

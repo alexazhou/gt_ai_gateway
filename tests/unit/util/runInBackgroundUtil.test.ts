@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { runInBackground } from "../../../src/util/runInBackgroundUtil";
+import runInBackgroundUtil from "../../../src/util/runInBackgroundUtil";
 import { Context } from "hono";
 
 describe("runInBackgroundUtil", () => {
@@ -24,7 +24,7 @@ describe("runInBackgroundUtil", () => {
         const taskPromise = Promise.resolve();
         const mockTask = vi.fn().mockReturnValue(taskPromise);
 
-        runInBackground(mockContext, mockTask);
+        runInBackgroundUtil.runInBackground(mockContext, mockTask);
 
         expect(mockTask).toHaveBeenCalledTimes(1);
         expect(waitUntilMock).toHaveBeenCalledTimes(1);
@@ -37,7 +37,7 @@ describe("runInBackgroundUtil", () => {
         const taskPromise = Promise.resolve();
         const mockTask = vi.fn().mockReturnValue(taskPromise);
 
-        runInBackground(mockContext, mockTask);
+        runInBackgroundUtil.runInBackground(mockContext, mockTask);
 
         expect(mockTask).toHaveBeenCalledTimes(1);
         
@@ -58,7 +58,7 @@ describe("runInBackgroundUtil", () => {
         const mockTask = vi.fn().mockReturnValue(taskPromise);
 
         // This should not throw, it should swallow the getter error and fallback
-        expect(() => runInBackground(mockContext, mockTask)).not.toThrow();
+        expect(() => runInBackgroundUtil.runInBackground(mockContext, mockTask)).not.toThrow();
         expect(mockTask).toHaveBeenCalledTimes(1);
     });
 
@@ -69,7 +69,7 @@ describe("runInBackgroundUtil", () => {
         // Task returns a rejected promise
         const mockTask = vi.fn().mockRejectedValue(error);
 
-        runInBackground(mockContext, mockTask);
+        runInBackgroundUtil.runInBackground(mockContext, mockTask);
 
         // Wait a microtask to ensure the catch block executes
         await new Promise(resolve => setTimeout(resolve, 0));
