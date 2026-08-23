@@ -267,22 +267,25 @@ describe("Upstream Timeout & Orphan Recovery", () => {
 
 
     it("should recover stale processing records via manual scan endpoint", async () => {
-        // 不经 API 直接预置一条「已过期」的 processing 记录（start_at 一小时前，远超默认 10 分钟阈值）。
+        // 不经 API 直接预置一条「已过期」的 processing 记录（start_at 两天前，远超默认 10 分钟阈值）。
         // 时间在 JS 按应用统一格式（'YYYY-MM-DD HH:mm:ss'，同 recordManager.formatDbDatetime）算好并内联：
         //   - 避免 SQLite 专有 datetime()（MySQL 无此函数）
         //   - worker 模式的 dbHelper.execute 走 wrangler d1 CLI 子进程，该通道不接受 ? 绑定值
         //   - 保证与 recoverOrphans 的文本比较一致（where start_at < 同格式 cutoff；混入 epoch 会因
         //     SQLite TEXT/NUMERIC 亲和性失真）
+        // 取「两天前」而非一小时前：本地测试在东八区（CST）而 Worker 运行在 UTC，午夜跨天时 1 小时前的
+        // 文本时间会落在「昨天」，与 UTC 的当前日期比较产生跨时区误差；2 天前保证任何时区、任何时刻下
+        // 该文本时间都严格在过去。
         // 注：request_data / response_data 已在 migrate_0025 删除（改存对象存储），此处不写。
         const formatDbDatetime = (d: Date) => {
             const p = (n: number) => String(n).padStart(2, "0");
             return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
         };
-        const oneHourAgo = formatDbDatetime(new Date(Date.now() - 3600_000));
+        const twoDaysAgo = formatDbDatetime(new Date(Date.now() - 86400_000 * 2));
         const now = formatDbDatetime(new Date());
         await dbHelper.execute(
             `INSERT INTO record (user_id, model_id, status, tenant_id, start_at, created_at, updated_at)
-             VALUES (${testUserId}, ${hangBodyModelId}, 'processing', (SELECT id FROM tenant WHERE name = 'main'), '${oneHourAgo}', '${now}', '${now}')`,
+             VALUES (${testUserId}, ${hangBodyModelId}, 'processing', (SELECT id FROM tenant WHERE name = 'main'), '${twoDaysAgo}', '${now}', '${now}')`,
         );
 
         const recoverResponse = await requestHelper.post(
