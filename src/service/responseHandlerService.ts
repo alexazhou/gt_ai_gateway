@@ -29,23 +29,13 @@ import customError from "../customError";
 
 interface StreamRunResult {
     accumulator: AccumulatorBase;
-    firstTokenTime: number | null;
     failedCode: string | null;
-    eventCount: number;
 }
 
 
 interface RunSSELoopOptions {
     accumulator: AccumulatorBase;
     converter: BaseConverter | null;
-}
-
-// 写 SSE 到客户端失败（客户端断开）；以错误类型标识，供外层 catch 区分原因
-class ClientWriteError extends Error {
-    constructor(cause: unknown) {
-        super(cause instanceof Error ? cause.message : String(cause));
-        this.name = "ClientWriteError";
-    }
 }
 
 // 流式读循环日志前缀（runSSELoop 只被 handleStreamResponse 一处调用，直接固化）
@@ -71,9 +61,7 @@ async function runSSELoop(
     const upstreamReader = upstreamRes.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let eventCount = 0;
     let failedCode: string | null = null;
-    let firstTokenTime: number | null = null;
 
     // 相邻 chunk 空闲超时：超时置 UPSTREAM_TIMEOUT 并取消上游 body
     const idleTimeoutMs = await configService.getNumber(ConfigKey.UPSTREAM_STREAM_IDLE_TIMEOUT_MS);
@@ -104,8 +92,6 @@ async function runSSELoop(
             buffer = splitResult.remainingBuffer;
 
             for (const upstreamEvent of splitResult.events) {
-                eventCount++;
-
                 const clientEvents = opts.converter
                     ? opts.converter.convertStreamEvent(upstreamEvent.data, upstreamEvent.event, upstreamEvent.id)
                     : [upstreamEvent];
@@ -125,10 +111,6 @@ async function runSSELoop(
                         break;
                     }
 
-                    if (firstTokenTime === null && accumulator.isOutputStarted()) {
-                        firstTokenTime = Date.now();
-                    }
-
                     // writeSSE 抛错即客户端断开：包成专用错误，由外层 catch 按类型归类
                     try {
                         await stream.writeSSE({
@@ -137,7 +119,7 @@ async function runSSELoop(
                             id: clientEvent.id,
                         });
                     } catch (e: any) {
-                        throw new ClientWriteError(e);
+                        throw new customError.ClientWriteError(e);
                     }
                 }
 
@@ -152,14 +134,14 @@ async function runSSELoop(
         }
         // 未记录失败码时按错误类型区分：写客户端失败 → 客户端断开；其余 → 上游断开
         if (!failedCode) {
-            failedCode = e instanceof ClientWriteError
+            failedCode = e instanceof customError.ClientWriteError
                 ? FailedCode.CLIENT_DISCONNECTED
                 : FailedCode.UPSTREAM_DISCONNECTED;
         }
     }
 
     unsubscribeClientAbort();
-    return { accumulator, firstTokenTime, failedCode, eventCount };
+    return { accumulator, failedCode };
 }
 
 
@@ -174,7 +156,7 @@ function finalizeStreamResult(
     user: SgUser,
     state: StreamRunResult,
 ): void {
-    let { accumulator, firstTokenTime, failedCode } = state;
+    let { accumulator, failedCode } = state;
 
     runInBackgroundUtil.runInBackground(c, async () => {
         // 响应已完整接收（[DONE] / message_stop / response.completed）时优先视为成功：
@@ -186,6 +168,7 @@ function finalizeStreamResult(
             const cost = normalizedUsage
                 ? usageUtils.calculateCost(model, normalizedUsage.promptTokens, normalizedUsage.outputTokens, normalizedUsage.cacheReadTokens)
                 : 0;
+            const firstTokenTime = accumulator.getFirstTokenTime();
 
             await recordService.update(record.id, {
                 response_data: JSON.stringify(fullResponse),
@@ -378,7 +361,7 @@ export async function handleStreamResponse(
             accumulator,
             converter,
         });
-        console.log(`[responseHandlerService] Stream ended, events: ${state.eventCount}, completed: ${state.accumulator.isCompleted()}, failedCode: ${state.failedCode}`);
+        console.log(`[responseHandlerService] Stream ended, completed: ${state.accumulator.isCompleted()}, failedCode: ${state.failedCode}`);
         finalizeStreamResult(c, record, model, user, state);
         logStream?.end();
     });

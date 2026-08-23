@@ -13,6 +13,7 @@ export abstract class AccumulatorBase {
     protected error: object | null = null;
     protected parseFailed = false;
     protected outputStarted = false;
+    protected outputStartedAt: number | null = null;
 
     /**
      * 接收一条客户端 SSE 事件（协议的累积实现，子类必须实现）
@@ -54,10 +55,20 @@ export abstract class AccumulatorBase {
     }
 
     /**
-     * 标记模型已开始产出内容（子类在识别到首个输出事件时调用）
+     * 标记模型已开始产出内容（子类在识别到首个输出事件时调用）；首次触发时记录时间戳
      */
     protected markOutputStarted(): void {
-        this.outputStarted = true;
+        if (!this.outputStarted) {
+            this.outputStarted = true;
+            this.outputStartedAt = Date.now();
+        }
+    }
+
+    /**
+     * 首个输出 token 到达的时间（用于首 token 延迟）；尚未输出为 null
+     */
+    getFirstTokenTime(): number | null {
+        return this.outputStartedAt;
     }
 
     /**
@@ -104,6 +115,7 @@ export abstract class AccumulatorBase {
         this.error = null;
         this.parseFailed = false;
         this.outputStarted = false;
+        this.outputStartedAt = null;
     }
 }
 

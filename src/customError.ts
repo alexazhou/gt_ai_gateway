@@ -26,6 +26,17 @@ class NotFoundError extends AppError {
     }
 }
 
+
+/**
+ * 写 SSE 到客户端失败（客户端断开）的内部错误；供流式响应的外层 catch 按错误类型归类原因
+ */
+class ClientWriteError extends Error {
+    constructor(cause: unknown) {
+        super(cause instanceof Error ? cause.message : String(cause));
+        this.name = "ClientWriteError";
+    }
+}
+
 function buildLlmErrorResponse(err: Error | AppError, apiFormat: ApiFormat) {
     const message = err.message || "Unknown error";
     let code = "api_error";
@@ -68,5 +79,6 @@ function buildLlmErrorResponse(err: Error | AppError, apiFormat: ApiFormat) {
 export default {
     AppError,
     NotFoundError,
+    ClientWriteError,
     buildLlmErrorResponse,
 };
