@@ -33,25 +33,6 @@ export class TimeoutAbortController {
     private readonly timer: ReturnType<typeof setTimeout> | undefined;
     private readonly unsubscribeClient: () => void;
 
-    /**
-     * 订阅中止信号，统一处理「信号已中断」与「信号随后中断」两种时机：
-     * - 信号已中断（addEventListener 对已中断信号不会再触发）：立即同步执行 handler；
-     * - 否则挂监听，中断时执行 handler。
-     * 返回取消订阅函数（信号已中断时返回空操作，避免重复执行）。
-     * 由于「检查 aborted」与「挂监听」之间无异步间隙，不会重复触发。
-     */
-    private subscribeAbort(signal: AbortSignal | undefined, handler: () => void): () => void {
-        if (!signal) {
-            return () => {};
-        }
-        if (signal.aborted) {
-            handler();
-            return () => {};
-        }
-        signal.addEventListener("abort", handler);
-        return () => signal.removeEventListener("abort", handler);
-    }
-
     constructor(timeoutMs: number, clientAbortSignal: AbortSignal | undefined) {
         this.signal = this.controller.signal;
         this.clientAbortSignal = clientAbortSignal;
@@ -117,6 +98,25 @@ export class TimeoutAbortController {
             }, timeoutMs);
         });
         return Promise.race([task, timeoutReject]).finally(() => clearTimeout(timer));
+    }
+
+    /**
+     * 订阅中止信号，统一处理「信号已中断」与「信号随后中断」两种时机：
+     * - 信号已中断（addEventListener 对已中断信号不会再触发）：立即同步执行 handler；
+     * - 否则挂监听，中断时执行 handler。
+     * 返回取消订阅函数（信号已中断时返回空操作，避免重复执行）。
+     * 由于「检查 aborted」与「挂监听」之间无异步间隙，不会重复触发。
+     */
+    private subscribeAbort(signal: AbortSignal | undefined, handler: () => void): () => void {
+        if (!signal) {
+            return () => {};
+        }
+        if (signal.aborted) {
+            handler();
+            return () => {};
+        }
+        signal.addEventListener("abort", handler);
+        return () => signal.removeEventListener("abort", handler);
     }
 
     /** 清理定时器与客户端断开监听（在 finally 中调用） */
