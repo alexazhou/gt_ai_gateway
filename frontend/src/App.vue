@@ -69,6 +69,7 @@ html.dark body {
     --collapse-btn-bg: #f4f7fb;
     --collapse-btn-text: #4f5d75;
     --token-divider: #d9d9d9;
+    --tag-default-border: #d9d9d9;
     --accent-primary: #258fff;
     --accent-primary-hover: #4aa4ff;
     --accent-primary-soft: rgba(37, 143, 255, 0.16);
@@ -125,6 +126,7 @@ html.dark body {
     --collapse-btn-bg: rgba(255, 255, 255, 0.08);
     --collapse-btn-text: rgba(255, 255, 255, 0.65);
     --token-divider: rgba(255, 255, 255, 0.15);
+    --tag-default-border: #424242;
     --accent-primary: #409cff;
     --accent-primary-hover: #66b2ff;
     --accent-primary-soft: rgba(64, 156, 255, 0.20);

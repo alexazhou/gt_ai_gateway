@@ -54,7 +54,7 @@ defineEmits<{
     flex-shrink: 0;
     width: 100px;
     font-size: 14px;
-    color: rgba(0, 0, 0, 0.88);
+    color: var(--text-primary);
     display: flex;
     align-items: center;
 }

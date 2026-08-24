@@ -173,7 +173,7 @@ function formatPrice(value?: number): string {
     align-items: center;
     width: 100px;
     font-size: 14px;
-    color: rgba(0, 0, 0, 0.88);
+    color: var(--text-primary);
 }
 
 .field-help-icon {

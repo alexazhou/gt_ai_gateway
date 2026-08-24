@@ -54,7 +54,7 @@ defineProps<{
     padding: 5px 7px 4px;
     line-height: 1;
     background: var(--bg-info-item);
-    border: 1px solid #d9d9d9;
+    border: 1px solid var(--tag-default-border, #d9d9d9);
     border-left: 0;
     border-radius: 0 4px 4px 0;
     text-overflow: ellipsis;

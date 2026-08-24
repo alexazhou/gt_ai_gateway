@@ -253,7 +253,7 @@ function getStatusText(status: string | null, failedCode?: string | null): strin
 
 .token-divider {
     margin: 0 4px;
-    color: #d9d9d9;
+    color: var(--token-divider);
 }
 
 .metric-sub {
