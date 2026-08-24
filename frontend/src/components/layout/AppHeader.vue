@@ -41,7 +41,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted } from 'vue';
+import { computed, h, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { message } from 'ant-design-vue/es';
 import {
@@ -68,11 +68,17 @@ const currentTenantName = computed(() => {
 });
 const currentTenantKey = computed(() => tenantStore.currentTenantId || '');
 
-onMounted(() => {
-    if (isRoot.value && tenantStore.multiTenantEnabled) {
-        tenantStore.loadTenants();
-    }
-});
+// isRoot / multiTenantEnabled 均为异步来自 /status.json，onMounted 单次判断会在两者就绪前
+// 错过加载导致下拉为空；改为 watch 在条件满足时触发（立即执行 + 异步就绪后自动补触发）
+watch(
+    [() => isRoot.value, () => tenantStore.multiTenantEnabled],
+    ([root, multiTenantEnabled]) => {
+        if (root && multiTenantEnabled) {
+            tenantStore.loadTenants();
+        }
+    },
+    { immediate: true },
+);
 
 function handleTenantSelect({ key }: { key: string }) {
     if (key === tenantStore.currentTenantId) return;
