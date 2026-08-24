@@ -141,23 +141,9 @@ jobs:
                   done
 
             - name: Delete platform-specific tags
+              env:
+                TAGS: ${{ steps.meta.outputs.tags }}
               run: |
-                  tags='${{ steps.meta.outputs.tags }}'
-                  username="${{ secrets.DOCKERHUB_USERNAME }}"
-                  token="${{ secrets.DOCKERHUB_TOKEN }}"
-
-                  for tag in $tags; do
-                      if [[ "$tag" == *"ghcr.io"* ]]; then
-                          continue
-                      fi
-
-                      # Delete amd64 suffix tag
-                      curl -s -X DELETE \
-                          -H "Authorization: Basic $(echo -n "$username:$token" | base64)" \
-                          "https://hub.docker.com/v2/repositories/alexazhou/gt_ai_gateway/tags/${tag#*:}-amd64/" || true
-
-                      # Delete arm64 suffix tag
-                      curl -s -X DELETE \
-                          -H "Authorization: Basic $(echo -n "$username:$token" | base64)" \
-                          "https://hub.docker.com/v2/repositories/alexazhou/gt_ai_gateway/tags/${tag#*:}-arm64/" || true
-                  done
+                  DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}" \
+                  DOCKERHUB_TOKEN="${{ secrets.DOCKERHUB_TOKEN }}" \
+                  bash script/docker_hub_delete_platform_tags.sh "${TAGS}"
