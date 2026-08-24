@@ -100,10 +100,10 @@ app.onError((err, c) => {
     const apiFormat = c.get("api_format");
     if (apiFormat) {
         const formatted = customError.buildLlmErrorResponse(err as any, apiFormat);
-        // 限流拒绝：附加 Retry-After 头（固定 60s——滑动窗口两桶加权模型不记录单个请求时间戳，
-        // 客户端等满一个窗口再重试成功率最高）
+        // 限流拒绝：附加 Retry-After 头（令牌桶可精确计算补足 1 个令牌的等待秒数，见 rateLimitService）
         if (error.code === "rate_limit_error") {
-            c.header("Retry-After", "60");
+            const retryAfter = (error as unknown as { retryAfterSeconds?: number }).retryAfterSeconds ?? 60;
+            c.header("Retry-After", String(retryAfter));
         }
         return c.json(formatted, statusCode as any);
     }

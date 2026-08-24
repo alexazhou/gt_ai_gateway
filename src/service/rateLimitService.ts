@@ -3,10 +3,12 @@ import customError from "../customError";
 import memoryRateLimitStore from "../util/rule/memoryRateLimitStore";
 import type { RateLimitStore, RequestContext } from "../util/rule/types";
 
-// 重试建议秒数：滑动窗口两桶加权模型不记录单个请求时间戳，60s 为保守上限，客户端等满一个窗口再重试
-const RETRY_AFTER_SECONDS = 60;
+// rpm 的补液窗口：1 分钟（补液速率 = rpm / 60s）
+const WINDOW_MS = 60_000;
+// rpm = 0（硬性阻断）时的重试建议：规则不可用，给出保守值供客户端退避
+const RETRY_AFTER_OFFLINE_SECONDS = 60;
 
-// 注入的计数器存储实现：默认内存滑动窗口，测试可替换
+// 注入的计数器存储实现：默认内存令牌桶，测试可替换
 let store: RateLimitStore = memoryRateLimitStore;
 
 function setStore(implementation: RateLimitStore): void {
@@ -18,11 +20,17 @@ interface CheckAndAdmitOptions {
     failoverEligible?: boolean;
 }
 
+/** 由 rpm 推导令牌桶参数：容量 = rpm（瞬时突发上限），补液速率 = rpm / 60s */
+function tokenBucketParams(rpm: number): { capacity: number; refillPerMs: number } {
+    return { capacity: rpm, refillPerMs: rpm / WINDOW_MS };
+}
+
 /**
- * 限流准入：RPM 先加后判（check + record 一步完成），超限抛 RateLimitError（429）。
+ * 限流准入：令牌桶消费 1 个令牌（补液 + 扣减一步完成），桶空抛 RateLimitError（429）。
  * - config.rpm 为 null / 缺省 → 不限制（规则命中但放行）
  * - config.rpm 为 0 → 不可用（无请求额度，所有命中请求一律 429，可作硬性阻断）
- * - config.rpm 为 N（N > 0）→ 60s 滑动窗口内最多 N 个请求
+ * - config.rpm 为 N（N > 0）→ 令牌桶容量 N、补液 N 个/分钟：瞬时突发 ≤ N，
+ *   长时间平均速率 = N 请求/分钟；桶空时按当前令牌数给出精确的 Retry-After
  */
 async function checkAndAdmit(rule: SgRule, ctx: RequestContext, opts: CheckAndAdmitOptions = {}): Promise<void> {
     const failoverEligible = opts.failoverEligible ?? false;
@@ -35,7 +43,7 @@ async function checkAndAdmit(rule: SgRule, ctx: RequestContext, opts: CheckAndAd
     if (rpm === 0) {
         throw new customError.RateLimitError(
             `Rule "${rule.name}" is unavailable (rpm = 0)`,
-            RETRY_AFTER_SECONDS,
+            RETRY_AFTER_OFFLINE_SECONDS,
             failoverEligible,
             Number(rule.id),
             rule.name,
@@ -43,12 +51,14 @@ async function checkAndAdmit(rule: SgRule, ctx: RequestContext, opts: CheckAndAd
     }
 
     const now = Date.now();
-    const weighted = store.incr(`rule:${rule.id}:rpm`, now);
-    // 超限（> 上限）才拒绝：rpm = N 表示滑动窗口内最多 N 个请求，第 N+1 个才拒绝
-    if (weighted > rpm) {
+    const { capacity, refillPerMs } = tokenBucketParams(rpm);
+    const result = store.consume(`rule:${rule.id}:rpm`, now, capacity, refillPerMs);
+    if (!result.allowed) {
+        // 精确重试时间：补足 (1 - remaining) 个令牌所需毫秒，换算成秒向上取整（最小 1s）
+        const waitSeconds = Math.max(1, Math.ceil((1 - result.remaining) / refillPerMs / 1000));
         throw new customError.RateLimitError(
             `Rate limit exceeded for rule "${rule.name}" (rpm = ${rpm})`,
-            RETRY_AFTER_SECONDS,
+            waitSeconds,
             failoverEligible,
             Number(rule.id),
             rule.name,

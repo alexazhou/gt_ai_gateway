@@ -199,7 +199,11 @@ describe("Rule API", () => {
             user.token,
         );
         expect(limited.status).toBe(429);
-        expect(limited.headers.get("retry-after")).toBe("60");
+        // 令牌桶空桶补 1 个令牌需 60s/rpm 秒，两次请求间隔消耗部分补液 → retry-after 介于 1..60s
+        const retryAfter = Number(limited.headers.get("retry-after"));
+        expect(Number.isInteger(retryAfter)).toBe(true);
+        expect(retryAfter).toBeGreaterThanOrEqual(1);
+        expect(retryAfter).toBeLessThanOrEqual(60);
         expect(limited.body.error.type).toBe("rate_limit_error");
         expect(limited.body.error.code).toBe("rate_limit_error");
 

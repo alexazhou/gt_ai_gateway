@@ -1,71 +1,68 @@
-import type { RateLimitStore } from "./types";
+import type { ConsumeResult, RateLimitStore } from "./types";
 
-// 限流窗口：60s 滑动窗口
+// rpm 的补液窗口：1 分钟（rpm = requests per minute，补液速率 = rpm / 60s）
 const WINDOW_MS = 60_000;
-// 陈旧键清扫间隔阈值：两次活跃调用（incr）相隔超过该值即惰性触发一次清扫
+// 惰性清扫触发间隔：两次活跃调用（consume）相隔超过该值即清扫一次
 const CLEANUP_INTERVAL_MS = 60_000;
+// 键空闲超过该时长即回收（重建后从满桶开始，等效于全新窗口全额额度）
+const MAX_IDLE_MS = 120_000;
 
-// 单条计数器的两桶状态：当前分钟 + 上一分钟（用于跨分钟边界的加权插值）
-interface WindowBucket {
-    minuteKey: number;
-    curCount: number;
-    prevCount: number;
+// 单条计数器的令牌桶状态：当前令牌数 + 最后一次补液时刻
+interface TokenBucket {
+    tokens: number;
+    lastRefill: number;
 }
 
 /**
- * 内存滑动窗口计数器（60s 窗口 + 当前/上一分钟两桶加权插值），避免固定窗口在分钟交界的双倍突发：
- * weighted = curCount + prevCount * (1 - elapsed / 60_000)
+ * 内存令牌桶（Token Bucket）限流计数器：
+ * - 桶容量 capacity = rpm（瞬时突发上限），补液速率 refillPerMs = rpm / 60s（每分钟补满 rpm 个令牌）
+ * - 每个请求扣 1 个令牌，桶空即限流；补液按毫秒连续累计，无固定两桶插值，不产生估计误差
+ * - 长时间平均速率收敛到 N 请求/分钟，瞬时突发 ≤ N，语义清晰且可给出精确的等待重试时间
  *
- * Node 单进程事件循环内同步读写天然原子，无并发问题。键空间按（规则数 × 2 分钟窗口）有界，
- * 配 incr 内的惰性清扫回收陈旧键（避免常驻定时器在 Worker 全局作用域下报错）。
+ * Node 单进程事件循环内同步读写天然原子，无并发问题。键空间按（规则数 × 上限）有界，
+ * 配 consume 内的惰性清扫回收陈旧键（避免常驻定时器在 Worker 全局作用域下报错）。
  */
 class MemoryRateLimitStore implements RateLimitStore {
-    private buckets = new Map<string, WindowBucket>();
+    private buckets = new Map<string, TokenBucket>();
     private lastCleanup = 0;
 
-    /** 自增 1 并返回加权计数（RPM：check + record 一步完成） */
-    incr(key: string, now: number): number {
-        // 定期惰性清扫陈旧键（空闲超过 1 个完整窗口），避免常驻定时器在 Worker 全局作用域下报错
+    /** 补液 + 扣 1 个令牌；桶空返回 allowed=false（不扣减，令牌保持当前值） */
+    consume(key: string, now: number, capacity: number, refillPerMs: number): ConsumeResult {
+        // 定期惰性清扫陈旧键（空闲超过 MAX_IDLE_MS），避免常驻定时器在 Worker 全局作用域下报错
         if (this.lastCleanup === 0 || now - this.lastCleanup >= CLEANUP_INTERVAL_MS) {
             this.cleanup(now);
             this.lastCleanup = now;
         }
 
-        const minuteKey = Math.floor(now / WINDOW_MS);
-
         let bucket = this.buckets.get(key);
         if (!bucket) {
-            bucket = { minuteKey, curCount: 0, prevCount: 0 };
+            // 新键从满桶开始：等效于新窗口直接获得全额 rpm 额度
+            bucket = { tokens: capacity, lastRefill: now };
             this.buckets.set(key, bucket);
         }
 
-        // 滚动到新分钟：相邻分钟把当前计数降级为上一分钟；跨多个窗口则上一分钟清零
-        if (bucket.minuteKey !== minuteKey) {
-            if (minuteKey - bucket.minuteKey === 1) {
-                bucket.prevCount = bucket.curCount;
-            } else {
-                bucket.prevCount = 0;
-            }
-            bucket.curCount = 0;
-            bucket.minuteKey = minuteKey;
+        // 补液：按经过时间补充令牌，封顶到容量；lastRefill 推进到 now，避免下次重复累计
+        const elapsed = now - bucket.lastRefill;
+        if (elapsed > 0) {
+            bucket.tokens = Math.min(capacity, bucket.tokens + elapsed * refillPerMs);
+            bucket.lastRefill = now;
         }
 
-        bucket.curCount += 1;
-
-        const elapsed = now - minuteKey * WINDOW_MS;
-        return bucket.curCount + bucket.prevCount * (1 - elapsed / WINDOW_MS);
+        if (bucket.tokens >= 1) {
+            bucket.tokens -= 1;
+            return { allowed: true, remaining: bucket.tokens };
+        }
+        return { allowed: false, remaining: bucket.tokens };
     }
 
 
     /**
-     * 清扫陈旧键：最后一次活跃早于上一分钟（空闲超过 1 个完整窗口）即回收。
-     * 键空间按（规则数 × 2 分钟窗口）有界——活跃键的 minuteKey 只可能是当前分钟或上一分钟，
-     * 空闲 2 分钟以上的键数据已完全过期，回收无害。
+     * 清扫陈旧键：空闲超过 MAX_IDLE_MS 即回收。令牌桶空闲时自然补满并停在容量，
+     * 回收后重建仍从满桶开始，与保留等价（键空间按（规则数 × 上限）有界）。
      */
     cleanup(now: number): void {
-        const currentMinuteKey = Math.floor(now / WINDOW_MS);
         for (const [key, bucket] of this.buckets) {
-            if (currentMinuteKey - bucket.minuteKey > 1) {
+            if (now - bucket.lastRefill >= MAX_IDLE_MS) {
                 this.buckets.delete(key);
             }
         }

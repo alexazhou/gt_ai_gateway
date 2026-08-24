@@ -39,8 +39,20 @@ export interface RequestContext {
     vendor_id?: number;
 }
 
-/** 限流计数器存储接口：本期仅内存实现，接口预留以便后续切 DB / Durable Object */
+/** 令牌桶消费结果 */
+export interface ConsumeResult {
+    /** 是否获得令牌（放行）；false = 桶空被限流 */
+    allowed: boolean;
+    /** allowed=true：扣减后的剩余令牌数；allowed=false：此刻桶内令牌数（< 1，用于计算等待时间） */
+    remaining: number;
+}
+
+/** 限流计数器存储接口：本期仅内存实现（令牌桶），接口预留以便后续切 DB / Durable Object */
 export interface RateLimitStore {
-    /** 自增 1 并返回加权计数（RPM：check + record 一步完成） */
-    incr(key: string, now: number): number;
+    /**
+     * 令牌桶消费：按 refillPerMs 补液（封顶 capacity），再尝试扣 1 个令牌。
+     * @param capacity 桶容量（瞬时突发上限，即 rpm）
+     * @param refillPerMs 补液速率（令牌/毫秒 = rpm / 60s）
+     */
+    consume(key: string, now: number, capacity: number, refillPerMs: number): ConsumeResult;
 }
