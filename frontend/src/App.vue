@@ -53,6 +53,7 @@ html.dark body {
     --bg-info-item: #fafafa;
     --bg-code: #f6f8fa;
     --bg-code-header: #ffffff;
+    --component-bg: #ffffff;
     --border-color: #e8edf5;
     --border-info-item: #f0f0f0;
     --text-primary: #243247;
@@ -110,6 +111,7 @@ html.dark body {
     --bg-info-item: #262626;
     --bg-code: #171717;
     --bg-code-header: #202020;
+    --component-bg: #1f1f1f;
     --border-color: #303030;
     --border-info-item: #303030;
     --text-primary: rgba(255, 255, 255, 0.85);

@@ -274,10 +274,10 @@ defineExpose({ open });
 }
 
 .urls-view {
-    border: 1px solid var(--color-border, #d9d9d9);
+    border: 1px solid var(--border-color, #d9d9d9);
     border-radius: 6px;
     padding: 8px 12px;
-    background: var(--color-bg-container-disabled, #f5f5f5);
+    background: var(--bg-info-item, #f5f5f5);
 }
 
 .url-view-item {
@@ -289,7 +289,7 @@ defineExpose({ open });
 }
 
 .url-key {
-    color: var(--color-text-secondary, #888);
+    color: var(--text-secondary, #888);
     text-transform: uppercase;
     font-size: 11px;
     min-width: 72px;
@@ -297,7 +297,7 @@ defineExpose({ open });
 }
 
 .url-value {
-    color: var(--color-text, #333);
+    color: var(--text-primary, #333);
     word-break: break-all;
     flex: 1;
 }

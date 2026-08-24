@@ -274,14 +274,14 @@
             <a-radio-group v-model:value="deleteMode" style="display: flex; flex-direction: column; gap: 12px;">
                 <a-radio value="payload">
                     <div>
-                        <div style="font-weight: 500;">删除请求体</div>
-                        <div style="font-size: 12px; color: #8c8c8c;">保留请求记录元数据（时间、模型、Token 等），仅清除 request/response 原始内容</div>
+                        <div style="font-weight: 500; color: var(--text-primary);">删除请求体</div>
+                        <div style="font-size: 12px; color: var(--text-secondary, #8c8c8c);">保留请求记录元数据（时间、模型、Token 等），仅清除最占用空间的 request/response 原始内容</div>
                     </div>
                 </a-radio>
                 <a-radio value="all">
                     <div>
-                        <div style="font-weight: 500;">删除完整请求记录</div>
-                        <div style="font-size: 12px; color: #8c8c8c;">彻底删除所有请求记录，此操作不可恢复</div>
+                        <div style="font-weight: 500; color: var(--text-primary);">删除完整请求记录</div>
+                        <div style="font-size: 12px; color: var(--text-secondary, #8c8c8c);">彻底删除所有请求记录，此操作不可恢复</div>
                     </div>
                 </a-radio>
             </a-radio-group>
@@ -569,8 +569,15 @@ async function saveConfig() {
     color: var(--text-primary);
 }
 
+.section-title {
+    margin: 0 0 16px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
 .settings-list {
-    background: var(--component-bg, #ffffff);
+    background: var(--bg-card, #ffffff);
     border: 1px solid var(--border-color, #f0f0f0);
     border-radius: 8px;
     overflow: hidden;

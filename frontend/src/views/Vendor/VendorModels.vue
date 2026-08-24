@@ -368,7 +368,7 @@ function handleBack() {
 }
 
 .model-count {
-    color: var(--color-text-secondary, #888);
+    color: var(--text-secondary, #888);
     font-size: 13px;
 }
 
@@ -381,7 +381,7 @@ function handleBack() {
 
 .selected-count {
     margin-left: 8px;
-    color: var(--color-text-secondary, #888);
+    color: var(--text-secondary, #888);
     font-size: 13px;
 }
 
@@ -399,12 +399,12 @@ function handleBack() {
     align-items: flex-start;
     gap: 8px;
     padding: 6px 0;
-    border-bottom: 1px solid var(--color-border-secondary, #f0f0f0);
+    border-bottom: 1px solid var(--border-color, #f0f0f0);
     cursor: pointer;
 }
 
 .model-checkbox-item:hover {
-    background: var(--color-fill-quaternary, #fafafa);
+    background: var(--bg-info-item, #fafafa);
 }
 
 .model-checkbox-label {
@@ -417,13 +417,13 @@ function handleBack() {
 }
 
 .empty-hint {
-    color: var(--color-text-secondary, #888);
+    color: var(--text-secondary, #888);
     text-align: center;
     padding: 24px 0;
 }
 
 .format-auto {
-    color: var(--color-text-secondary, #888);
+    color: var(--text-secondary, #888);
     font-size: 13px;
 }
 </style>

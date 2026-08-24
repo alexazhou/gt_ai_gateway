@@ -143,7 +143,7 @@ function exitDeveloperMode() {
 }
 
 .settings-list {
-    background: var(--component-bg, #ffffff);
+    background: var(--bg-card, #ffffff);
     border: 1px solid var(--border-color, #f0f0f0);
     border-radius: 8px;
     overflow: hidden;

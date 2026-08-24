@@ -126,7 +126,7 @@ async function loadStatus(): Promise<void> {
 }
 
 .client-tabs {
-    background: var(--component-bg, #ffffff);
+    background: var(--bg-card, #ffffff);
     border: 1px solid var(--border-color, #f0f0f0);
     border-radius: 8px;
     padding: 0 18px 18px;
