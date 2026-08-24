@@ -440,17 +440,22 @@ async function cleanup(): Promise<void> {
  * 清表后重建 main 主租户（多租户隔离）：truncate 会清掉 tenant 表，不重建则
  * tenantService.getMainTenantId() 失败，所有租户逻辑在测试里不可用。
  */
-function seedMainTenant(): void {
+async function seedMainTenant(): Promise<void> {
     const isMysqlDriver = config.DB_CONFIG.driver === "mysql";
     const sql = isMysqlDriver
         ? "INSERT INTO tenant (id, name, description) VALUES (1, 'main', '主租户（迁移生成）') ON DUPLICATE KEY UPDATE name='main'"
         : "INSERT OR REPLACE INTO tenant (id, name, description) VALUES (1, 'main', '主租户（迁移生成）')";
-    if (isWorkerMode) {
-        runD1Command(["--command", sql]);
-    } else if (isMysqlDriver) {
-        getMysqlPool().query(sql).catch((err: unknown) => console.error("Failed to seed main tenant:", err));
-    } else {
-        adapter!.exec(sql);
+    try {
+        if (isWorkerMode) {
+            runD1Command(["--command", sql]);
+        } else if (isMysqlDriver) {
+            // await 落库后再清缓存，避免 getMainTenantId() 撞上 INSERT 未提交（"Main tenant not found" 偶发）
+            await getMysqlPool().query(sql);
+        } else {
+            adapter!.exec(sql);
+        }
+    } catch (err: unknown) {
+        console.error("Failed to seed main tenant:", err);
     }
     tenantService.clearMainTenantCache();
 }
@@ -487,7 +492,7 @@ async function truncate(): Promise<void> {
     if (isWorkerMode) {
         // In worker mode, clear D1 tables only (admin user created via API)
         clearD1Tables();
-        seedMainTenant();
+        await seedMainTenant();
 
         // Clear in-memory config cache so tests don't leak state across runs
         configService.clearCache();
@@ -522,7 +527,7 @@ async function truncate(): Promise<void> {
     }
 
     // 多租户隔离：重建 main 主租户
-    seedMainTenant();
+    await seedMainTenant();
 
     // Clear config cache to ensure test isolation
     configService.clearCache();
