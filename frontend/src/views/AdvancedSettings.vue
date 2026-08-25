@@ -48,19 +48,6 @@
                                 />
                             </div>
                         </div>
-                        <div class="setting-item">
-                            <div class="setting-info">
-                                <div class="setting-title">多租户隔离</div>
-                                <div class="setting-desc">启用后按租户隔离用户/模型/供应商；关闭时退回逻辑单租户（仅 main），仅 root 可修改</div>
-                            </div>
-                            <div class="setting-action">
-                                <a-switch
-                                    :checked="form.multi_tenant_enabled"
-                                    @change="form.multi_tenant_enabled = $event as boolean"
-                                    :disabled="saving || !isRoot"
-                                />
-                            </div>
-                        </div>
                     </div>
                 </a-tab-pane>
 
@@ -296,13 +283,10 @@ import { getConfig, updateConfig } from '@/api/config';
 import { checkUpdate } from '@/api/system';
 import { clearPayload, clearAllRecords } from '@/api/record';
 import { useAppStore } from '@/stores/app';
-import { useAuthStore } from '@/stores/auth';
 import { RunMode } from '@/types/system';
 
 const appStore = useAppStore();
-const authStore = useAuthStore();
 
-const isRoot = computed(() => authStore.userType === 'root');
 const currentVersion = computed(() => appStore.version);
 const isWorkerMode = computed(() => appStore.mode === RunMode.WORKER);
 const isR2StorageAvailable = computed(() => appStore.r2StorageAvailable);
@@ -336,7 +320,6 @@ const originalConfig = reactive({
     module_billing_enabled: false,
     module_api_playground_enabled: false,
     module_client_config_enabled: false,
-    multi_tenant_enabled: false,
 });
 
 const form = reactive({
@@ -351,7 +334,6 @@ const form = reactive({
     module_billing_enabled: false,
     module_api_playground_enabled: false,
     module_client_config_enabled: false,
-    multi_tenant_enabled: false,
 });
 
 const isDirty = computed(() => {
@@ -365,8 +347,7 @@ const isDirty = computed(() => {
            form.telemetry_disabled !== originalConfig.telemetry_disabled ||
            form.module_billing_enabled !== originalConfig.module_billing_enabled ||
            form.module_api_playground_enabled !== originalConfig.module_api_playground_enabled ||
-           form.module_client_config_enabled !== originalConfig.module_client_config_enabled ||
-           form.multi_tenant_enabled !== originalConfig.multi_tenant_enabled;
+           form.module_client_config_enabled !== originalConfig.module_client_config_enabled;
 });
 
 onMounted(() => {
@@ -419,9 +400,6 @@ async function loadConfig(): Promise<void> {
 
         form.module_client_config_enabled = config.module_client_config_enabled === "true";
         originalConfig.module_client_config_enabled = config.module_client_config_enabled === "true";
-
-        form.multi_tenant_enabled = config.multi_tenant_enabled === "true";
-        originalConfig.multi_tenant_enabled = config.multi_tenant_enabled === "true";
     } finally {
         loading.value = false;
     }
@@ -511,7 +489,6 @@ async function saveConfig() {
             module_billing_enabled: form.module_billing_enabled ? "true" : "false",
             module_api_playground_enabled: form.module_api_playground_enabled ? "true" : "false",
             module_client_config_enabled: form.module_client_config_enabled ? "true" : "false",
-            multi_tenant_enabled: form.multi_tenant_enabled ? "true" : "false",
         });
         message.success('配置已保存');
         originalConfig.cch_rewrite_enabled = form.cch_rewrite_enabled;
@@ -525,15 +502,11 @@ async function saveConfig() {
         originalConfig.module_billing_enabled = form.module_billing_enabled;
         originalConfig.module_api_playground_enabled = form.module_api_playground_enabled;
         originalConfig.module_client_config_enabled = form.module_client_config_enabled;
-        originalConfig.multi_tenant_enabled = form.multi_tenant_enabled;
 
         // 同步全局状态
         appStore.moduleBillingEnabled = form.module_billing_enabled;
         appStore.moduleApiPlaygroundEnabled = form.module_api_playground_enabled;
         appStore.moduleClientConfigEnabled = form.module_client_config_enabled;
-
-        // 多租户开关变化后刷新 /status.json（tenant.multi_tenant_enabled / main_id）
-        await appStore.fetchStatus();
 
         if ((window as any).posthog) {
             if (form.telemetry_disabled) {

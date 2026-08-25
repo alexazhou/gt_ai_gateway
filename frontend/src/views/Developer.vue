@@ -25,7 +25,24 @@
                 </div>
             </div>
 
-
+            <div class="settings-section">
+                <h3 class="section-title">多租户</h3>
+                <div class="settings-list">
+                    <div class="setting-item">
+                        <div class="setting-info">
+                            <div class="setting-title">多租户隔离</div>
+                            <div class="setting-desc">启用后按租户隔离用户/模型/供应商；关闭时退回逻辑单租户（仅 main），仅 root 可修改</div>
+                        </div>
+                        <div class="setting-action">
+                            <a-switch
+                                :checked="form.multi_tenant_enabled"
+                                @change="form.multi_tenant_enabled = $event as boolean"
+                                :disabled="saving || !isRoot"
+                            />
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <div class="page-actions">
                 <a-button style="margin-right: 12px" :disabled="!isDirty || saving" @click="cancelChanges">
@@ -51,22 +68,29 @@ import { useRouter } from 'vue-router';
 import { message } from 'ant-design-vue/es';
 import { getConfig, updateConfig } from '@/api/config';
 import { useAppStore } from '@/stores/app';
+import { useAuthStore } from '@/stores/auth';
 
 const router = useRouter();
 const appStore = useAppStore();
+const authStore = useAuthStore();
 const loading = ref(false);
 const saving = ref(false);
 
+const isRoot = computed(() => authStore.userType === 'root');
+
 const originalConfig = reactive({
     host_key: '',
+    multi_tenant_enabled: false,
 });
 
 const form = reactive({
     host_key: '',
+    multi_tenant_enabled: false,
 });
 
 const isDirty = computed(() => {
-    return form.host_key !== originalConfig.host_key;
+    return form.host_key !== originalConfig.host_key ||
+           form.multi_tenant_enabled !== originalConfig.multi_tenant_enabled;
 });
 
 onMounted(() => {
@@ -79,6 +103,8 @@ async function loadConfig(): Promise<void> {
         const config = await getConfig();
         form.host_key = config.host_key || '';
         originalConfig.host_key = config.host_key || '';
+        form.multi_tenant_enabled = config.multi_tenant_enabled === "true";
+        originalConfig.multi_tenant_enabled = config.multi_tenant_enabled === "true";
     } finally {
         loading.value = false;
     }
@@ -86,6 +112,7 @@ async function loadConfig(): Promise<void> {
 
 function cancelChanges() {
     form.host_key = originalConfig.host_key;
+    form.multi_tenant_enabled = originalConfig.multi_tenant_enabled;
 }
 
 async function saveConfig(): Promise<void> {
@@ -93,10 +120,16 @@ async function saveConfig(): Promise<void> {
     try {
         const config = await updateConfig({
             ...(form.host_key ? { host_key: form.host_key } : {}),
+            multi_tenant_enabled: form.multi_tenant_enabled ? "true" : "false",
         });
-        
+
         form.host_key = config.host_key || '';
         originalConfig.host_key = config.host_key || '';
+        originalConfig.multi_tenant_enabled = form.multi_tenant_enabled;
+
+        // 多租户开关变化后刷新 /status.json（tenant.multi_tenant_enabled / main_id）
+        await appStore.fetchStatus();
+
         message.success('设置已保存');
     } catch {
         // error handling is typically done by the request interceptor
