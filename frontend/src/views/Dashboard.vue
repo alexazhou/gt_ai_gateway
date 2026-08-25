@@ -102,7 +102,7 @@
             <div class="status-grid-item">
                 <StatusCard
                     title="请求总数"
-                    :value="systemStats.recordCount"
+                    :value="statsStore.stats?.total_requests || 0"
                     :loading="loading"
                 />
             </div>
@@ -195,7 +195,6 @@ const systemStats = ref({
     userCount: 0,
     vendorCount: 0,
     modelCount: 0,
-    recordCount: 0,
 });
 
 const systemStatus = ref('正常');
@@ -290,7 +289,6 @@ async function loadSystemData() {
             userCount: normalizedUsers.total,
             vendorCount: normalizedVendors.total,
             modelCount: normalizedModels.total,
-            recordCount: systemStatusData?.statistics?.records || 0,
         };
 
         if (systemStatusData) {
