@@ -37,7 +37,7 @@
                             <a-switch
                                 :checked="form.multi_tenant_enabled"
                                 @change="form.multi_tenant_enabled = $event as boolean"
-                                :disabled="saving || !isRoot"
+                                :disabled="saving || !authStore.isRoot"
                             />
                         </div>
                     </div>
@@ -75,8 +75,6 @@ const appStore = useAppStore();
 const authStore = useAuthStore();
 const loading = ref(false);
 const saving = ref(false);
-
-const isRoot = computed(() => authStore.userType === 'root');
 
 const originalConfig = reactive({
     host_key: '',

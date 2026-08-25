@@ -9,6 +9,7 @@ export const useAuthStore = defineStore('auth', () => {
     const isLoading = ref(false);
 
     const isAuthenticated = computed(() => !!token.value);
+    const isRoot = computed(() => userType.value === 'root');
 
     function setToken(newToken: string) {
         token.value = newToken;
@@ -64,6 +65,7 @@ export const useAuthStore = defineStore('auth', () => {
         userType,
         isLoading,
         isAuthenticated,
+        isRoot,
         setToken,
         clearToken,
         validateToken,

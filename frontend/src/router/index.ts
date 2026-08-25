@@ -201,7 +201,7 @@ router.beforeEach(async (to) => {
         }
 
         // requiresRoot 路由（如租户管理）仅 root 可访问
-        if (to.meta.requiresRoot && authStore.userType !== 'root') {
+        if (to.meta.requiresRoot && !authStore.isRoot) {
             return { name: 'Dashboard' };
         }
 

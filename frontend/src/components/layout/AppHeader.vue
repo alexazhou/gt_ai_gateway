@@ -3,7 +3,7 @@
         <div class="header-left">
             <img src="/favicon.svg" alt="Logo" class="logo" @click="handleLogoClick">
             <span class="title">{{ title }}</span>
-            <a-dropdown v-if="isRoot && tenantStore.multiTenantEnabled">
+            <a-dropdown v-if="authStore.isRoot && tenantStore.multiTenantEnabled">
                 <a-button type="text" class="tenant-btn">
                     <ApartmentOutlined />
                     <span>{{ currentTenantName }}</span>
@@ -60,7 +60,6 @@ const themeStore = useThemeStore();
 const appStore = useAppStore();
 const tenantStore = useTenantStore();
 
-const isRoot = computed(() => authStore.userType === 'root');
 const currentTenantName = computed(() => {
     const view = tenantStore.currentTenantIdNum;
     const tenant = tenantStore.tenants.find(t => t.id === view);
@@ -71,7 +70,7 @@ const currentTenantKey = computed(() => tenantStore.currentTenantId || '');
 // isRoot / multiTenantEnabled 均为异步来自 /status.json，onMounted 单次判断会在两者就绪前
 // 错过加载导致下拉为空；改为 watch 在条件满足时触发（立即执行 + 异步就绪后自动补触发）
 watch(
-    [() => isRoot.value, () => tenantStore.multiTenantEnabled],
+    [() => authStore.isRoot, () => tenantStore.multiTenantEnabled],
     ([root, multiTenantEnabled]) => {
         if (root && multiTenantEnabled) {
             tenantStore.loadTenants();

@@ -31,7 +31,7 @@
                     <ControlOutlined />
                     <span>规则管理</span>
                 </a-menu-item>
-                <a-menu-item v-if="isRoot && tenantStore.multiTenantEnabled && tenantStore.isMainView" key="/tenant">
+                <a-menu-item v-if="authStore.isRoot && tenantStore.multiTenantEnabled && tenantStore.isMainView" key="/tenant">
                     <ApartmentOutlined />
                     <span>租户管理</span>
                 </a-menu-item>
@@ -107,8 +107,6 @@ const route = useRoute();
 const appStore = useAppStore();
 const authStore = useAuthStore();
 const tenantStore = useTenantStore();
-
-const isRoot = computed(() => authStore.userType === 'root');
 
 const hasUpdate = ref(false);
 const updateUrl = ref('');
