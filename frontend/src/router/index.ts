@@ -124,7 +124,7 @@ const routes: RouteRecordRaw[] = [
                 path: 'tenant',
                 name: 'Tenant',
                 component: TenantIndex,
-                meta: { title: '租户管理', requiresRoot: true },
+                meta: { title: '租户管理', requiresRoot: true, requiresMainView: true },
             },
             {
                 path: 'rule',
@@ -202,6 +202,12 @@ router.beforeEach(async (to) => {
 
         // requiresRoot 路由（如租户管理）仅 root 可访问
         if (to.meta.requiresRoot && authStore.userType !== 'root') {
+            return { name: 'Dashboard' };
+        }
+
+        // requiresMainView 路由（如租户管理）仅 main 租户视角可用：
+        // root 切到非 main 租户视角后不提供租户管理入口
+        if (to.meta.requiresMainView && !tenantStore.isMainView) {
             return { name: 'Dashboard' };
         }
 
