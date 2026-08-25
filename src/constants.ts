@@ -108,7 +108,7 @@ export enum UserStatus {
 
 export const ROOT_USER_ID = -1;
 
-// 主租户名：迁移生成、不可删除；多租户隔离关闭时所有请求固定落入该租户
+// 主租户名：自动生成、不可删除；多租户隔离关闭时所有请求固定落入该租户
 export const DEFAULT_TENANT_NAME = "main";
 
 export enum ConfigKey {

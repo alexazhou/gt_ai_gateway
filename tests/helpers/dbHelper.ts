@@ -443,8 +443,8 @@ async function cleanup(): Promise<void> {
 async function seedMainTenant(): Promise<void> {
     const isMysqlDriver = config.DB_CONFIG.driver === "mysql";
     const sql = isMysqlDriver
-        ? "INSERT INTO tenant (id, name, description) VALUES (1, 'main', '主租户（迁移生成）') ON DUPLICATE KEY UPDATE name='main'"
-        : "INSERT OR REPLACE INTO tenant (id, name, description) VALUES (1, 'main', '主租户（迁移生成）')";
+        ? "INSERT INTO tenant (id, name, description) VALUES (1, 'main', '主租户（自动生成）') ON DUPLICATE KEY UPDATE name='main'"
+        : "INSERT OR REPLACE INTO tenant (id, name, description) VALUES (1, 'main', '主租户（自动生成）')";
     try {
         if (isWorkerMode) {
             runD1Command(["--command", sql]);

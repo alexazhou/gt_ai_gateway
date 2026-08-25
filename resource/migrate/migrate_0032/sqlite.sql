@@ -8,8 +8,8 @@ CREATE TABLE tenant (
 );
 CREATE UNIQUE INDEX tenant_name_index ON tenant (name);
 
--- 主租户（迁移生成，不可删除）
-INSERT INTO tenant (name, description) VALUES ('main', '主租户（迁移生成）');
+-- 主租户（自动生成，不可删除）
+INSERT INTO tenant (name, description) VALUES ('main', '主租户（自动生成）');
 
 -- 存量表归属租户（列可空，应用层回填后强制非空，沿用项目惯例）
 ALTER TABLE user             ADD COLUMN tenant_id BIGINT NULL;
