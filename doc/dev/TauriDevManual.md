@@ -144,7 +144,8 @@ Tauri Rust 在启动 sidecar 时传入以下环境变量：
     },
     "bundle": {
         "resources": {
-            "../../resource/migrate/*": "resource/migrate/"  // 迁移文件打包
+            "icons/tray-icon@2x.png": "icons/tray-icon@2x.png",
+            "../../resource/migrate": "resource/migrate"  // 迁移文件打包（保留子目录树）
         },
         "externalBin": [
             "../build/binaries/ai-gateway-backend"           // sidecar 二进制
