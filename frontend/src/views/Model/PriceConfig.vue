@@ -118,17 +118,17 @@
     <div v-else class="price-display">
         <span class="price-item" title="输入价格">
             <ArrowUpOutlined class="price-icon input" />
-            ¥{{ formatPrice(prices.input) }}
+            {{ formatPrice(prices.input) }}
         </span>
         <span class="price-divider">/</span>
         <span class="price-item" title="输出价格">
             <ArrowDownOutlined class="price-icon output" />
-            ¥{{ formatPrice(prices.output) }}
+            {{ formatPrice(prices.output) }}
         </span>
         <span class="price-divider">/</span>
         <span class="price-item" title="缓存读取价格">
             <ArrowUpOutlined class="price-icon cache-read" />
-            ¥{{ formatPrice(prices.cache_read) }}
+            {{ formatPrice(prices.cache_read) }}
         </span>
     </div>
 </template>
