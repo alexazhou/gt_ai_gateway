@@ -38,7 +38,7 @@
                 <a-input-number
                     :value="prices.input"
                     placeholder="请输入输入价格"
-                    :min="0.0001"
+                    :min="0"
                     :precision="6"
                     style="width: 100%"
                     @update:value="updatePrice('input', $event)"
@@ -54,7 +54,7 @@
                 <a-input-number
                     :value="prices.output"
                     placeholder="请输入输出价格"
-                    :min="0.0001"
+                    :min="0"
                     :precision="6"
                     style="width: 100%"
                     @update:value="updatePrice('output', $event)"
@@ -70,7 +70,7 @@
                 <a-input-number
                     :value="prices.cache_read"
                     placeholder="请输入缓存读取价格"
-                    :min="0.0001"
+                    :min="0"
                     :precision="6"
                     style="width: 100%"
                     @update:value="updatePrice('cache_read', $event)"

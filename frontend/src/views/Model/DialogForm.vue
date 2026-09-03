@@ -275,9 +275,9 @@ function openModel(model: Model, mode: 'edit' | 'view') {
     formState.cross_tenant = Boolean(model.cross_tenant);
     formState.failoverEnabled = model.routing_config.failover?.enabled ?? true;
     formState.prices = {
-        input: model.prices?.input || undefined,
-        output: model.prices?.output || undefined,
-        cache_read: model.prices?.cache_read || undefined,
+        input: model.prices?.input ?? undefined,
+        output: model.prices?.output ?? undefined,
+        cache_read: model.prices?.cache_read ?? undefined,
     };
     getConfig().then(config => {
         moduleBillingEnabled.value = config.module_billing_enabled === 'true';
