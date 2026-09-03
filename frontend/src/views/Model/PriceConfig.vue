@@ -31,50 +31,86 @@
             <div class="settings-row">
                 <label class="settings-label">
                     输入价格
-                    <a-tooltip title="输入 token 的计费价格（元/百万 tokens），留空表示不收费">
+                    <a-tooltip title="输入 token 的计费价格（元/百万 tokens），清除或留空表示不收费">
                         <InfoCircleOutlined class="field-help-icon" />
                     </a-tooltip>
                 </label>
-                <a-input-number
-                    :value="prices.input"
-                    placeholder="请输入输入价格"
-                    :min="0"
-                    :precision="6"
-                    style="width: 100%"
-                    @update:value="updatePrice('input', $event)"
-                />
+                <div class="price-input-wrap">
+                    <a-input-number
+                        :value="prices.input"
+                        placeholder="请输入输入价格"
+                        :min="0"
+                        :precision="6"
+                        :controls="false"
+                        style="width: 100%"
+                        @update:value="updatePrice('input', $event)"
+                    />
+                    <button
+                        v-if="prices.input != null"
+                        class="clear-price-inner-btn"
+                        type="button"
+                        title="清除价格"
+                        @click="clearPrice('input')"
+                    >
+                        <CloseOutlined />
+                    </button>
+                </div>
             </div>
             <div class="settings-row">
                 <label class="settings-label">
                     输出价格
-                    <a-tooltip title="输出 token 的计费价格（元/百万 tokens），留空表示不收费">
+                    <a-tooltip title="输出 token 的计费价格（元/百万 tokens），清除或留空表示不收费">
                         <InfoCircleOutlined class="field-help-icon" />
                     </a-tooltip>
                 </label>
-                <a-input-number
-                    :value="prices.output"
-                    placeholder="请输入输出价格"
-                    :min="0"
-                    :precision="6"
-                    style="width: 100%"
-                    @update:value="updatePrice('output', $event)"
-                />
+                <div class="price-input-wrap">
+                    <a-input-number
+                        :value="prices.output"
+                        placeholder="请输入输出价格"
+                        :min="0"
+                        :precision="6"
+                        :controls="false"
+                        style="width: 100%"
+                        @update:value="updatePrice('output', $event)"
+                    />
+                    <button
+                        v-if="prices.output != null"
+                        class="clear-price-inner-btn"
+                        type="button"
+                        title="清除价格"
+                        @click="clearPrice('output')"
+                    >
+                        <CloseOutlined />
+                    </button>
+                </div>
             </div>
             <div class="settings-row">
                 <label class="settings-label">
                     缓存读取价格
-                    <a-tooltip title="缓存命中时读取 token 的计费价格（元/百万 tokens），留空表示不收费">
+                    <a-tooltip title="缓存命中时读取 token 的计费价格（元/百万 tokens），清除或留空表示不收费">
                         <InfoCircleOutlined class="field-help-icon" />
                     </a-tooltip>
                 </label>
-                <a-input-number
-                    :value="prices.cache_read"
-                    placeholder="请输入缓存读取价格"
-                    :min="0"
-                    :precision="6"
-                    style="width: 100%"
-                    @update:value="updatePrice('cache_read', $event)"
-                />
+                <div class="price-input-wrap">
+                    <a-input-number
+                        :value="prices.cache_read"
+                        placeholder="请输入缓存读取价格"
+                        :min="0"
+                        :precision="6"
+                        :controls="false"
+                        style="width: 100%"
+                        @update:value="updatePrice('cache_read', $event)"
+                    />
+                    <button
+                        v-if="prices.cache_read != null"
+                        class="clear-price-inner-btn"
+                        type="button"
+                        title="清除价格"
+                        @click="clearPrice('cache_read')"
+                    >
+                        <CloseOutlined />
+                    </button>
+                </div>
             </div>
         </a-collapse-panel>
     </a-collapse>
@@ -102,6 +138,7 @@ import { computed, ref } from 'vue';
 import {
     ArrowDownOutlined,
     ArrowUpOutlined,
+    CloseOutlined,
     InfoCircleOutlined,
 } from '@ant-design/icons-vue';
 import type { ModelPrices } from '@/types/model';
@@ -123,6 +160,14 @@ function updatePrice(key: keyof ModelPrices, value: number | null) {
     emit('update:prices', {
         ...props.prices,
         [key]: value ?? undefined,
+    });
+}
+
+
+function clearPrice(key: keyof ModelPrices) {
+    emit('update:prices', {
+        ...props.prices,
+        [key]: undefined,
     });
 }
 
@@ -174,6 +219,42 @@ function formatPrice(value?: number): string {
     width: 100px;
     font-size: 14px;
     color: var(--text-primary);
+}
+
+.price-input-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+}
+
+.price-input-wrap :deep(.ant-input-number-input) {
+    padding-right: 28px;
+}
+
+.clear-price-inner-btn {
+    position: absolute;
+    right: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    font-size: 10px;
+    color: rgba(0, 0, 0, 0.25);
+    background: transparent;
+    cursor: pointer;
+}
+
+.clear-price-inner-btn:hover {
+    color: var(--error-color, #ff4d4f);
+}
+
+.clear-price-inner-btn:focus {
+    outline: none;
 }
 
 .field-help-icon {
