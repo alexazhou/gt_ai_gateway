@@ -1,5 +1,5 @@
 import { Context } from "hono";
-import { UserType } from "../constants";
+import { ASSIGNABLE_USER_TYPES, UserType } from "../constants";
 import userManager from "../manager/userManager";
 import userService from "../service/userService";
 import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
@@ -65,13 +65,18 @@ async function createUser(c: Context) {
             token = crypto.randomUUID();
         }
 
+        const userType = type || UserType.NORMAL;
+        if (!ASSIGNABLE_USER_TYPES.includes(userType)) {
+            return c.json({ error: `Invalid type, must be one of: ${ASSIGNABLE_USER_TYPES.join(", ")}` }, 400);
+        }
+
         // token 掩码进日志（前 4 位 + *），避免明文
-        console.log("[userController] Creating user:", { name, type, token: maskUtil.maskToken(token) });
+        console.log("[userController] Creating user:", { name, type: userType, token: maskUtil.maskToken(token) });
 
         const instance = await userManager.create({
             name,
             token,
-            type: type || UserType.NORMAL,
+            type: userType,
         }, scope.tenantId);
 
         console.log("[userController] User created successfully:", { id: instance.id, name: instance.name, type: instance.type, token: maskUtil.maskToken(instance.token) });
@@ -101,7 +106,7 @@ async function updateUser(c: Context) {
     }
 
     const body = await c.req.json();
-    const { name, token, status } = body;
+    const { name, token, status, type } = body;
 
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) {
@@ -112,6 +117,20 @@ async function updateUser(c: Context) {
     }
     if (status !== undefined) {
         updateData.status = status;
+    }
+    if (type !== undefined && type !== null && type !== "" && type !== user.type) {
+        if (!ASSIGNABLE_USER_TYPES.includes(type)) {
+            return c.json({ error: `Invalid type, must be one of: ${ASSIGNABLE_USER_TYPES.join(", ")}` }, 400);
+        }
+        // 不允许改自己的类型：租户内唯一管理员自我降级后，将无人能再进入管理后台
+        if (c.get("user")?.id === userId) {
+            return c.json({ error: "You cannot change your own user type" }, 400);
+        }
+        // root 为系统保留类型（由 ROOT_TOKEN 提供），不允许通过用户接口改动
+        if (user.type === UserType.ROOT) {
+            return c.json({ error: "Root user type cannot be modified" }, 403);
+        }
+        updateData.type = type;
     }
 
     if (Object.keys(updateData).length === 0) {

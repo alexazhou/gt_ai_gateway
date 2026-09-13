@@ -139,4 +139,92 @@ describe("User API (Negative)", () => {
             expect(response.status).toBeGreaterThanOrEqual(400);
         });
     });
+
+    /**
+     * 用户类型（type）权限边界：
+     * - root 为系统保留类型（只由 ROOT_TOKEN 提供），接口不允许创建/改成 root
+     * - 管理员不能修改自己的类型，避免租户内唯一管理员自我降级后再也进不了后台
+     * 用例自建管理员，不使用 setupAdminUser()（其 token 唯一，重复创建会冲突）
+     */
+    describe("User type guard", () => {
+        const ROOT_TOKEN = "root-token-123";
+        let adminToken: string;
+        let selfAdminId: number;
+        let targetUserId: number;
+
+        beforeAll(async () => {
+            const adminResponse = await requestHelper.post(
+                "/user/create.json",
+                { name: "Type Guard Admin", token: "type-guard-admin-token", type: "admin" },
+                ROOT_TOKEN,
+            );
+            expect(adminResponse.status).toBe(200);
+            adminToken = adminResponse.body.token;
+            selfAdminId = adminResponse.body.id;
+
+            const targetResponse = await requestHelper.post(
+                "/user/create.json",
+                { name: "Type Guard Target", token: "type-guard-target-token" },
+                adminToken,
+            );
+            expect(targetResponse.status).toBe(200);
+            targetUserId = targetResponse.body.id;
+        });
+
+        it("should reject creating a user with root type", async () => {
+            const response = await requestHelper.post(
+                "/user/create.json",
+                { name: "Illegal Root User", token: "illegal-root-token", type: "root" },
+                adminToken,
+            );
+
+            expect(response.status).toBe(400);
+            expect(response.body).toHaveProperty("error");
+        });
+
+        it("should reject creating a user with unknown type", async () => {
+            const response = await requestHelper.post(
+                "/user/create.json",
+                { name: "Illegal Type User", token: "illegal-type-token", type: "superuser" },
+                adminToken,
+            );
+
+            expect(response.status).toBe(400);
+            expect(response.body).toHaveProperty("error");
+        });
+
+        it("should reject changing a user type to root", async () => {
+            const response = await requestHelper.put(
+                `/user/${targetUserId}`,
+                { type: "root" },
+                adminToken,
+            );
+
+            expect(response.status).toBe(400);
+            expect(response.body).toHaveProperty("error");
+        });
+
+        it("should reject changing own user type", async () => {
+            const response = await requestHelper.put(
+                `/user/${selfAdminId}`,
+                { type: "normal" },
+                adminToken,
+            );
+
+            expect(response.status).toBe(400);
+            expect(response.body).toHaveProperty("error");
+        });
+
+        it("should still allow updating own user when type is unchanged", async () => {
+            const response = await requestHelper.put(
+                `/user/${selfAdminId}`,
+                { name: "Type Guard Admin Renamed", type: "admin" },
+                adminToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.name).toBe("Type Guard Admin Renamed");
+            expect(response.body.type).toBe("admin");
+        });
+    });
 });

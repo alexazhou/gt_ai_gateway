@@ -107,6 +107,33 @@ describe("User API (Positive)", () => {
             expect(response.body.token.length).toBeGreaterThan(0);
             expect(response.body.token).not.toBe(""); // 不应该是空字符串
         });
+
+        it("should create a user with the specified type", async () => {
+            const userData = {
+                name: "Created Admin Type User",
+                token: "created-admin-type-token",
+                type: "admin",
+            };
+            const response = await requestHelper.post(
+                "/user/create.json",
+                userData,
+                adminToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.type).toBe("admin");
+        });
+
+        it("should create a normal user when type is not provided", async () => {
+            const response = await requestHelper.post(
+                "/user/create.json",
+                { name: "Default Type User", token: "default-type-user-token" },
+                adminToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.type).toBe("normal");
+        });
     });
 
     describe("GET /user/list.json", () => {
@@ -300,6 +327,58 @@ describe("User API (Positive)", () => {
             expect(response.body).toHaveProperty("token");
             expect(response.body).toHaveProperty("created_at");
             expect(response.body).toHaveProperty("updated_at");
+        });
+
+        it("should update user type to admin", async () => {
+            const response = await requestHelper.put(
+                `/user/${userToUpdateId}`,
+                { type: "admin" },
+                adminToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.id).toBe(userToUpdateId);
+            expect(response.body.type).toBe("admin");
+
+            // 类型变更需落库（重新查询确认，而不是只看更新响应）
+            const fetched = await requestHelper.get(`/user/${userToUpdateId}`, adminToken);
+            expect(fetched.body.type).toBe("admin");
+        });
+
+        it("should update user type back to normal", async () => {
+            const response = await requestHelper.put(
+                `/user/${userToUpdateId}`,
+                { type: "normal" },
+                adminToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.type).toBe("normal");
+        });
+
+        it("should keep type unchanged when type is not provided", async () => {
+            await requestHelper.put(
+                `/user/${userToUpdateId}`,
+                { type: "admin" },
+                adminToken,
+            );
+
+            const response = await requestHelper.put(
+                `/user/${userToUpdateId}`,
+                { name: "Type Untouched User" },
+                adminToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.name).toBe("Type Untouched User");
+            expect(response.body.type).toBe("admin");
+
+            // 复原，避免影响后续用例
+            await requestHelper.put(
+                `/user/${userToUpdateId}`,
+                { type: "normal" },
+                adminToken,
+            );
         });
     });
 });

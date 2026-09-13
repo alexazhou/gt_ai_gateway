@@ -108,6 +108,10 @@ export enum UserStatus {
 
 export const ROOT_USER_ID = -1;
 
+// 可通过用户接口分配的类型：ROOT 仅由 ROOT_TOKEN 提供（见 userService.getUserByToken），
+// 若允许接口写入 type=root，管理员即可自造越权账号（root 可跨租户、可管理租户）
+export const ASSIGNABLE_USER_TYPES: string[] = [UserType.NORMAL, UserType.ADMIN];
+
 // 主租户名：自动生成、不可删除；多租户隔离关闭时所有请求固定落入该租户
 export const DEFAULT_TENANT_NAME = "main";
 

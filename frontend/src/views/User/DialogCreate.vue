@@ -15,7 +15,7 @@
             <a-form-item label="用户名" name="name">
                 <a-input v-model:value="formState.name" placeholder="请输入用户名" />
             </a-form-item>
-            <a-form-item label="Token（可选）" name="token" extra="留空则由服务端自动生成；填写后将使用该 Token">
+            <a-form-item label="Token（可选）" name="token" tooltip="留空则由服务端自动生成；填写后将使用该 Token">
                 <a-input-password
                     v-model:value="formState.token"
                     placeholder="请输入 Token"
@@ -39,7 +39,7 @@
 import { ref, reactive } from 'vue';
 import type { FormInstance } from 'ant-design-vue/es';
 import { createUser } from '@/api/user';
-import type { User } from '@/types/user';
+import type { AssignableUserType, User } from '@/types/user';
 import { notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 
 const emit = defineEmits<{
@@ -53,7 +53,7 @@ const formRef = ref<FormInstance>();
 const formState = reactive({
     name: '',
     token: '',
-    type: 'normal' as const,
+    type: 'normal' as AssignableUserType,
 });
 
 const rules = {
