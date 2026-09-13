@@ -139,6 +139,8 @@ async function status(c: Context) {
             user_type: c.get("user_type"),
             // 调用方用户 id（root 为 ROOT_USER_ID）：前端据此判断「正在编辑自己」等场景
             user_id: user?.id ?? null,
+            // 调用方用户名，前端顶栏展示（root 为 "Root"）
+            user_name: user?.name ?? null,
             tenant: {
                 id: user?.tenant_id ?? null,
                 main_id: multiTenantEnabled ? await tenantService.getMainTenantId() : null,

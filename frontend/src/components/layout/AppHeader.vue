@@ -25,7 +25,7 @@
             <a-dropdown>
                 <a-button type="text" class="user-btn">
                     <UserOutlined />
-                    <span class="username">{{ authStore.userType || 'Admin' }}</span>
+                    <span class="username" :title="displayName">{{ displayName }}</span>
                 </a-button>
                 <template #overlay>
                     <a-menu>
@@ -59,6 +59,9 @@ const authStore = useAuthStore();
 const themeStore = useThemeStore();
 const appStore = useAppStore();
 const tenantStore = useTenantStore();
+
+// 顶栏展示登录用户名；旧后端不返回 user_name 时退回身份标识，避免显示空白
+const displayName = computed(() => authStore.userName || authStore.userType || 'Admin');
 
 const currentTenantName = computed(() => {
     const view = tenantStore.currentTenantIdNum;
@@ -261,5 +264,10 @@ function handleLogoClick() {
 .username {
     font-size: 14px;
     color: var(--text-primary);
+    /* 用户名由用户自填且长度不限，超长时省略而不是撑破顶栏 */
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 </style>
