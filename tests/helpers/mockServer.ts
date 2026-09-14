@@ -251,6 +251,11 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleOpenAIChat(req, res);
     } else if (url.includes("/responses/incomplete")) {
         handleResponsesStreamIncomplete(req, res);
+    // 注意顺序：/responses/stream-failed-hang 包含 /responses/stream-failed 前缀，必须先匹配
+    } else if (url.includes("/responses/stream-failed-hang")) {
+        handleResponsesStreamFailedHang(req, res);
+    } else if (url.includes("/responses/stream-failed")) {
+        handleResponsesStreamFailed(req, res);
     } else if (url.includes("/responses/slow")) {
         handleResponsesStreamSlow(req, res);
     } else if (url.includes("/responses/complete-then-hang")) {
@@ -1309,6 +1314,78 @@ function handleResponsesStreamIncomplete(req: IncomingMessage, res: ServerRespon
             res.end();
         }, 50);
     });
+}
+
+
+/**
+ * Responses API stream that reports a mid-stream failure: it opens the response normally,
+ * then emits response.failed - i.e. an HTTP 200 whose SSE body carries the error.
+ * hangAfterError=true 模拟上游报错后既不关连接也不再发数据（网关不应等到空闲超时才收尾）。
+ */
+function writeResponsesStreamFailed(
+    req: IncomingMessage,
+    res: ServerResponse,
+    hangAfterError: boolean,
+): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+        captureRequest(req, body, data);
+        const respId = `resp_mock_${Date.now()}`;
+        const now = Math.floor(Date.now() / 1000);
+        const model = data.model || "gpt-4o";
+
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+
+        res.write(`data: ${JSON.stringify({
+            type: "response.created",
+            sequence_number: 0,
+            response: {
+                id: respId,
+                object: "response",
+                created_at: now,
+                model,
+                status: "in_progress",
+                output: [],
+                error: null,
+                usage: null,
+            },
+        })}\n\n`);
+
+        res.write(`data: ${JSON.stringify({
+            type: "response.failed",
+            sequence_number: 4,
+            response: {
+                id: respId,
+                object: "response",
+                created_at: now,
+                model,
+                status: "failed",
+                output: [],
+                error: { code: "server_error", message: "upstream failed mid-stream" },
+                usage: null,
+            },
+        })}\n\n`);
+
+        if (!hangAfterError) {
+            res.end();
+        }
+    });
+}
+
+
+function handleResponsesStreamFailed(req: IncomingMessage, res: ServerResponse): void {
+    writeResponsesStreamFailed(req, res, false);
+}
+
+
+function handleResponsesStreamFailedHang(req: IncomingMessage, res: ServerResponse): void {
+    writeResponsesStreamFailed(req, res, true);
 }
 
 

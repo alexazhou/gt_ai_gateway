@@ -132,22 +132,26 @@ async function runSSELoop(
                 for (const clientEvent of clientEvents) {
                     if (!clientEvent.data) continue;
 
+                    // 累加器是旁路观察者：只记录流状态（供收尾时判定成败），不决定是否转发。
+                    // 上游的错误事件因此会照常下发，客户端能看到错误详情，而不是只等到一条
+                    // 被截断的流（HTTP 已是 200，SSE 体是唯一的错误通道）。
                     accumulator.addEvent(clientEvent);
-
-                    // 出错后不再转发给客户端：记失败码（未记录时）并中止
-                    if (accumulator.isErrored()) {
-                        if (failedCode === null) {
-                            failedCode = accumulator.isParseFailed()
-                                ? FailedCode.SSE_PARSE_ERROR
-                                : FailedCode.UPSTREAM_ERROR;
-                        }
-                        break;
+                    if (accumulator.isErrored() && failedCode === null) {
+                        failedCode = accumulator.isParseFailed()
+                            ? FailedCode.SSE_PARSE_ERROR
+                            : FailedCode.UPSTREAM_ERROR;
                     }
 
                     await writeEventToClient(stream, clientEvent);
                 }
+            }
 
-                if (failedCode !== null) break;
+            // 逻辑上已经结束——正常收尾（收到终止标记）或已出错——就不必再等上游关连接了，
+            // 立即收尾。否则上游发完终止标记后挂着不断开时，客户端要等空闲超时（默认 180s）
+            // 才能拿到流结束，收尾落库（含成功计费）也被拖到那时。
+            if (accumulator.isCompleted() || failedCode !== null) {
+                upstreamReader.cancel().catch(() => {});
+                break;
             }
         }
     } catch (e: any) {
