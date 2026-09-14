@@ -171,6 +171,33 @@ describe("AnthropicAccumulator stream state", () => {
         expect(acc.isCompleted()).toBe(false);
     });
 
+    it("does not mark completed when message_stop follows an upstream error", () => {
+        const acc = new anthropicAccumulator.AnthropicAccumulator();
+        acc.addEvent({ data: JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Overloaded" } }), event: "error" });
+
+        acc.addEvent({ data: JSON.stringify({ type: "message_stop" }), event: "message_stop" });
+
+        expect(acc.isErrored()).toBe(true);
+        expect(acc.isCompleted()).toBe(false);
+    });
+
+    it("keeps completed when an error arrives after the terminal event", () => {
+        const acc = new anthropicAccumulator.AnthropicAccumulator();
+        acc.addEvent({ data: JSON.stringify({ type: "message_stop" }), event: "message_stop" });
+        // 终止事件之后的上游噪声不得推翻已成立的完成态
+        acc.addEvent({ data: JSON.stringify({ type: "error", error: { message: "late noise" } }), event: "error" });
+
+        expect(acc.isCompleted()).toBe(true);
+        expect(acc.isErrored()).toBe(true);
+    });
+
+    it("does not treat a null error field as an upstream error", () => {
+        const acc = new anthropicAccumulator.AnthropicAccumulator();
+        acc.addEvent({ data: JSON.stringify({ type: "message_start", message: { id: "msg_1" }, error: null }), event: "message_start" });
+
+        expect(acc.isErrored()).toBe(false);
+    });
+
     it("flags output started on lifecycle events (preserves TTFT semantics)", () => {
         const acc = new anthropicAccumulator.AnthropicAccumulator();
         acc.addEvent({ data: JSON.stringify({ type: "message_start", message: { id: "m1", model: "claude" } }), event: "message_start" });

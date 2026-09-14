@@ -96,6 +96,32 @@ describe("OpenAIChatAccumulator stream state", () => {
         expect(acc.getError()).toMatchObject({ type: "error" });
     });
 
+    it("does not mark completed when [DONE] follows an upstream error", () => {
+        const acc = new openaiChatAccumulator.OpenAIChatAccumulator();
+        acc.addEvent({ data: JSON.stringify({ error: { message: "upstream boom", type: "server_error" } }) });
+        acc.addEvent({ data: "[DONE]" });
+
+        expect(acc.isErrored()).toBe(true);
+        expect(acc.isCompleted()).toBe(false);
+    });
+
+    it("keeps completed when an error arrives after [DONE]", () => {
+        const acc = new openaiChatAccumulator.OpenAIChatAccumulator();
+        acc.addEvent({ data: "[DONE]" });
+        // 终止标记之后的上游噪声不得推翻已成立的完成态
+        acc.addEvent({ data: JSON.stringify({ error: { message: "late noise", type: "server_error" } }) });
+
+        expect(acc.isCompleted()).toBe(true);
+        expect(acc.isErrored()).toBe(true);
+    });
+
+    it("does not treat a null error field as an upstream error", () => {
+        const acc = new openaiChatAccumulator.OpenAIChatAccumulator();
+        acc.addEvent({ data: JSON.stringify({ choices: [{ delta: { content: "hi" } }], error: null }) });
+
+        expect(acc.isErrored()).toBe(false);
+    });
+
     it("getUsage returns accumulated usage", () => {
         const acc = new openaiChatAccumulator.OpenAIChatAccumulator();
         acc.addEvent({ data: JSON.stringify({ choices: [{ delta: { content: "hi" }, finish_reason: "stop" }], usage: { prompt_tokens: 5, completion_tokens: 3 } }) });

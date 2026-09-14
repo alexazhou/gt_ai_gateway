@@ -183,8 +183,8 @@ function finalizeStreamResult(
     let { accumulator, failedCode } = state;
 
     runInBackgroundUtil.runInBackground(c, async () => {
-        // 响应已完整接收（[DONE] / message_stop / response.completed）时优先视为成功：
-        // 即使随后客户端或上游连接断开，也可能只是客户端拿到完整结果后提前关闭了连接
+        // 已完整接收即视为成功：即使随后连接断开，也可能只是客户端拿到完整结果后提前关闭
+        // （客户端断开 / 上游超时不置 errored，不该覆盖成功）；标志语义见 AccumulatorBase
         if (accumulator.isCompleted()) {
             const fullResponse = accumulator.getResponse();
             const normalizedUsage = usageUtils.normalizeUsage(ApiFormat.OPENAI, accumulator.getUsage() as Dict | null);

@@ -131,11 +131,13 @@ export class ResponsesAccumulator extends AccumulatorBase {
     }
 
 
+    // error 用 != null 判定：Responses 的 response 对象本身带 error: null（正常时），
+    // 显式的 null 不是错误，只有非空 error 才算
     private isErrorEvent(event: Record<string, any>, eventName?: string): boolean {
         return eventName === "error"
             || event.type === "error"
             || event.type === "response.failed"
-            || event.error !== undefined;
+            || event.error != null;
     }
 
 

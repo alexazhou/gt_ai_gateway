@@ -72,8 +72,8 @@ export class OpenAIChatAccumulator extends AccumulatorBase {
             return;
         }
 
-        // 错误事件检测
-        if ((parsed as any)?.type === "error" || (parsed as any)?.error !== undefined) {
+        // 错误事件检测（error 用 != null 判定：上游报文里显式的 error: null 不是错误）
+        if ((parsed as any)?.type === "error" || (parsed as any)?.error != null) {
             this.markError(parsed);
             return;
         }

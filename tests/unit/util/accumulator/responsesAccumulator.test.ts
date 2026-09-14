@@ -180,6 +180,55 @@ describe("ResponsesAccumulator", () => {
             expect(acc.getError()).toEqual(failedPayload);
         });
 
+        it("does not mark completed when response.completed follows response.failed", () => {
+            const acc = new responsesAccumulator.ResponsesAccumulator();
+
+            acc.addEvent({
+                data: JSON.stringify({
+                    type: "response.failed",
+                    sequence_number: 4,
+                    response: {
+                        id: "r1",
+                        status: "failed",
+                        error: { code: "server_error", message: "upstream boom" },
+                    },
+                }),
+                event: "response.failed",
+            });
+            acc.addEvent({
+                data: JSON.stringify({
+                    type: "response.completed",
+                    response: { id: "r1", object: "response", status: "completed", output: [] },
+                }),
+                event: "response.completed",
+            });
+
+            expect(acc.isErrored()).toBe(true);
+            expect(acc.isCompleted()).toBe(false);
+        });
+
+        it("keeps completed when an error arrives after response.completed", () => {
+            const acc = new responsesAccumulator.ResponsesAccumulator();
+
+            acc.addEvent({
+                data: JSON.stringify({ type: "response.completed", response: { id: "r1", status: "completed", output: [] } }),
+                event: "response.completed",
+            });
+            // 终止事件之后的上游噪声不得推翻已成立的完成态
+            acc.addEvent({ data: JSON.stringify({ type: "error", code: "server_error", message: "late noise" }), event: "error" });
+
+            expect(acc.isCompleted()).toBe(true);
+            expect(acc.isErrored()).toBe(true);
+        });
+
+        it("does not treat a null error field as an upstream error", () => {
+            const acc = new responsesAccumulator.ResponsesAccumulator();
+
+            acc.addEvent({ data: JSON.stringify({ type: "response.created", error: null, response: { id: "r1" } }), event: "response.created" });
+
+            expect(acc.isErrored()).toBe(false);
+        });
+
         it("does not flag output started on lifecycle events", () => {
             const acc = new responsesAccumulator.ResponsesAccumulator();
 
