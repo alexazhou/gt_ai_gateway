@@ -16,6 +16,7 @@ import abortTimeoutUtil from "../util/abortTimeoutUtil";
 import userService from "./userService";
 import streamLogService from "./streamLogService";
 import usageUtils, { type Dict } from "../util/protocol/usageUtil";
+import upstreamFailureUtil from "../util/protocol/upstreamFailureUtil";
 import openaiChatAccumulator from "../util/accumulator/openaiChatAccumulator";
 import anthropicAccumulator from "../util/accumulator/anthropicAccumulator";
 import responsesAccumulator from "../util/accumulator/responsesAccumulator";
@@ -296,6 +297,38 @@ export async function handleNonStreamResponse(
             response_body: responseText,
         }, ActivityLevel.ERROR);
 
+        c.status(statusCode);
+        c.res.headers.set("Content-Type", upstreamRes.headers.get("content-type") || "application/json");
+        return c.body(responseText);
+    }
+
+    // 上游也可能把失败放进 HTTP 200 的响应体里（按协议各自的失败形态判定，见 upstreamFailureUtil）。
+    // 只看状态码会把这类失败记成成功：status 记 success、failed_code 空着、活动日志记"请求成功"。
+    const bodyFailure = upstreamFailureUtil.detectUpstreamBodyFailure(upstreamFormat, responseText);
+    if (bodyFailure !== null) {
+        console.error("[responseHandlerService] Upstream failure inside a 200 response body:", {
+            recordId: record.id,
+            upstreamErrorCode: bodyFailure.code,
+            body: responseText,
+        });
+
+        await recordService.update(record.id, {
+            response_data: responseText,
+            status: SgRecordStatus.FAILED,
+            failed_code: FailedCode.UPSTREAM_ERROR,
+            usage: null,
+            end_at: new Date(),
+            cost: 0,
+            first_token_latency: Date.now() - record.created_at.getTime(),
+        });
+        await requestActivityService.append(record.id, RequestActivityStage.RESULT, "上游在响应体中返回失败", {
+            status: SgRecordStatus.FAILED,
+            upstream_status: statusCode,
+            upstream_error_code: bodyFailure.code,
+            response_body: responseText,
+        }, ActivityLevel.ERROR);
+
+        // 响应仍按上游原样透传（HTTP 200 + 失败体），不擅自改成 5xx，保持上游协议语义
         c.status(statusCode);
         c.res.headers.set("Content-Type", upstreamRes.headers.get("content-type") || "application/json");
         return c.body(responseText);

@@ -30,6 +30,7 @@ let responsesClientAnthropicStreamErrorModelName: string;
 let anthropicStreamErrorModelName: string;
 let responsesStreamFailedModelName: string;
 let responsesStreamFailedHangModelName: string;
+let responsesFailedBodyModelName: string;
 
 // Slow vendors/models for client_disconnected tests
 let openaiSlowModelName: string;
@@ -204,6 +205,27 @@ describe("Stream Failure Handling", () => {
             modelFixtures.createRandomModel(
                 responsesStreamFailedHangVendor.body.id,
                 responsesStreamFailedHangModelName,
+            ),
+            adminToken,
+        );
+
+        // --- Responses upstream that reports a failure inside a 200 non-stream body ---
+        const responsesFailedBodyVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                type: "other",
+                name: "Mock Responses Failed Body",
+                token: "test-token",
+                urls: { responses: `${MOCK_BASE}/responses/failed-body` },
+            },
+            adminToken,
+        );
+        responsesFailedBodyModelName = `responses-failed-body-${Date.now()}`;
+        await requestHelper.post(
+            "/model/create.json",
+            modelFixtures.createRandomModel(
+                responsesFailedBodyVendor.body.id,
+                responsesFailedBodyModelName,
             ),
             adminToken,
         );
@@ -572,6 +594,26 @@ describe("Stream Failure Handling", () => {
 
             const records = await requestHelper.getFinalizedRecords(adminToken, 1);
             expect(records[0].status).toBe("success");
+        }, 15000);
+
+        it("should mark the record failed when a non-stream upstream returns HTTP 200 with a failed body", async () => {
+            const response = await requestHelper.post(
+                "/llm/v1/responses",
+                { model: responsesFailedBodyModelName, input: "hi" },
+                testUserToken,
+            );
+
+            // 上游给的就是 200 + 失败体：响应原样透传，不擅自改状态码
+            expect(response.status).toBe(200);
+            expect(response.body.status).toBe("failed");
+
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
+
+            // 失败只存在于响应体里，只看状态码会记成 success
+            expect(record.status).toBe("failed");
+            expect(record.failed_code).toBe("upstream_error");
+            expect(record.cost).toBe(0);
         }, 15000);
 
         it("should close the stream after an upstream error without waiting for the upstream to close", async () => {

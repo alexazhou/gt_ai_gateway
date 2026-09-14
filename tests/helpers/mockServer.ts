@@ -262,6 +262,8 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleResponsesStreamCompleteThenHang(req, res);
     } else if (url.includes("/responses/error")) {
         handleResponsesError(req, res);
+    } else if (url.includes("/responses/failed-body")) {
+        handleResponsesFailedBody(req, res);
     } else if (url.includes("/responses")) {
         handleOpenAIResponses(req, res);
     } else if (url.includes("/messages/stream-error")) {
@@ -1386,6 +1388,32 @@ function handleResponsesStreamFailed(req: IncomingMessage, res: ServerResponse):
 
 function handleResponsesStreamFailedHang(req: IncomingMessage, res: ServerResponse): void {
     writeResponsesStreamFailed(req, res, true);
+}
+
+
+/**
+ * Responses API non-stream response that reports a failure inside a 200 body:
+ * HTTP 200 with status=failed and an error object. Only the body carries the failure.
+ */
+function handleResponsesFailedBody(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+        captureRequest(req, body, data);
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+            id: `resp_mock_${Date.now()}`,
+            object: "response",
+            created_at: Math.floor(Date.now() / 1000),
+            model: data.model || "gpt-4o",
+            status: "failed",
+            output: [],
+            error: { code: "server_error", message: "upstream failed" },
+            usage: null,
+        }));
+    });
 }
 
 
