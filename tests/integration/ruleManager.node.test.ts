@@ -15,7 +15,7 @@ describe("ruleManager (node, real db)", () => {
     beforeEach(async () => {
         await dbHelper.truncate();
         const mainId = await tenantService.getMainTenantId();
-        mainScope = { tenantId: mainId, mainTenantId: mainId, isRoot: true, multiTenantEnabled: false };
+        mainScope = { tenantId: mainId, mainTenantId: mainId, isSystemAdmin: true, multiTenantEnabled: false };
     });
 
     function buildRule(overrides: Record<string, any> = {}) {

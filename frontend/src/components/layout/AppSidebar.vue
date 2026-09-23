@@ -31,7 +31,7 @@
                     <ControlOutlined />
                     <span>规则管理</span>
                 </a-menu-item>
-                <a-menu-item v-if="authStore.isRoot && tenantStore.multiTenantEnabled && tenantStore.isMainView" key="/tenant">
+                <a-menu-item v-if="authStore.isSystemAdmin && tenantStore.multiTenantEnabled && tenantStore.isMainView" key="/tenant">
                     <ApartmentOutlined />
                     <span>租户管理</span>
                 </a-menu-item>

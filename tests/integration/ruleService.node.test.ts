@@ -10,6 +10,7 @@ import customError from "../../src/customError";
 import dbHelper from "../helpers/dbHelper";
 import ormTestHelper from "../helpers/ormTestHelper";
 import memoryRateLimitStore from "../../src/util/rule/memoryRateLimitStore";
+import type { TenantScope } from "../../src/middleware/tenantScopeMiddleware";
 
 describe("ruleService (node, real db)", () => {
     let tenantId = 1;
@@ -26,6 +27,11 @@ describe("ruleService (node, real db)", () => {
         memoryRateLimitStore.clear();
         ruleService.invalidateCache();
     });
+
+    // 作用域（isSystemAdmin 由 resolveScopeForUser 判定后注入）；规则对所有人一视同仁，作用域只影响规则集归属
+    function tenantScope(isSystemAdmin = false): TenantScope {
+        return { tenantId, mainTenantId, isSystemAdmin, multiTenantEnabled: true };
+    }
 
     function user(id: number, type: UserType = UserType.NORMAL): SgUser {
         return { id, type } as unknown as SgUser;
@@ -57,11 +63,11 @@ describe("ruleService (node, real db)", () => {
         });
 
         // 名单外用户 1 → 拒绝
-        await expect(ruleService.matchAndCheck(user(1), model(5), tenantId, mainTenantId)).rejects.toBeInstanceOf(customError.AccessDeniedError);
+        await expect(ruleService.matchAndCheck(user(1), model(5), tenantScope())).rejects.toBeInstanceOf(customError.AccessDeniedError);
         // 名单内用户 3 → 放行
-        await expect(ruleService.matchAndCheck(user(3), model(5), tenantId, mainTenantId)).resolves.toBeUndefined();
+        await expect(ruleService.matchAndCheck(user(3), model(5), tenantScope())).resolves.toBeUndefined();
         // 其他模型 → 放行
-        await expect(ruleService.matchAndCheck(user(1), model(6), tenantId, mainTenantId)).resolves.toBeUndefined();
+        await expect(ruleService.matchAndCheck(user(1), model(6), tenantScope())).resolves.toBeUndefined();
     });
 
     it("deny-wins: any of multiple forbid_access rules matching rejects", async () => {
@@ -69,16 +75,27 @@ describe("ruleService (node, real db)", () => {
         await createAccessControl({ type: "user_id", oper: "in", values: [1, 2] });
 
         // 用户 1 命中第二条规则
-        await expect(ruleService.matchAndCheck(user(1), model(7), tenantId, mainTenantId)).rejects.toBeInstanceOf(customError.AccessDeniedError);
+        await expect(ruleService.matchAndCheck(user(1), model(7), tenantScope())).rejects.toBeInstanceOf(customError.AccessDeniedError);
         // 用户 3 两条都不命中 → 放行
-        await expect(ruleService.matchAndCheck(user(3), model(7), tenantId, mainTenantId)).resolves.toBeUndefined();
+        await expect(ruleService.matchAndCheck(user(3), model(7), tenantScope())).resolves.toBeUndefined();
     });
 
-    it("root bypasses all rules", async () => {
+    it("rules apply to every user, including root (no bypass)", async () => {
         await createRateLimit({ type: "const", values: [true] }, 1);
         await createAccessControl({ type: "const", values: [true] });
 
-        await expect(ruleService.matchAndCheck(user(1, UserType.ROOT), model(5), tenantId, mainTenantId)).resolves.toBeUndefined();
+        // root、系统管理员、普通用户命中同一条 forbid_access 规则 → 一律 403
+        await expect(ruleService.matchAndCheck(user(1, UserType.ROOT), model(5), tenantScope(true))).rejects.toBeInstanceOf(customError.AccessDeniedError);
+        await expect(ruleService.matchAndCheck(user(2, UserType.ADMIN), model(5), tenantScope(true))).rejects.toBeInstanceOf(customError.AccessDeniedError);
+        await expect(ruleService.matchAndCheck(user(3), model(5), tenantScope())).rejects.toBeInstanceOf(customError.AccessDeniedError);
+    });
+
+    it("matchAndCheckVendor applies to every user, including root", async () => {
+        await createRateLimit({ type: "vendor_id", oper: "=", values: [9] }, 1);
+
+        // root 照样消耗配额：rpm=1 → 首个放行、第二个 429
+        await expect(ruleService.matchAndCheckVendor(user(1, UserType.ROOT), model(5), vendor(9), tenantScope(true))).resolves.toBeUndefined();
+        await expect(ruleService.matchAndCheckVendor(user(1, UserType.ROOT), model(5), vendor(9), tenantScope(true))).rejects.toBeInstanceOf(customError.RateLimitError);
     });
 
     it("forbid_access is checked before rate_limit (denied request consumes no quota)", async () => {
@@ -92,19 +109,19 @@ describe("ruleService (node, real db)", () => {
         });
 
         // 用户 1 被 403 拒绝，不消耗限流计数
-        await expect(ruleService.matchAndCheck(user(1), model(5), tenantId, mainTenantId)).rejects.toBeInstanceOf(customError.AccessDeniedError);
+        await expect(ruleService.matchAndCheck(user(1), model(5), tenantScope())).rejects.toBeInstanceOf(customError.AccessDeniedError);
         // 用户 2 仍保有完整配额（rpm=1 → 第一个请求放行）
-        await expect(ruleService.matchAndCheck(user(2), model(5), tenantId, mainTenantId)).resolves.toBeUndefined();
+        await expect(ruleService.matchAndCheck(user(2), model(5), tenantScope())).resolves.toBeUndefined();
         // 用户 2 第二个请求 → 限流
-        await expect(ruleService.matchAndCheck(user(2), model(5), tenantId, mainTenantId)).rejects.toBeInstanceOf(customError.RateLimitError);
+        await expect(ruleService.matchAndCheck(user(2), model(5), tenantScope())).rejects.toBeInstanceOf(customError.RateLimitError);
     });
 
     it("rate limit rejects after rpm quota exhausted", async () => {
         await createRateLimit({ type: "model_id", oper: "=", values: [5] }, 2);
 
-        await expect(ruleService.matchAndCheck(user(1), model(5), tenantId, mainTenantId)).resolves.toBeUndefined();
-        await expect(ruleService.matchAndCheck(user(2), model(5), tenantId, mainTenantId)).resolves.toBeUndefined();
-        await expect(ruleService.matchAndCheck(user(3), model(5), tenantId, mainTenantId)).rejects.toBeInstanceOf(customError.RateLimitError);
+        await expect(ruleService.matchAndCheck(user(1), model(5), tenantScope())).resolves.toBeUndefined();
+        await expect(ruleService.matchAndCheck(user(2), model(5), tenantScope())).resolves.toBeUndefined();
+        await expect(ruleService.matchAndCheck(user(3), model(5), tenantScope())).rejects.toBeInstanceOf(customError.RateLimitError);
     });
 
     it("rules with vendor_id are split to phase 2 (matchAndCheckVendor)", async () => {
@@ -117,18 +134,18 @@ describe("ruleService (node, real db)", () => {
         });
 
         // 阶段一不含 vendor_id 的规则 → 不拦截
-        await expect(ruleService.matchAndCheck(user(1), model(5), tenantId, mainTenantId)).resolves.toBeUndefined();
+        await expect(ruleService.matchAndCheck(user(1), model(5), tenantScope())).resolves.toBeUndefined();
         // 阶段二命中实际路由到的供应商 9 → 拒绝
-        await expect(ruleService.matchAndCheckVendor(user(1), model(5), vendor(9), tenantId, mainTenantId)).rejects.toBeInstanceOf(customError.AccessDeniedError);
+        await expect(ruleService.matchAndCheckVendor(user(1), model(5), vendor(9), tenantScope())).rejects.toBeInstanceOf(customError.AccessDeniedError);
         // 路由到供应商 8 → 放行
-        await expect(ruleService.matchAndCheckVendor(user(1), model(5), vendor(8), tenantId, mainTenantId)).resolves.toBeUndefined();
+        await expect(ruleService.matchAndCheckVendor(user(1), model(5), vendor(8), tenantScope())).resolves.toBeUndefined();
     });
 
     it("vendor rate limit throws RateLimitError with failoverEligible=true", async () => {
         await createRateLimit({ type: "vendor_id", oper: "=", values: [9] }, 1);
 
-        await expect(ruleService.matchAndCheckVendor(user(1), model(5), vendor(9), tenantId, mainTenantId)).resolves.toBeUndefined();
-        const err = await ruleService.matchAndCheckVendor(user(1), model(5), vendor(9), tenantId, mainTenantId).catch(e => e);
+        await expect(ruleService.matchAndCheckVendor(user(1), model(5), vendor(9), tenantScope())).resolves.toBeUndefined();
+        const err = await ruleService.matchAndCheckVendor(user(1), model(5), vendor(9), tenantScope()).catch(e => e);
         expect(err).toBeInstanceOf(customError.RateLimitError);
         expect(err.failoverEligible).toBe(true);
     });

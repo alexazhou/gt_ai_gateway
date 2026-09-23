@@ -10,6 +10,9 @@ export const useAuthStore = defineStore('auth', () => {
     const userId = ref<number | null>(null);
     // 当前登录用户名：顶栏展示（root 为 "Root"）
     const userName = ref<string>('');
+    // 系统管理员（root，或归属 main 租户的 admin）：与后端 TenantScope.isSystemAdmin 同源，
+    // 由 /status.json 下发，前端不自行拼装判定条件（main 租户 id 在隔离开关闭时不下发）
+    const isSystemAdmin = ref(false);
     const isLoading = ref(false);
 
     const isAuthenticated = computed(() => !!token.value);
@@ -25,6 +28,7 @@ export const useAuthStore = defineStore('auth', () => {
         userType.value = '';
         userId.value = null;
         userName.value = '';
+        isSystemAdmin.value = false;
         clearAuthToken();
     }
 
@@ -41,6 +45,8 @@ export const useAuthStore = defineStore('auth', () => {
             }
             userId.value = data?.user_id ?? null;
             userName.value = data?.user_name ?? '';
+            // 旧后端不返回该字段 → 退回「仅 root」，与改造前行为一致
+            isSystemAdmin.value = data?.is_system_admin ?? (data?.user_type === 'root');
             return { success: true };
         } catch (error: any) {
             // 只有明确的 401/403 认证失败才清 Token
@@ -76,6 +82,7 @@ export const useAuthStore = defineStore('auth', () => {
         isLoading,
         isAuthenticated,
         isRoot,
+        isSystemAdmin,
         setToken,
         clearToken,
         validateToken,

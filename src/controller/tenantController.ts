@@ -1,5 +1,4 @@
 import { Context } from "hono";
-import { UserType } from "../constants";
 import tenantManager from "../manager/tenantManager";
 import tenantService from "../service/tenantService";
 import configService from "../service/configService";
@@ -7,15 +6,15 @@ import customError from "../customError";
 import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
 
 
-// 租户管理 root 专用：非 root 一律 403
-function assertRoot(c: Context): void {
-    if (c.get("user_type") !== UserType.ROOT) {
-        throw new customError.AppError("Root access required", 403);
+// 租户管理系统管理员专用（root，或归属 main 租户的 admin）：非系统管理员一律 403
+function assertSystemAdmin(c: Context): void {
+    if (!c.get("tenantScope")?.isSystemAdmin) {
+        throw new customError.AppError("System administrator access required", 403);
     }
 }
 
 
-// 功能开关关闭时租户「管理写操作」禁用（list / get 仍允许 root 查看租户本身）
+// 功能开关关闭时租户「管理写操作」禁用（list / get 仍允许系统管理员查看租户本身）
 async function assertMultiTenantEnabled(): Promise<void> {
     if (!(await configService.isMultiTenantEnabled())) {
         throw new customError.AppError("Multi-tenant isolation is disabled", 400);
@@ -24,7 +23,7 @@ async function assertMultiTenantEnabled(): Promise<void> {
 
 
 async function listTenants(c: Context) {
-    assertRoot(c);
+    assertSystemAdmin(c);
     const query = c.req.query();
     const { pageSize, offset } = parsePaginationQuery(query);
     const result = await tenantManager.list({
@@ -37,7 +36,7 @@ async function listTenants(c: Context) {
 
 
 async function getTenant(c: Context) {
-    assertRoot(c);
+    assertSystemAdmin(c);
     const tenantId = parseInt(c.req.param("id"), 10);
     if (isNaN(tenantId)) {
         throw new customError.AppError("Invalid ID format", 400);
@@ -51,7 +50,7 @@ async function getTenant(c: Context) {
 
 
 async function createTenant(c: Context) {
-    assertRoot(c);
+    assertSystemAdmin(c);
     await assertMultiTenantEnabled();
     const body = await c.req.json();
     const tenant = await tenantService.createTenant(body.name, body.description);
@@ -60,7 +59,7 @@ async function createTenant(c: Context) {
 
 
 async function updateTenant(c: Context) {
-    assertRoot(c);
+    assertSystemAdmin(c);
     await assertMultiTenantEnabled();
     const tenantId = parseInt(c.req.param("id"), 10);
     if (isNaN(tenantId)) {
@@ -76,7 +75,7 @@ async function updateTenant(c: Context) {
 
 
 async function deleteTenant(c: Context) {
-    assertRoot(c);
+    assertSystemAdmin(c);
     await assertMultiTenantEnabled();
     const tenantId = parseInt(c.req.param("id"), 10);
     if (isNaN(tenantId)) {

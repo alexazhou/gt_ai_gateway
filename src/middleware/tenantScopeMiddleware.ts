@@ -16,7 +16,13 @@ export interface TenantScope {
     tenantId: number;
     /** main 租户 id：构建「本租户 ∪ main 共享模型/规则」候选条件用（避免 manager 反向依赖 tenantService） */
     mainTenantId: number;
-    isRoot: boolean;
+    /**
+     * 系统管理员：root，或归属 main 租户的 admin。多租户下二者**管理权限**完全等价
+     * （租户管理 / 跨租户视角 / 多租户开关）。
+     * 判据只看 user.tenant_id，与多租户隔离开关状态无关。
+     * 与 LLM 调用权限无关：所有用户（含 root）均受限流 / 访问控制规则约束。
+     */
+    isSystemAdmin: boolean;
     multiTenantEnabled: boolean;
 }
 
@@ -35,14 +41,27 @@ async function resolveTenantByIdentifier(identifier: string): Promise<SgTenant |
 }
 
 
+// 系统管理员判定：root 全部是；admin 须归属 main 租户。normal 一律不是。
+// 判据只看 user.tenant_id（不看解析出的视角租户），故隔离开关闭时归属其它租户的 admin 仍不是系统管理员。
+function computeIsSystemAdmin(user: SgUser | undefined, mainTenantId: number): boolean {
+    if (!user) {
+        return false;
+    }
+    if (user.type === UserType.ROOT) {
+        return true;
+    }
+    return user.type === UserType.ADMIN && user.tenant_id === mainTenantId;
+}
+
+
 // 与产品文档「请求的租户区分」一致。供管理端中间件与 LLM 调用路径共用。
 // - 功能开关关闭：一律 main；显式指定非 main 租户时报错（不静默回退）
-// - 功能开关开启：显式指定 X-Tenant-ID → 用该租户（root 可任意、不存在 400；非 root 必须等于自身 tenant_id，否则 403）；
-//   未显式指定 → 非 root 用自身租户、root 缺省 main
+// - 功能开关开启：显式指定 X-Tenant-ID → 用该租户（系统管理员可任意、不存在 400；非系统管理员必须等于自身 tenant_id，否则 403）；
+//   未显式指定 → 非系统管理员用自身租户、系统管理员缺省 main
 export async function resolveScopeForUser(user: SgUser | undefined, header?: string): Promise<TenantScope> {
-    const isRoot = user?.type === UserType.ROOT;
     const multiTenantEnabled = await configService.isMultiTenantEnabled();
     const mainId = await tenantService.getMainTenantId();
+    const isSystemAdmin = computeIsSystemAdmin(user, mainId);
 
     if (!multiTenantEnabled) {
         if (header && header.trim() !== "") {
@@ -51,7 +70,7 @@ export async function resolveScopeForUser(user: SgUser | undefined, header?: str
                 throw new customError.AppError("Multi-tenant isolation is disabled", 400);
             }
         }
-        return { tenantId: mainId, mainTenantId: mainId, isRoot, multiTenantEnabled: false };
+        return { tenantId: mainId, mainTenantId: mainId, isSystemAdmin, multiTenantEnabled: false };
     }
 
     if (header && header.trim() !== "") {
@@ -59,16 +78,16 @@ export async function resolveScopeForUser(user: SgUser | undefined, header?: str
         if (!specified) {
             throw new customError.AppError("Tenant not found", 400);
         }
-        if (!isRoot && specified.id !== user?.tenant_id) {
+        if (!isSystemAdmin && specified.id !== user?.tenant_id) {
             throw new customError.AppError("Tenant mismatch: you can only operate within your own tenant", 403);
         }
-        return { tenantId: specified.id, mainTenantId: mainId, isRoot, multiTenantEnabled: true };
+        return { tenantId: specified.id, mainTenantId: mainId, isSystemAdmin, multiTenantEnabled: true };
     }
 
-    if (isRoot) {
-        return { tenantId: mainId, mainTenantId: mainId, isRoot, multiTenantEnabled: true };
+    if (isSystemAdmin) {
+        return { tenantId: mainId, mainTenantId: mainId, isSystemAdmin, multiTenantEnabled: true };
     }
-    return { tenantId: user?.tenant_id ?? mainId, mainTenantId: mainId, isRoot, multiTenantEnabled: true };
+    return { tenantId: user?.tenant_id ?? mainId, mainTenantId: mainId, isSystemAdmin, multiTenantEnabled: true };
 }
 
 
@@ -109,10 +128,27 @@ const requireTenantAdmin: MiddlewareHandler = async (c, next) => {
     return await next();
 };
 
+/**
+ * 仅解析并注入 tenantScope（不做租户鉴权），供全局控制面在 requireAdmin 之后使用。
+ * 控制器据 scope.isSystemAdmin 决定是否放行系统管理员专属能力。
+ */
 const tenantScope: MiddlewareHandler = async (c, next) => {
     const scope = await resolveScopeForUser(c.get("user"), c.req.header("X-Tenant-ID"));
     c.set("tenantScope", scope);
     await next();
 };
 
-export default { tenantScope, requireTenantAdmin };
+/**
+ * 全局控制面（/config.json、/client-config/*）入口：解析作用域并要求落在 main 视角。
+ * 与前端一致（侧边栏「设置」「客户端管理」仅在 main 视角显示）；隔离关闭时 scope 恒为 main，自然放行。
+ */
+const requireMainView: MiddlewareHandler = async (c, next) => {
+    const scope = await resolveScopeForUser(c.get("user"), c.req.header("X-Tenant-ID"));
+    if (scope.tenantId !== scope.mainTenantId) {
+        return c.json({ error: "This endpoint is only available in the main tenant scope" }, 403);
+    }
+    c.set("tenantScope", scope);
+    return await next();
+};
+
+export default { tenantScope, requireMainView, requireTenantAdmin };

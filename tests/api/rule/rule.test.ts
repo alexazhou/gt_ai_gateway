@@ -460,9 +460,10 @@ describe("Rule API", () => {
         expect(limited.status).toBe(429);
     });
 
-    it("root bypasses all rules", async () => {
+    it("rules apply to root too (no bypass)", async () => {
         const vendorId = await createVendor();
         const model = await createModel(unique("root-model"), vendorId);
+        const user = await createUser();
 
         // 全量拒绝：forbid_access const→true（拒绝所有人）+ rate_limit rpm=0（不可用）
         await requestHelper.post(
@@ -476,13 +477,32 @@ describe("Rule API", () => {
             adminToken,
         );
 
-        // root 请求全程旁路
+        // root 与普通用户一样被 403 拦截（命中 forbid_access，先于限流判定）
         const rootResponse = await requestHelper.post(
             "/llm/v1/chat/completions",
             mockHelper.generateOpenAIChatRequest({ model: model.name, stream: false }),
             ROOT_TOKEN,
         );
-        expect(rootResponse.status).toBe(200);
+        expect(rootResponse.status).toBe(403);
+
+        const userResponse = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: model.name, stream: false }),
+            user.token,
+        );
+        expect(userResponse.status).toBe(403);
+
+        // 删除全部拒绝规则后，root 恢复可用（确认 403 由规则而非其它原因导致）
+        const list = await requestHelper.get("/rule/list.json", adminToken);
+        for (const rule of list.body.list) {
+            await requestHelper.del(`/rule/${rule.id}`, adminToken);
+        }
+        const rootAfter = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({ model: model.name, stream: false }),
+            ROOT_TOKEN,
+        );
+        expect(rootAfter.status).toBe(200);
     });
 
     it("zero regression: no rules configured, behavior unchanged", async () => {
