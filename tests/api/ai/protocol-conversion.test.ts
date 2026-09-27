@@ -19,6 +19,8 @@ let anthropicClientModelId: number;
 let anthropicClientModelName: string;
 let responsesErrorModelId: number;
 let responsesErrorModelName: string;
+let openAIClientResponsesUpstreamModelId: number;
+let openAIClientResponsesUpstreamModelName: string;
 
 
 describe("AI Protocol Conversion API", () => {
@@ -108,6 +110,27 @@ describe("AI Protocol Conversion API", () => {
             adminToken,
         );
         responsesErrorModelId = responsesErrorModel.body.id;
+
+        const responsesOnlyVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                type: "other",
+                name: "Mock Responses Only Conversion",
+                token: "responses-conversion-token",
+                urls: { responses: `${mockBaseUrl}/responses` },
+            },
+            adminToken,
+        );
+        openAIClientResponsesUpstreamModelName = `openai-client-responses-upstream-${Date.now()}`;
+        const openAIClientResponsesUpstreamModel = await requestHelper.post(
+            "/model/create.json",
+            modelFixtures.createRandomModel(
+                responsesOnlyVendor.body.id,
+                openAIClientResponsesUpstreamModelName,
+            ),
+            adminToken,
+        );
+        openAIClientResponsesUpstreamModelId = openAIClientResponsesUpstreamModel.body.id;
     });
 
 
@@ -207,6 +230,39 @@ describe("AI Protocol Conversion API", () => {
         expect(responseData.choices[0].message.role).toBe("assistant");
         expect(responseData.choices[0].message.content).toContain("mock Claude assistant");
         expect(responseData.usage.prompt_tokens).toBeGreaterThan(0);
+    }, 30000);
+
+
+    it("should convert OpenAI stream request to a Responses upstream and return OpenAI SSE", async () => {
+        const chatRequest = mockHelper.generateOpenAIChatRequest({
+            model: openAIClientResponsesUpstreamModelName,
+            stream: true,
+        });
+
+        const response = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            chatRequest,
+            testUserToken,
+        );
+
+        expect(response.status).toBe(200);
+        expect(typeof response.body).toBe("string");
+        expect(response.body).toContain("chat.completion.chunk");
+        expect(response.body).toContain("[DONE]");
+        // 客户端协议是 OpenAI，不该看到 Responses 的事件名
+        expect(response.body).not.toContain("response.output_text.delta");
+
+        const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+        const record = records[0];
+        expect(record.user_id).toBe(testUserId);
+        expect(record.model_id).toBe(openAIClientResponsesUpstreamModelId);
+        expect(record.status).toBe("success");
+        expect(record.upstream_format).toBe("responses");
+        expect(record.usage.prompt_tokens).toBeGreaterThan(0);
+
+        const responseData = JSON.parse(record.response_data);
+        expect(responseData.choices[0].message.role).toBe("assistant");
+        expect(responseData.choices[0].message.content).toBeTruthy();
     }, 30000);
 
 

@@ -684,8 +684,6 @@ describe("Stream Failure Handling", () => {
     // 转换器是客户端看到的唯一通道，而累加器吃的也是转换后的事件——转换器一旦吞掉
     // 上游的错误，客户端只看到一条被截断的流，记录还可能被记成成功并计费。
     //
-    // 只覆盖路由能走到的跨协议情况。OpenAI 客户端只会落到 Anthropic 上游
-    // （protocolUtil.resolveUpstreamFormat），那个方向这里造不出来，只由转换器单元用例覆盖。
     // ============================================================
 
     describe("Cross-protocol upstream failure — error inside a 200 SSE stream", () => {
@@ -709,6 +707,29 @@ describe("Stream Failure Handling", () => {
             // 上游的错误体要落进记录（而不是只留一个 unknown_error）
             expect(record.response_data).toContain("upstream failed mid-stream");
         }
+
+        it("should surface an upstream response.failed to an OpenAI client", async () => {
+            const response = await fetch(`${config.SERVER_CONFIG.baseUrl}/llm/v1/chat/completions`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${testUserToken}`,
+                },
+                body: JSON.stringify({
+                    model: responsesStreamFailedModelName,
+                    messages: [{ role: "user", content: "hi" }],
+                    stream: true,
+                }),
+            } as any);
+
+            expect(response.status).toBe(200);
+            const sseText = await readStreamText(response);
+
+            // Responses 的 response.failed 必须被翻译成带 error 字段的 chunk
+            expect(sseText).toContain("upstream failed mid-stream");
+
+            await expectRecordFailedWithUpstreamError();
+        }, 15000);
 
         it("should surface an upstream response.failed to an Anthropic client", async () => {
             const response = await fetch(`${config.SERVER_CONFIG.baseUrl}/llm/v1/messages`, {

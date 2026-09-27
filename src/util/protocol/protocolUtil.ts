@@ -17,12 +17,12 @@ export function resolveUpstreamFormat(
         return clientFormat;
     }
 
-    // 尝试其他支持的格式（按优先级排序）
+    // 上游不支持客户端协议时，按下面的顺序回退。
+    // OpenAI 与 Responses 是同一家的两套协议，互相转换更贴近原始请求语义
+    // （reasoning 映射为 reasoning_effort），所以互为首选，Anthropic 排在后面。
     const supportedAlternativeFormats: Partial<Record<ApiFormat, ApiFormat[]>> = {
-        [ApiFormat.OPENAI]: [ApiFormat.ANTHROPIC],
+        [ApiFormat.OPENAI]: [ApiFormat.RESPONSES, ApiFormat.ANTHROPIC],
         [ApiFormat.ANTHROPIC]: [ApiFormat.OPENAI, ApiFormat.RESPONSES],
-        // RESPONSES 客户端回退优先 OPENAI：Responses 为 OpenAI 原生协议，
-        // 转 openai 更贴近原始请求语义（reasoning 映射为 reasoning_effort）
         [ApiFormat.RESPONSES]: [ApiFormat.OPENAI, ApiFormat.ANTHROPIC],
     };
 

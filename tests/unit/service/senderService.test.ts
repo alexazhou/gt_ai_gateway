@@ -36,10 +36,19 @@ describe("resolveUpstreamFormat", () => {
         expect(upstreamFormat).toBe(ApiFormat.RESPONSES);
     });
 
-    it("falls back to client format when no supported conversion path", () => {
+    it("uses Responses for an OpenAI client when only Responses is supported", () => {
         const upstreamFormat = protocolUtils.resolveUpstreamFormat(
             ApiFormat.OPENAI,
             [ApiFormat.RESPONSES],
+        );
+
+        expect(upstreamFormat).toBe(ApiFormat.RESPONSES);
+    });
+
+    it("falls back to client format when the upstream declares no format", () => {
+        const upstreamFormat = protocolUtils.resolveUpstreamFormat(
+            ApiFormat.OPENAI,
+            [],
         );
 
         expect(upstreamFormat).toBe(ApiFormat.OPENAI);
