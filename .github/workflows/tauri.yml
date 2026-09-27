@@ -140,6 +140,10 @@ jobs:
           TAURI_BUILD_TARGET: x86_64-pc-windows-msvc
         run: npm run tauri:build-sidecar-backend
 
+      - name: Run backend Rust tests
+        working-directory: tauri/src-tauri
+        run: cargo test --release --target x86_64-pc-windows-msvc
+
       - name: Build Tauri App
         uses: tauri-apps/tauri-action@v0
         env:

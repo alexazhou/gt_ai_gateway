@@ -1,6 +1,8 @@
 mod sys;
 pub mod utils;
 
+use crate::utils::{StdioEvent, StdioStream};
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -365,8 +367,6 @@ fn start_backend_process(app: &tauri::AppHandle) -> Result<(), String> {
             return Err(format!("failed to spawn backend sidecar: {}", e));
         }
     };
-    let stdout = child.stdout.take();
-
     sys::platform::post_spawn(&mut platform_state, &mut child);
 
     let process_state = app.state::<BackendProcessState>();
@@ -378,115 +378,118 @@ fn start_backend_process(app: &tauri::AppHandle) -> Result<(), String> {
     drop(stored_platform_state);
 
     schedule_backend_start_timeout(app.clone());
-    watch_backend_stdout(app.clone(), child, stdout);
+
+    // stdout / stderr 都是管道，一并交给 watch_piped_stdio 接管；漏掉任何一路都会让后端在写满缓冲区后卡死
+    utils::watch_piped_stdio(child, {
+        let app_for_stdout = app.clone();
+        let app_for_exit = app.clone();
+        move |event| match event {
+            StdioEvent::ReaderStarted(stream) => {
+                rust_log(format!("{}_READER_THREAD_STARTED", stream.label()))
+            }
+            StdioEvent::ReaderFinished(stream) => {
+                rust_log(format!("{}_READER_THREAD_FINISHED", stream.label()))
+            }
+            StdioEvent::Line(StdioStream::Stdout, line) => {
+                handle_backend_stdout_line(&app_for_stdout, &line)
+            }
+            StdioEvent::Line(StdioStream::Stderr, line) => {
+                rust_log(format!("BACKEND_STDERR: {}", line))
+            }
+            StdioEvent::ReadError(stream, message) => {
+                rust_log(format!("{} READ ERROR: {}", stream.label(), message))
+            }
+            StdioEvent::Exited(code) => handle_backend_exit(&app_for_exit, code),
+        }
+    });
     rust_log("backend process spawned");
     Ok(())
 }
 
-fn watch_backend_stdout(
-    app_handle: tauri::AppHandle,
-    mut child: std::process::Child,
-    stdout: Option<std::process::ChildStdout>,
-) {
-    std::thread::spawn(move || {
-        use std::io::{BufRead, BufReader};
+/// 处理一行后端 stdout：转发日志、驱动启动状态机
+fn handle_backend_stdout_line(app_handle: &tauri::AppHandle, line_str: &str) {
+    rust_log(format!("BACKEND_STDOUT: {}", line_str));
 
-        rust_log("STDOUT_READER_THREAD_STARTED");
-
-        // 持续读取 stdout，直到进程退出管道关闭（这同时充当了 drain 的作用，防止子进程被阻塞）
-        if let Some(out) = stdout {
-            let reader = BufReader::new(out);
-            for line in reader.lines() {
-                match line {
-                    Ok(line_str) => {
-                        rust_log(format!("BACKEND_STDOUT: {}", line_str));
-                        if line_str.contains(MIGRATION_START_MARKER) {
-                            let started = with_backend_state(|state| {
-                                if state.is_starting() {
-                                    *state = BackendState::Migrating;
-                                    true
-                                } else {
-                                    false
-                                }
-                            });
-                            if started {
-                                cancel_backend_start_timeout();
-                                let _ = app_handle.emit("backend-migration-start", ());
-                            } else {
-                                rust_log(format!(
-                                    "backend migration start ignored, state={}",
-                                    backend_state_description(),
-                                ));
-                            }
-                        }
-                        if line_str.contains(MIGRATION_END_MARKER) {
-                            let ended = with_backend_state(|state| {
-                                if state.is_migrating() {
-                                    *state = BackendState::Starting;
-                                    true
-                                } else {
-                                    false
-                                }
-                            });
-                            if ended {
-                                let _ = app_handle.emit("backend-migration-end", line_str.clone());
-                                schedule_backend_start_timeout(app_handle.clone());
-                            } else {
-                                rust_log(format!(
-                                    "backend migration end ignored, state={}",
-                                    backend_state_description(),
-                                ));
-                            }
-                        }
-                        // 检测到成功启动的关键日志
-                        if line_str.contains("Server listening on") {
-                            let should_open = with_backend_state(|state| {
-                                if state.is_waiting_for_ready() {
-                                    *state = BackendState::Ready;
-                                    true
-                                } else {
-                                    false
-                                }
-                            });
-                            if should_open {
-                                cancel_backend_start_timeout();
-                                let _ = app_handle.emit("backend-ready", ());
-                                open_main_window(&app_handle);
-                            } else {
-                                rust_log(format!(
-                                    "backend ready ignored, state={}",
-                                    backend_state_description(),
-                                ));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        rust_log(format!("STDOUT READ ERROR: {:?}", e));
-                    }
-                }
+    if line_str.contains(MIGRATION_START_MARKER) {
+        let started = with_backend_state(|state| {
+            if state.is_starting() {
+                *state = BackendState::Migrating;
+                true
+            } else {
+                false
             }
-        }
-
-        // stdout 结束后（意味着子进程已经退出），收集退出码
-        if let Ok(status) = child.wait() {
+        });
+        if started {
             cancel_backend_start_timeout();
-            let code = status.code().unwrap_or(1);
-            let should_emit_error = with_backend_state(|state| match state {
-                BackendState::Ready => {
-                    *state = BackendState::Exited(code);
-                    code != 0
-                }
-                BackendState::Failed(_) => false,
-                _ => {
-                    *state = BackendState::Exited(code);
-                    true
-                }
-            });
-            if should_emit_error {
-                emit_backend_error(&app_handle, &BackendError::ExitCode(code));
+            let _ = app_handle.emit("backend-migration-start", ());
+        } else {
+            rust_log(format!(
+                "backend migration start ignored, state={}",
+                backend_state_description(),
+            ));
+        }
+    }
+
+    if line_str.contains(MIGRATION_END_MARKER) {
+        let ended = with_backend_state(|state| {
+            if state.is_migrating() {
+                *state = BackendState::Starting;
+                true
+            } else {
+                false
             }
+        });
+        if ended {
+            let _ = app_handle.emit("backend-migration-end", line_str.to_string());
+            schedule_backend_start_timeout(app_handle.clone());
+        } else {
+            rust_log(format!(
+                "backend migration end ignored, state={}",
+                backend_state_description(),
+            ));
+        }
+    }
+
+    // 检测到成功启动的关键日志
+    if line_str.contains("Server listening on") {
+        let should_open = with_backend_state(|state| {
+            if state.is_waiting_for_ready() {
+                *state = BackendState::Ready;
+                true
+            } else {
+                false
+            }
+        });
+        if should_open {
+            cancel_backend_start_timeout();
+            let _ = app_handle.emit("backend-ready", ());
+            open_main_window(app_handle);
+        } else {
+            rust_log(format!(
+                "backend ready ignored, state={}",
+                backend_state_description(),
+            ));
+        }
+    }
+}
+
+/// 后端进程退出后的收尾：更新状态，必要时上报错误
+fn handle_backend_exit(app_handle: &tauri::AppHandle, code: i32) {
+    cancel_backend_start_timeout();
+    let should_emit_error = with_backend_state(|state| match state {
+        BackendState::Ready => {
+            *state = BackendState::Exited(code);
+            code != 0
+        }
+        BackendState::Failed(_) => false,
+        _ => {
+            *state = BackendState::Exited(code);
+            true
         }
     });
+    if should_emit_error {
+        emit_backend_error(app_handle, &BackendError::ExitCode(code));
+    }
 }
 
 #[tauri::command]

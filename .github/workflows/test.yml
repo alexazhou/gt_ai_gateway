@@ -155,3 +155,45 @@ jobs:
 
       - name: Run tests (Worker mode)
         run: npm run backend:test:worker
+
+  test-rust-win:
+    name: Test (Rust, Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          token: ${{ github.token }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './tauri/src-tauri -> target'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 后端 sidecar 是 cargo 编译期的硬依赖：tauri-build 会校验 externalBin 指向的文件是否存在
+      - name: Build backend sidecar
+        shell: bash
+        env:
+          TAURI_BUILD_TARGET: x86_64-pc-windows-msvc
+        run: npm run tauri:build-sidecar-backend
+
+      - name: Run Rust tests
+        working-directory: tauri/src-tauri
+        run: cargo test --release --target x86_64-pc-windows-msvc
