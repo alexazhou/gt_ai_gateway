@@ -124,7 +124,7 @@ fn backend_state_snapshot() -> BackendState {
         .clone()
 }
 
-fn backend_is_ready() -> bool {
+pub(crate) fn backend_is_ready() -> bool {
     backend_state_snapshot().is_ready()
 }
 
@@ -566,7 +566,7 @@ fn read_config(app_data_dir: &Path) -> AppConfig {
 }
 
 
-fn show_main_window(app: &tauri::AppHandle) {
+pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     rust_log("show_main_window called");
     sys::platform::set_dock_visibility(app, true);
     if let Some(window) = app.get_webview_window("main") {
@@ -723,22 +723,18 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| match event {
-            tauri::RunEvent::ExitRequested { api, .. } => {
-                // Prevent the app from completely exiting when the last window closes
-                api.prevent_exit();
+        .run(|app_handle, event| {
+            // 平台特有事件（如 macOS 点 Dock 图标重新打开）由 sys 层自行判断与处理
+            if sys::platform::handle_run_event(app_handle, &event) {
+                return;
             }
-            #[cfg(target_os = "macos")]
-            tauri::RunEvent::Reopen { has_visible_windows, .. } => {
-                if !has_visible_windows {
-                    if backend_is_ready() {
-                        show_main_window(app_handle);
-                    } else if let Some(splash) = app_handle.get_webview_window("splashscreen") {
-                        let _ = splash.show();
-                        let _ = splash.set_focus();
-                    }
+
+            match event {
+                tauri::RunEvent::ExitRequested { api, .. } => {
+                    // Prevent the app from completely exiting when the last window closes
+                    api.prevent_exit();
                 }
+                _ => {}
             }
-            _ => {}
         });
 }

@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::process::Command;
+use tauri::Manager;
 
 pub type PlatformState = crate::sys::unix::UnixPlatformState;
 
@@ -53,5 +54,26 @@ pub fn set_dock_visibility(app: &tauri::AppHandle, visible: bool) {
 
     if let Err(e) = app.set_activation_policy(policy) {
         println!("RUST: failed to set dock visibility to {}: {:?}", visible, e);
+    }
+}
+
+/// 处理平台特有的事件；返回 true 表示事件已由平台层处理，调用方不必再做通用处理。
+///
+/// macOS 独有：点击 Dock 图标重新打开应用。`RunEvent::Reopen` 只在 macOS 上存在
+/// （Tauri 自身就给它标了 `#[cfg(target_os = "macos")]`），所以只有这个文件会匹配它。
+pub fn handle_run_event(app: &tauri::AppHandle, event: &tauri::RunEvent) -> bool {
+    match event {
+        tauri::RunEvent::Reopen { has_visible_windows, .. } => {
+            if !*has_visible_windows {
+                if crate::backend_is_ready() {
+                    crate::show_main_window(app);
+                } else if let Some(splash) = app.get_webview_window("splashscreen") {
+                    let _ = splash.show();
+                    let _ = splash.set_focus();
+                }
+            }
+            true
+        }
+        _ => false,
     }
 }

@@ -33,3 +33,8 @@ pub fn post_spawn(state: &mut PlatformState, child: &mut std::process::Child) {
 }
 
 pub fn set_dock_visibility(_app: &tauri::AppHandle, _visible: bool) {}
+
+/// 处理平台特有的事件；Linux 上没有这类事件，一律交回调用方做通用处理。
+pub fn handle_run_event(_app: &tauri::AppHandle, _event: &tauri::RunEvent) -> bool {
+    false
+}
