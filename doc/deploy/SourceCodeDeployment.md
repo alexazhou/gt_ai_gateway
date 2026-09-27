@@ -38,9 +38,12 @@ cp .dev.vars.template .dev.vars
 ```
 
 打开 `.dev.vars` 文件，根据您的需要进行修改。主要的必填配置是管理员密钥：
+
 ```env
-# 超级管理员的登录密码，建议修改为您的专属密码
-ROOT_TOKEN=your-secret-root-token
+# 超级管理员的登录密码：请替换成自己生成的值（openssl rand -hex 32）。
+# your-root-token-here 只是「请改成你自己的」的标记，照抄它、或留空都不会生效：
+# root 权限会失效、管理后台无法登录（服务照常启动，启动日志会提示）
+ROOT_TOKEN=your-root-token-here
 
 # 服务运行端口，默认 8720
 PORT=8720

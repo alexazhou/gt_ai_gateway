@@ -92,10 +92,14 @@ docker run -d \
     --name gt_ai_gateway \
     -p 8787:8787 \
     -v $(pwd)/data:/app/data \
-    -e ROOT_TOKEN=your-secret-root-token \
+    -e ROOT_TOKEN=your-root-token-here \
     ghcr.io/alexazhou/gt_ai_gateway:latest
 ```
 启动后访问 `http://localhost:8787` 即可进入管理界面。详见：[Docker 部署文档](doc/deploy/DockerDeployment.md)。
+
+> `ROOT_TOKEN` 是最高权限 Token，请替换成自己生成的值（`openssl rand -hex 32`）。
+> `your-root-token-here` 只是「请改成你自己的」的标记，照抄它不会生效：root 权限会失效、
+> 管理后台无法登录（服务照常启动，启动日志会提示）。
 
 ### 3. 桌面客户端 (App) 运行
 最适合个人用户的即开即用模式。无需配置复杂的环境，直接下载安装包即可运行本地客户端。

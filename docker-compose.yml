@@ -10,7 +10,9 @@ services:
             - NODE_ENV=production
             - PORT=8787
             - DB_PATH=/app/data/local.db
-            - ROOT_TOKEN=${ROOT_TOKEN:-your-secret-root-token-change-this}
+            # ROOT_TOKEN 必须改成自己生成的值（生成方式：openssl rand -hex 32）
+            # 保留下面的示例值（或留空）时服务照常启动，但 root 权限失效、管理后台无法登录
+            - ROOT_TOKEN=${ROOT_TOKEN:-your-root-token-here}
         volumes:
             - ./data:/app/data
         restart: unless-stopped

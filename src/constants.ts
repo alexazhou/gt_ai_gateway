@@ -112,6 +112,11 @@ export const ROOT_USER_ID = -1;
 // 若允许接口写入 type=root，管理员即可自造越权账号（root 可跨租户、可管理租户）
 export const ASSIGNABLE_USER_TYPES: string[] = [UserType.NORMAL, UserType.ADMIN];
 
+// root token 的公开占位值：等于它就等同于「未配置」，一律不作为 root（见 userService.isRootToken）。
+// 文档、docker-compose、wrangler 示例统一用这个值——它是「请改成你自己的」的标记，不是可用的 token：
+// 照抄它只会得到 401，服务照常启动并在日志里提示。
+export const PLACEHOLDER_ROOT_TOKEN = "your-root-token-here";
+
 // 主租户名：自动生成、不可删除；多租户隔离关闭时所有请求固定落入该租户
 export const DEFAULT_TENANT_NAME = "main";
 

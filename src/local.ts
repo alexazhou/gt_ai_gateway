@@ -6,6 +6,7 @@ import { readFileSync } from "fs";
 import ormService from "./service/ormService";
 import recordService from "./service/recordService";
 import hostService from "./service/hostService";
+import userService from "./service/userService";
 import app, { Env } from "./routes";
 import initLogger, { Logger } from "./util/loggerUtil";
 import maskUtil from "./util/maskUtil";
@@ -107,6 +108,15 @@ async function startServer() {
         DB: (ormService.dbAdapter as any).db,
         ROOT_TOKEN: process.env.ROOT_TOKEN || "",
     };
+
+    // ROOT_TOKEN 未设置、或仍是仓库里公开的示例值时，root 权限失效、管理后台登录不上。
+    // 启动时明确提示，否则用户只看到「登录不上」而不知道原因。
+    if (!userService.isRootTokenConfigured(bindings.ROOT_TOKEN)) {
+        console.warn(
+            "⚠️ ROOT_TOKEN 未设置（或仍是仓库里公开的示例值）：root 权限已失效，管理后台无法登录。\n" +
+                "   请设置一个随机 token（例如 openssl rand -hex 32）后重启。",
+        );
+    }
 
     // Static file serving (frontend) - skip in API-only mode (desktop sidecar)
     if (!apiOnly) {

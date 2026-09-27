@@ -1,5 +1,5 @@
 import { SgUser } from "../model/sgUser";
-import { ROOT_USER_ID, UserType, BALANCE_SCALE } from "../constants";
+import { ROOT_USER_ID, UserType, BALANCE_SCALE, PLACEHOLDER_ROOT_TOKEN } from "../constants";
 import userManager from "../manager/userManager";
 import rechargeRecordManager from "../manager/rechargeRecordManager";
 import configService from "./configService";
@@ -28,11 +28,25 @@ async function sha256(input: string): Promise<Uint8Array> {
     return new Uint8Array(digest);
 }
 
-async function isRootToken(token: string, rootToken?: string): Promise<boolean> {
+/**
+ * root token 是否已正确配置：非空，且不是随仓库公开的占位值。
+ *
+ * 占位值（文档/compose/wrangler 里统一使用的示例值）等同于「未配置」——
+ * 它公开可见，若被当成有效 root token，任何人都能接管管理面。
+ */
+function isRootTokenConfigured(rootToken?: string): boolean {
     if (!rootToken) {
         return false;
     }
-    const [tokenHash, rootHash] = await Promise.all([sha256(token), sha256(rootToken)]);
+    return rootToken !== PLACEHOLDER_ROOT_TOKEN;
+}
+
+async function isRootToken(token: string, rootToken?: string): Promise<boolean> {
+    const configuredRootToken = rootToken ?? "";
+    if (!isRootTokenConfigured(configuredRootToken)) {
+        return false;
+    }
+    const [tokenHash, rootHash] = await Promise.all([sha256(token), sha256(configuredRootToken)]);
     return constantTimeEqualBytes(tokenHash, rootHash);
 }
 
@@ -110,6 +124,7 @@ async function checkBalance(userId: number, requiredAmount: number): Promise<boo
 
 export default {
     isRootToken,
+    isRootTokenConfigured,
     getUserByToken,
     adjustBalance,
     deductBalance,
