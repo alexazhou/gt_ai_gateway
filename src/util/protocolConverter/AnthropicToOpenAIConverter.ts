@@ -247,6 +247,13 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
     }
 
 
+    public override onUpstreamEnd(): ProtocolStreamEvent[] {
+        // 上游给过 finish_reason（stop_reason 已暂存）却没见 [DONE]：补齐 message_delta + message_stop。
+        // 上游真发过 [DONE] 时 handleDoneEvent 已把 pendingStopReason 清空，这里返回空、不重复补发。
+        return this.pendingStopReason !== null ? this.handleDoneEvent() : [];
+    }
+
+
     protected override handleDoneEvent(): ProtocolStreamEvent[] {
         // [DONE] 是上游 openai 流的明确收尾标记,此时所有 usage chunk(含缓存在内的
         // 尾随 usage-only chunk)一定都已到达,统一在这里聚合发出最终的

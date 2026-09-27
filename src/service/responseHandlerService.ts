@@ -100,6 +100,24 @@ async function runSSELoop(
         upstreamReader.cancel().catch(() => {});
     });
 
+    // 投递一组客户端事件：先喂旁路累加器（只记录流状态供收尾判定成败，不决定是否转发 ——
+    // 上游的错误事件因此会照常下发，客户端能看到错误详情，而不是只等到一条被截断的流，
+    // HTTP 已是 200，SSE 体是唯一的错误通道），再写 SSE。主循环与 EOF 收尾共用。
+    async function deliverClientEvents(clientEvents: ProtocolStreamEvent[]): Promise<void> {
+        for (const clientEvent of clientEvents) {
+            if (!clientEvent.data) continue;
+
+            accumulator.addEvent(clientEvent);
+            if (accumulator.isErrored() && failedCode === null) {
+                failedCode = accumulator.isParseFailed()
+                    ? FailedCode.SSE_PARSE_ERROR
+                    : FailedCode.UPSTREAM_ERROR;
+            }
+
+            await writeEventToClient(stream, clientEvent);
+        }
+    }
+
     try {
         while (true) {
             const result = await abortTimeoutUtil.raceWithTimeout(
@@ -110,7 +128,16 @@ async function runSSELoop(
                     upstreamReader.cancel().catch(() => {});
                 },
             );
-            if (result.done) break;
+            if (result.done) {
+                // 上游干净结束（EOF，不是超时/断开）：部分 OpenAI 兼容上游会给全内容、finish_reason
+                // 与 usage，却省略冗余的 [DONE] 直接关连接。此时数据是完整的，交给协议侧各自收尾 ——
+                // 转换器补齐客户端还缺的终止事件，累加器据已到齐的数据补记完成，否则会漏记 usage、
+                // 误判 failed。
+                const tailEvents = opts.converter ? opts.converter.onUpstreamEnd() : [];
+                await deliverClientEvents(tailEvents);
+                accumulator.onUpstreamEnd();
+                break;
+            }
 
             const chunk = decoder.decode(result.value, { stream: true });
             streamLogService.appendStreamLog(logStream, chunk);
@@ -130,21 +157,7 @@ async function runSSELoop(
                     ? opts.converter.convertStreamEvent(upstreamEvent.data, upstreamEvent.event, upstreamEvent.id)
                     : [upstreamEvent];
 
-                for (const clientEvent of clientEvents) {
-                    if (!clientEvent.data) continue;
-
-                    // 累加器是旁路观察者：只记录流状态（供收尾时判定成败），不决定是否转发。
-                    // 上游的错误事件因此会照常下发，客户端能看到错误详情，而不是只等到一条
-                    // 被截断的流（HTTP 已是 200，SSE 体是唯一的错误通道）。
-                    accumulator.addEvent(clientEvent);
-                    if (accumulator.isErrored() && failedCode === null) {
-                        failedCode = accumulator.isParseFailed()
-                            ? FailedCode.SSE_PARSE_ERROR
-                            : FailedCode.UPSTREAM_ERROR;
-                    }
-
-                    await writeEventToClient(stream, clientEvent);
-                }
+                await deliverClientEvents(clientEvents);
             }
 
             // 逻辑上已经结束——正常收尾（收到终止标记）或已出错——就不必再等上游关连接了，

@@ -85,6 +85,16 @@ export class OpenAIChatAccumulator extends AccumulatorBase {
     }
 
     /**
+     * 上游流干净结束：已收到 finish_reason 说明本轮生成结束、usage 也已累积到位，
+     * 只是上游省略了冗余的 [DONE] —— 补记完成，让请求按成功结算。
+     */
+    public override onUpstreamEnd(): void {
+        if (this.response.choices.some((choice) => choice.finish_reason != null)) {
+            this.markCompleted();
+        }
+    }
+
+    /**
      * 处理 OpenAI 格式的消息
      */
     private handleOpenAIMessage(msg: OpenAIChatChunk): void {

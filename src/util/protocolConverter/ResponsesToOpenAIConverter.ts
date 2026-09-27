@@ -693,6 +693,14 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
         return out;
     }
 
+    public override onUpstreamEnd(): ProtocolStreamEvent[] {
+        // 上游给过 finish_reason 却没收尾：补发 response.completed。
+        // 正常收尾（usage 帧已发 response.completed）时 resetState 已把 finishReason 清空 →
+        // 这里返回空，不重复补发。
+        return this.finishReason !== null ? this.handleDoneEvent() : [];
+    }
+
+
     protected override handleDoneEvent(): ProtocolStreamEvent[] {
         const out: ProtocolStreamEvent[] = [];
 

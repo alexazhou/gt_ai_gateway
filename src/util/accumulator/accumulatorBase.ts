@@ -45,6 +45,20 @@ export abstract class AccumulatorBase {
     }
 
     /**
+     * 上游流干净结束（EOF）时的收尾自检：本流数据已齐则标记完成。
+     *
+     * 默认空实现：Anthropic / Responses 的终止事件承载信息（stop_reason / usage / 完整
+     * response），缺失即为真截断，不能据 EOF 收尾。只有 OpenAI chat completions 需要覆写 ——
+     * 它的终止标记 [DONE] 是冗余的，部分兼容上游省略它直接关闭连接，此时数据其实已齐全。
+     *
+     * 由 responseHandlerService 在 EOF 分支调用（超时 / 上游断开 / 客户端断开等不调用）。
+     * markCompleted 内部的 errored 守卫仍然生效：上游报过错再收尾的畸形流不会记成完成。
+     */
+    public onUpstreamEnd(): void {
+        // 默认无需收尾
+    }
+
+    /**
      * 标记收到错误事件并保存 payload（子类在识别到错误事件时调用）
      */
     protected markError(payload: object): void {

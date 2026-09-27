@@ -227,6 +227,10 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
     // Handle different endpoints (more specific paths must come before generic ones)
     if (url.includes("/chat/completions/incomplete")) {
         handleOpenAIStreamIncomplete(req, res);
+    } else if (url.includes("/chat/completions/no-done-no-usage")) {
+        handleOpenAIStreamNoDoneNoUsage(req, res);
+    } else if (url.includes("/chat/completions/no-done")) {
+        handleOpenAIStreamNoDone(req, res);
     } else if (url.includes("/chat/completions/disconnect")) {
         handleOpenAIStreamDisconnect(req, res);
     } else if (url.includes("/chat/completions/slow")) {
@@ -1117,6 +1121,73 @@ function handleModelsList(_req: IncomingMessage, res: ServerResponse): void {
     };
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(response));
+}
+
+
+/**
+ * OpenAI stream that sends a complete response (finish_reason + usage) but never sends [DONE],
+ * then closes the connection cleanly. 模拟「按 stream_options.include_usage 报文、但省略 [DONE]
+ * 后直接以 chunked 终止块关闭」的上游：数据齐全，缺的只是冗余的终止标记。
+ */
+function handleOpenAIStreamNoDone(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+
+        const base = {
+            id: `chatcmpl-${Date.now()}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: data.model || "gpt-3.5-turbo",
+        };
+
+        // 内容
+        res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "Hello" }, finish_reason: null }] })}\n\n`);
+        // finish_reason：本轮生成结束
+        res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`);
+        // usage-only chunk（尾随的 choices: []）
+        res.write(`data: ${JSON.stringify({ ...base, choices: [], usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 } })}\n\n`);
+        // 干净关闭，不发 [DONE]
+        res.end();
+    });
+}
+
+
+/**
+ * 同 handleOpenAIStreamNoDone，但连 usage chunk 也不发（上游忽略 stream_options.include_usage）：
+ * 内容与 finish_reason 齐全，缺的是 [DONE] 与 usage 帧。
+ */
+function handleOpenAIStreamNoDoneNoUsage(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+
+        const base = {
+            id: `chatcmpl-${Date.now()}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: data.model || "gpt-3.5-turbo",
+        };
+
+        res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "Hello" }, finish_reason: null }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`);
+        // 不发 usage chunk、不发 [DONE]，直接关闭
+        res.end();
+    });
 }
 
 
