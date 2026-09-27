@@ -263,10 +263,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
         const out: ProtocolStreamEvent[] = [];
 
         switch (eventType) {
-            // 上游失败：Responses 有两种形态 —— API 级 error（body 本身就是错误对象）与
-            // 模型级 response.failed（错误对象在 response.error 里）。都翻译成 Anthropic 的
-            // error 事件：客户端与 Anthropic 累加器都按 event: error 识别失败；漏掉时客户端
-            // 只看到截断的流，累加器还会把请求记成成功并计费
+            // 上游失败统一转成 Anthropic 的 error 事件：客户端和累加器都按 event: error 认失败
             case "error":
             case "response.failed": {
                 const failedEvent = data as unknown as ResponsesEventError | ResponsesEventResponseFailed;

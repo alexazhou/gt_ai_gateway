@@ -339,10 +339,8 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
         const out: ProtocolStreamEvent[] = [];
         const chunk = data as unknown as OpenAIChunk;
 
-        // 上游在流内报错：OpenAI 兼容上游把错误放在 chunk 的 error 字段里（有的还会给 type: "error"）。
-        // 必须翻译成 Responses 的 error 事件，客户端与 Responses 累加器都按 type: "error" 识别失败；
-        // 漏掉时客户端只看到一条被截断的流，而若此前已收到 finish_reason，onUpstreamEnd 还会补发
-        // response.completed，把请求记成成功并计费。放在最前面，避免报错前先补发 created / in_progress
+        // 上游在流里报错：必须转成 Responses 的 error 事件，客户端和累加器都按它认失败。
+        // 放在最前面：别在报错之前先补发 response.created / response.in_progress。
         const streamError = data as unknown as OpenAIStreamError;
         const errorDetail = "error" in streamError
             ? streamError.error

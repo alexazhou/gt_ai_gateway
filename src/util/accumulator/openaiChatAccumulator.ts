@@ -4,7 +4,7 @@
  * 与 anthropicAccumulator / responsesAccumulator 并列，各处理一种协议。
  */
 
-import type { ProtocolStreamEvent } from "../protocolConverter/protocolTypes";
+import type { OpenAIStreamError, ProtocolStreamEvent } from "../protocolConverter/protocolTypes";
 import { AccumulatorBase } from "./accumulatorBase";
 import type { AccumulatedResponse } from "./accumulatorTypes";
 
@@ -39,11 +39,28 @@ interface OpenAIChatChunk {
         prompt_tokens?: number;
         completion_tokens?: number;
         total_tokens?: number;
+        prompt_tokens_details?: {
+            cached_tokens?: number;
+            // 有些上游用这个字段报缓存写入（对应 Anthropic 的 cache_creation_input_tokens）
+            cache_write_tokens?: number;
+        };
         completion_tokens_details?: {
             reasoning_tokens?: number;
         };
     };
 }
+
+/**
+ * 上游在流内报错。错误放在 error 字段、或整条就是一个错误对象，两种都是实际上游的写法。
+ * error 字段判 != null 而不是判真假：正常的 chunk 里会带 error: null。
+ */
+function isOpenAIStreamError(event: OpenAIChatChunk | OpenAIStreamError): event is OpenAIStreamError {
+    if ("error" in event) {
+        return event.error != null;
+    }
+    return "type" in event && event.type === "error";
+}
+
 
 export class OpenAIChatAccumulator extends AccumulatorBase {
     private response: AccumulatedResponse = {
@@ -63,7 +80,7 @@ export class OpenAIChatAccumulator extends AccumulatorBase {
             return;
         }
 
-        let parsed: OpenAIChatChunk;
+        let parsed: OpenAIChatChunk | OpenAIStreamError;
         try {
             parsed = JSON.parse(data);
         } catch (e) {
@@ -73,7 +90,7 @@ export class OpenAIChatAccumulator extends AccumulatorBase {
         }
 
         // 错误事件检测（error 用 != null 判定：上游报文里显式的 error: null 不是错误）
-        if ((parsed as any)?.type === "error" || (parsed as any)?.error != null) {
+        if (isOpenAIStreamError(parsed)) {
             this.markError(parsed);
             return;
         }
@@ -192,7 +209,7 @@ export class OpenAIChatAccumulator extends AccumulatorBase {
      * 合并后,读取方(getUsage 等)统一从 this.response.usage 取值。
      */
     private accumulateUsage(rawUsage: OpenAIChatChunk["usage"]): void {
-        const promptDetails = (rawUsage as any).prompt_tokens_details;
+        const promptDetails = rawUsage?.prompt_tokens_details;
         const prev = this.response.usage;
         this.response.usage = {
             prompt_tokens: rawUsage?.prompt_tokens ?? prev?.prompt_tokens,

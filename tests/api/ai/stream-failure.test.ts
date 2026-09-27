@@ -31,6 +31,7 @@ let anthropicStreamErrorModelName: string;
 let responsesStreamFailedModelName: string;
 let responsesStreamFailedHangModelName: string;
 let responsesFailedBodyModelName: string;
+let openaiStreamErrorModelName: string;
 
 // Slow vendors/models for client_disconnected tests
 let openaiSlowModelName: string;
@@ -184,6 +185,27 @@ describe("Stream Failure Handling", () => {
             modelFixtures.createRandomModel(
                 responsesStreamFailedVendor.body.id,
                 responsesStreamFailedModelName,
+            ),
+            adminToken,
+        );
+
+        // --- OpenAI upstream that reports the failure inside a 200 SSE stream ---
+        const openaiStreamErrorVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                type: "other",
+                name: "Mock OpenAI Stream Error",
+                token: "test-token",
+                urls: { openai: `${MOCK_BASE}/chat/completions/stream-error` },
+            },
+            adminToken,
+        );
+        openaiStreamErrorModelName = `openai-stream-error-${Date.now()}`;
+        await requestHelper.post(
+            "/model/create.json",
+            modelFixtures.createRandomModel(
+                openaiStreamErrorVendor.body.id,
+                openaiStreamErrorModelName,
             ),
             adminToken,
         );
@@ -652,6 +674,92 @@ describe("Stream Failure Handling", () => {
             const record = records[0];
             expect(record.status).toBe("failed");
             expect(record.failed_code).toBe("upstream_error");
+        }, 15000);
+    });
+
+
+    // ============================================================
+    // 跨协议：上游 200 + 错误在 SSE 体内
+    //
+    // 转换器是客户端看到的唯一通道，而累加器吃的也是转换后的事件——转换器一旦吞掉
+    // 上游的错误，客户端只看到一条被截断的流，记录还可能被记成成功并计费。
+    //
+    // 只覆盖路由能走到的跨协议情况。OpenAI 客户端只会落到 Anthropic 上游
+    // （protocolUtil.resolveUpstreamFormat），那个方向这里造不出来，只由转换器单元用例覆盖。
+    // ============================================================
+
+    describe("Cross-protocol upstream failure — error inside a 200 SSE stream", () => {
+        async function readStreamText(response: Awaited<ReturnType<typeof fetch>>): Promise<string> {
+            const reader = (response.body as any).getReader();
+            const decoder = new TextDecoder();
+            let text = "";
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                text += decoder.decode(value, { stream: true });
+            }
+            return text;
+        }
+
+        async function expectRecordFailedWithUpstreamError(): Promise<void> {
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
+            expect(record.status).toBe("failed");
+            expect(record.failed_code).toBe("upstream_error");
+            // 上游的错误体要落进记录（而不是只留一个 unknown_error）
+            expect(record.response_data).toContain("upstream failed mid-stream");
+        }
+
+        it("should surface an upstream response.failed to an Anthropic client", async () => {
+            const response = await fetch(`${config.SERVER_CONFIG.baseUrl}/llm/v1/messages`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${testUserToken}`,
+                },
+                body: JSON.stringify({
+                    model: responsesStreamFailedModelName,
+                    max_tokens: 100,
+                    messages: [{ role: "user", content: "hi" }],
+                    stream: true,
+                }),
+            } as any);
+
+            expect(response.status).toBe(200);
+            const sseText = await readStreamText(response);
+
+            // 必须被翻译成 Anthropic 的 error 事件
+            expect(sseText).toContain("event: error");
+            expect(sseText).toContain("upstream failed mid-stream");
+
+            await expectRecordFailedWithUpstreamError();
+        }, 15000);
+
+        it("should surface an upstream error chunk to a Responses client without completing the stream", async () => {
+            const response = await fetch(`${config.SERVER_CONFIG.baseUrl}/llm/v1/responses`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${testUserToken}`,
+                },
+                body: JSON.stringify({
+                    model: openaiStreamErrorModelName,
+                    input: "hi",
+                    stream: true,
+                }),
+            } as any);
+
+            expect(response.status).toBe(200);
+            const sseText = await readStreamText(response);
+
+            expect(sseText).toContain("upstream failed mid-stream");
+            // 上游已经报错：不能补发一个 response.completed 把这条流当成功收尾
+            expect(sseText).not.toContain("response.completed");
+
+            await expectRecordFailedWithUpstreamError();
+
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            expect(records[0].cost).toBe(0);
         }, 15000);
     });
 

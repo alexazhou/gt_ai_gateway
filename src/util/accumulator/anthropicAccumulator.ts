@@ -4,7 +4,7 @@
  * 与 openaiChatAccumulator / responsesAccumulator 并列，各处理一种协议。
  */
 
-import type { ProtocolStreamEvent } from "../protocolConverter/protocolTypes";
+import type { AnthropicErrorEvent, ProtocolStreamEvent } from "../protocolConverter/protocolTypes";
 import { AccumulatorBase } from "./accumulatorBase";
 import type { AccumulatedResponse } from "./accumulatorTypes";
 
@@ -51,6 +51,25 @@ interface AnthropicChunk {
     index?: number;
 }
 
+/**
+ * 上游在流内报错。Anthropic 规定发一个名为 error 的 SSE 事件；也有上游直接给带
+ * type: "error" 或 error 字段的报文，一并认掉。error 字段判 != null 而不是判真假：
+ * 正常的报文里会带 error: null。
+ */
+function isAnthropicStreamError(
+    event: AnthropicChunk | AnthropicErrorEvent,
+    eventName?: string,
+): event is AnthropicErrorEvent {
+    if (eventName === "error") {
+        return true;
+    }
+    if ("error" in event) {
+        return event.error != null;
+    }
+    return event.type === "error";
+}
+
+
 export class AnthropicAccumulator extends AccumulatorBase {
     private response: AccumulatedResponse = {
         choices: [{ index: 0, message: { content: "", thinking: "", signature: "" }, finish_reason: null }],
@@ -76,7 +95,7 @@ export class AnthropicAccumulator extends AccumulatorBase {
             return;
         }
 
-        let parsed: AnthropicChunk;
+        let parsed: AnthropicChunk | AnthropicErrorEvent;
         try {
             parsed = JSON.parse(clientEvent.data);
         } catch (e) {
@@ -86,7 +105,7 @@ export class AnthropicAccumulator extends AccumulatorBase {
         }
 
         // 错误事件检测（error 用 != null 判定：上游报文里显式的 error: null 不是错误）
-        if (clientEvent.event === "error" || (parsed as any)?.type === "error" || (parsed as any)?.error != null) {
+        if (isAnthropicStreamError(parsed, clientEvent.event)) {
             this.markError(parsed);
             return;
         }

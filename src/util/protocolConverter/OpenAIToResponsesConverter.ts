@@ -449,9 +449,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                 break;
             }
 
-            // Responses 的模型级失败（response.status = failed）：按 OpenAI 的 error chunk 下发。
-            // body 必须带 error 字段 —— OpenAI 累加器与客户端都靠它识别失败；漏掉这个事件时，
-            // 客户端只看到一条被截断的流，累加器还会把请求记成成功并计费
+            // 生成失败要转成带 error 字段的 chunk：客户端和累加器都靠这个字段认出失败
             case "response.failed": {
                 const failedEvent = data as unknown as ResponsesEventResponseFailed;
                 const upstreamError = failedEvent.response?.error ?? null;

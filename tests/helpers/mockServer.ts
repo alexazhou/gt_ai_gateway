@@ -245,6 +245,8 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleOpenAIStreamBadData(req, res);
     } else if (url.includes("/chat/completions/heartbeat")) {
         handleOpenAIStreamHeartbeat(req, res);
+    } else if (url.includes("/chat/completions/stream-error")) {
+        handleOpenAIChatStreamError(req, res);
     } else if (url.includes("/chat/completions/error")) {
         handleOpenAIChatError(req, res);
     } else if (url.includes("/chat/completions/unavailable")) {
@@ -333,6 +335,60 @@ function handleOpenAIChatBalance(req: IncomingMessage, res: ServerResponse): voi
     req.resume();
     res.writeHead(402, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: { message: "Insufficient upstream balance" } }));
+}
+
+
+/**
+ * OpenAI 兼容上游在 HTTP 200 的流里报错：先给一轮内容，再给一个带 error 字段的 chunk。
+ * 内容里刻意带了 finish_reason 且排在错误前面 —— 漏掉错误事件时这条流会被当成正常结束、
+ * 请求按成功计费，用例因此能钉住它。
+ */
+function handleOpenAIChatStreamError(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+
+    req.on("data", (chunk) => {
+        body += chunk.toString();
+    });
+
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+        captureRequest(req, body, data);
+        const id = `chatcmpl-mock_${Date.now()}`;
+        const created = Math.floor(Date.now() / 1000);
+        const model = data.model || "gpt-4o-mini";
+
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+
+        res.write(`data: ${JSON.stringify({
+            id,
+            object: "chat.completion.chunk",
+            created,
+            model,
+            choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }],
+        })}\n\n`);
+
+        res.write(`data: ${JSON.stringify({
+            id,
+            object: "chat.completion.chunk",
+            created,
+            model,
+            choices: [{ index: 0, delta: { content: "Hello" }, finish_reason: "stop" }],
+        })}\n\n`);
+
+        res.write(`data: ${JSON.stringify({
+            error: {
+                message: "upstream failed mid-stream",
+                type: "server_error",
+                code: "server_error",
+            },
+        })}\n\n`);
+
+        res.end();
+    });
 }
 
 

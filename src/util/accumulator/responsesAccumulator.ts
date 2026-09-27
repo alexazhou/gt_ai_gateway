@@ -76,7 +76,7 @@ export class ResponsesAccumulator extends AccumulatorBase {
     addEvent(clientEvent: ProtocolStreamEvent): void {
         let event: Record<string, any>;
         try {
-            event = JSON.parse(clientEvent.data) as ResponsesStreamEvent as Record<string, any>;
+            event = JSON.parse(clientEvent.data) as Record<string, any>;
         } catch {
             this.markParseFailed();
             return;
@@ -131,12 +131,13 @@ export class ResponsesAccumulator extends AccumulatorBase {
     }
 
 
-    // error 用 != null 判定：Responses 的 response 对象本身带 error: null（正常时），
-    // 显式的 null 不是错误，只有非空 error 才算
+    // error 字段判 != null 而不是判真假：正常的 Responses 响应里会带 error: null，不算失败。
+    // 最后那个 error 非空判断是兜底：有些上游不带上面两种 type，直接把错误对象放在顶层。
     private isErrorEvent(event: Record<string, any>, eventName?: string): boolean {
+        const type = event.type as ResponsesStreamEvent["type"] | undefined;
         return eventName === "error"
-            || event.type === "error"
-            || event.type === "response.failed"
+            || type === "error"
+            || type === "response.failed"
             || event.error != null;
     }
 
