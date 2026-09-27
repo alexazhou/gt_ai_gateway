@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ResponsesToOpenAIConverter } from "../../../src/util/protocolConverter/ResponsesToOpenAIConverter";
 import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterFactory";
 import { ApiFormat } from "../../../src/constants";
+import responsesAccumulator from "../../../src/util/accumulator/responsesAccumulator";
 import type {
     ResponsesRequest,
     ResponsesNonStreamResponse,
@@ -949,6 +950,32 @@ describe("ResponsesToOpenAIConverter", () => {
             expect(completedData.response.usage.output_tokens).toBe(5);
         });
     });
+
+        // ─── 上游失败 ───
+
+        it("should surface an upstream error chunk as a Responses error event", () => {
+            const converter = new ResponsesToOpenAIConverter("gpt-4");
+
+            // OpenAI 兼容上游把流内错误放在 chunk 的 error 字段里
+            const events = converter.convertStreamEvent(
+                JSON.stringify({ error: { code: "server_error", message: "upstream exploded" } }),
+            );
+
+            // ① 客户端（Responses）必须收到错误事件：HTTP 状态已是 200，SSE 体是唯一的错误通道
+            const errorEvent = events.find((e) => e.event === "error");
+            expect(errorEvent).toBeDefined();
+            const body = JSON.parse(errorEvent!.data);
+            expect(body.type).toBe("error");
+            expect(body.message).toBe("upstream exploded");
+
+            // ② 记账层（Responses 累加器按 type: "error" 识别）也必须看到失败，
+            //    否则会按已累积的 usage 记成功并计费
+            const accumulator = new responsesAccumulator.ResponsesAccumulator();
+            for (const event of events) {
+                accumulator.addEvent(event);
+            }
+            expect(accumulator.isErrored()).toBe(true);
+        });
 
     // ─── ConverterFactory 测试 ───
 

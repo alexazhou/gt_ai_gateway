@@ -13,6 +13,7 @@ import { AnthropicToResponsesConverter } from "../../../src/util/protocolConvert
 import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterFactory";
 import { ReasoningEffort } from "../../../src/util/protocolConverter/thinkingConfig";
 import { ApiFormat } from "../../../src/constants";
+import anthropicAccumulator from "../../../src/util/accumulator/anthropicAccumulator";
 import type {
     AnthropicRequest,
     AnthropicResponse,
@@ -925,6 +926,50 @@ describe("AnthropicToResponsesConverter - convertStreamEvent (Responses SSE → 
         );
 
         expect(events).toEqual([]);
+    });
+
+    it("should hand both upstream failure shapes to the client and to the accumulator", () => {
+        // Responses 上游的两种失败形态：模型级 response.failed，以及 API 级 error
+        const failedEvents = converter.convertStreamEvent(
+            JSON.stringify({
+                type: "response.failed",
+                sequence_number: 4,
+                response: {
+                    id: "resp_123",
+                    status: "failed",
+                    error: { code: "server_error", message: "upstream exploded" },
+                },
+            }),
+            "response.failed",
+        );
+        const apiErrorEvents = converter.convertStreamEvent(
+            JSON.stringify({ type: "error", code: "rate_limit_exceeded", message: "slow down" }),
+            "error",
+        );
+
+        // ① 客户端（Anthropic）必须收到 event: error + Anthropic 形态的错误体：
+        //    HTTP 状态已是 200，SSE 体是唯一的错误通道
+        const failedError = failedEvents.find((e) => e.event === "error");
+        expect(failedError).toBeDefined();
+        expect(JSON.parse(failedError!.data)).toEqual({
+            type: "error",
+            error: { type: "server_error", message: "upstream exploded" },
+        });
+
+        const apiError = apiErrorEvents.find((e) => e.event === "error");
+        expect(apiError).toBeDefined();
+        expect(JSON.parse(apiError!.data)).toEqual({
+            type: "error",
+            error: { type: "rate_limit_exceeded", message: "slow down" },
+        });
+
+        // ② 记账层也必须看得到：runSSELoop 把【转换后】的事件同时喂给客户端格式的累加器，
+        //    转换器吞掉错误会让请求被记成成功并计费
+        const accumulator = new anthropicAccumulator.AnthropicAccumulator();
+        for (const event of [...failedEvents, ...apiErrorEvents]) {
+            accumulator.addEvent(event);
+        }
+        expect(accumulator.isErrored()).toBe(true);
     });
 });
 

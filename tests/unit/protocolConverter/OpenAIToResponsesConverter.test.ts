@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { OpenAIToResponsesConverter } from "../../../src/util/protocolConverter/OpenAIToResponsesConverter";
 import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterFactory";
 import { ApiFormat } from "../../../src/constants";
+import openaiChatAccumulator from "../../../src/util/accumulator/openaiChatAccumulator";
 import type {
     OpenAIRequest,
     OpenAIResponse,
@@ -380,6 +381,42 @@ describe("OpenAIToResponsesConverter", () => {
             };
             const result = converter.convertResponse(res, "chatcmpl-custom");
             expect(result.id).toBe("chatcmpl-custom");
+        });
+    });
+
+    // ─── 流式事件转换 ───
+
+    describe("convertStreamEvent - 上游失败", () => {
+        it("should hand response.failed to the client and to the accumulator", () => {
+            const converter = new OpenAIToResponsesConverter("gpt-4");
+
+            // Responses 的模型级失败形态：event: response.failed + response.status = failed
+            const events = converter.convertStreamEvent(
+                JSON.stringify({
+                    type: "response.failed",
+                    sequence_number: 4,
+                    response: {
+                        id: "resp_123",
+                        status: "failed",
+                        error: { code: "server_error", message: "upstream exploded" },
+                    },
+                }),
+                "response.failed",
+            );
+
+            // ① 客户端必须看到失败详情：HTTP 状态已是 200，SSE 体是唯一的错误通道，
+            //    否则客户端只能看到一条被截断的流
+            const errorEvent = events.find((e) => e.event === "error");
+            expect(errorEvent).toBeDefined();
+            expect(JSON.parse(errorEvent!.data).error.message).toBe("upstream exploded");
+
+            // ② 记账层也必须看得到：runSSELoop 把【转换后】的事件同时喂给客户端格式的累加器，
+            //    转换器吞掉错误会让请求被记成成功并计费
+            const accumulator = new openaiChatAccumulator.OpenAIChatAccumulator();
+            for (const event of events) {
+                accumulator.addEvent(event);
+            }
+            expect(accumulator.isErrored()).toBe(true);
         });
     });
 

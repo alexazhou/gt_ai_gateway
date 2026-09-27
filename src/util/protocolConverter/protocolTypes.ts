@@ -155,6 +155,15 @@ export interface AnthropicSSEEvent {
     data: string;
 }
 
+/** Anthropic 的流内错误事件体（SSE 外层是 event: error） */
+export interface AnthropicErrorEvent {
+    type: "error";
+    error: {
+        type: string;
+        message: string;
+    };
+}
+
 export interface ProtocolStreamEvent {
     data: string;
     event?: string;
@@ -193,3 +202,22 @@ export interface OpenAIChunk {
         };
     };
 }
+
+/** OpenAI 兼容上游在流内报错：错误挂在 error 字段上（与官方 SDK 一致），这种 chunk 没有 choices */
+export interface OpenAIErrorChunk {
+    error: {
+        message: string;
+        type?: string;
+        code?: string | null;
+        param?: string | null;
+    };
+}
+
+/** OpenAI 兼容上游在流内报错：整条报文就是错误对象（部分兼容上游的写法） */
+export interface OpenAIErrorPayload {
+    type: "error";
+    code?: string | null;
+    message?: string;
+}
+
+export type OpenAIStreamError = OpenAIErrorChunk | OpenAIErrorPayload;

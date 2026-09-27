@@ -158,7 +158,9 @@ export type ResponsesStreamEvent =
     | ResponsesEventReasoningSummaryTextDone
     | ResponsesEventReasoningSummaryPartDone
     | ResponsesEventOutputItemDone
-    | ResponsesEventResponseCompleted;
+    | ResponsesEventResponseCompleted
+    | ResponsesEventError
+    | ResponsesEventResponseFailed;
 
 interface ResponsesEventBase {
     type: string;
@@ -268,4 +270,28 @@ export interface ResponsesEventOutputItemDone extends ResponsesEventBase {
 export interface ResponsesEventResponseCompleted extends ResponsesEventBase {
     type: "response.completed";
     response: ResponsesNonStreamResponse;
+}
+
+/** 错误对象：Responses 的两种失败事件都用这个形状（Anthropic 侧对应 error.type / error.message） */
+export interface ResponsesErrorDetail {
+    code?: string | null;
+    message?: string;
+}
+
+/** API 级错误事件：整条报文就是错误对象 */
+export interface ResponsesEventError {
+    type: "error";
+    code?: string | null;
+    message?: string;
+    sequence_number?: number;
+}
+
+/** 模型级失败事件：response.status = "failed"，错误详情在 response.error 里 */
+export interface ResponsesEventResponseFailed extends ResponsesEventBase {
+    type: "response.failed";
+    response: {
+        id?: string;
+        status: "failed";
+        error?: ResponsesErrorDetail;
+    };
 }

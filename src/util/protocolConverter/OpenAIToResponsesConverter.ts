@@ -11,6 +11,7 @@ import type {
     ResponsesNonStreamResponse,
     ResponsesInputItem,
     ResponsesOutputItem,
+    ResponsesEventResponseFailed,
 } from "./responsesTypes";
 import {
     buildThinkingConfigFromOpenAI,
@@ -443,6 +444,21 @@ export class OpenAIToResponsesConverter extends BaseConverter {
             case "error": {
                 out.push({
                     data: rawDataStr,
+                    event: "error",
+                });
+                break;
+            }
+
+            // Responses 的模型级失败（response.status = failed）：按 OpenAI 的 error chunk 下发。
+            // body 必须带 error 字段 —— OpenAI 累加器与客户端都靠它识别失败；漏掉这个事件时，
+            // 客户端只看到一条被截断的流，累加器还会把请求记成成功并计费
+            case "response.failed": {
+                const failedEvent = data as unknown as ResponsesEventResponseFailed;
+                const upstreamError = failedEvent.response?.error ?? null;
+                out.push({
+                    data: JSON.stringify({
+                        error: upstreamError ?? { message: "Upstream response failed" },
+                    }),
                     event: "error",
                 });
                 break;
