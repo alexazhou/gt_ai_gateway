@@ -63,7 +63,7 @@ async function adjustBalance(
     }
 
     // amount 为元，换算成整数微元后做整数加减，避免浮点。
-    // 系统允许负余额（复用 deductBalance 的透支语义），故不做「不能扣成负」守卫；
+    // 系统允许负余额（复用 deductBalance 的透支语义），故不做「不能扣成负」的检查；
     // 余额的扣减门槛统一由请求发起时的 checkBalance 预检负责。
     const amountUnits = toUnits(amount);
     await userManager.incrementBalance(userId, amountUnits);

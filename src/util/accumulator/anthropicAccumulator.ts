@@ -70,7 +70,7 @@ export class AnthropicAccumulator extends AccumulatorBase {
     addEvent(clientEvent: ProtocolStreamEvent): void {
         // Some Anthropic-compatible upstreams append OpenAI-style [DONE] after
         // the standard message_stop event. It is an SSE terminal marker, not JSON.
-        // 「已出错就不算完成」由 markCompleted 的守卫统一负责，这里不再重复判断
+        // 「已出错就不算完成」由 markCompleted 统一负责，这里不再重复判断
         if (clientEvent.data === "[DONE]") {
             this.markCompleted();
             return;
