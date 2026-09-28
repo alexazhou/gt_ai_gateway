@@ -51,7 +51,7 @@ class ORMService {
             this._dbAdapter = new MySQLAdapter(pool);
 
             const migrateAdapter = new MySQLDBAdapter(conn);
-            await dbMigrationService.migrate(migrateAdapter, "node");
+            await dbMigrationService.applyStartupMigrations(migrateAdapter);
             migrateAdapter.close();
         } else {
             if (!dbPath) {
@@ -71,7 +71,7 @@ class ORMService {
             this._dbAdapter = new SQLiteAdapter(db);
 
             const migrateAdapter = new SQLiteDBAdapter(dbPath);
-            await dbMigrationService.migrate(migrateAdapter, "node");
+            await dbMigrationService.applyStartupMigrations(migrateAdapter);
             migrateAdapter.close();
         }
 

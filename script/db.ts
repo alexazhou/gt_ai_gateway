@@ -63,13 +63,13 @@ async function main() {
                 await dbMigrationService.migrate(adapter, env, { dbName, configPath: dbConfigPath });
                 break;
             case "status":
-                await dbMigrationService.status(adapter, env);
+                await dbMigrationService.status(adapter);
                 break;
             case "clear":
                 await dbMigrationService.clear(adapter, env);
                 break;
             case "init":
-                await dbMigrationService.init(adapter, env);
+                await dbMigrationService.initDB(adapter, env);
                 break;
             default:
                 console.error(`Unknown command: ${command}`);
