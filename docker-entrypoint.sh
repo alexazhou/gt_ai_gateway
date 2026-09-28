@@ -9,7 +9,7 @@ echo "Using database at: $DB_PATH"
 # 确保数据目录存在
 mkdir -p $(dirname "$DB_PATH")
 
-# 迁移不在这里做：后端启动时执行（见 ormService.applyStartupMigrations），
+# 迁移不在这里做：后端启动时执行（见 dbMigrationService.applyStartupMigrations），
 # 由环境变量 MIGRATION_MODE 控制（execute / check / off，默认 execute）。
 
 # 启动应用

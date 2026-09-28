@@ -31,23 +31,11 @@ docker run -d \
 
 服务启动后，访问 `http://localhost:8787` 即可登录进入管理后台。
 
-### 迁移策略：`MIGRATION_MODE`
+### 迁移策略
 
-容器启动时不再单独跑迁移，改由后端启动时执行，行为由 `MIGRATION_MODE` 控制：
+服务启动时会自动执行迁移，行为可以用环境变量 `MIGRATION_MODE` 控制（执行 / 只检查 / 都不做），取值见 [配置指南](../usage/ConfigurationGuide.md) 的「附录：环境变量」。
 
-| 取值 | 行为 |
-|------|------|
-| `execute`（默认） | 应用待执行的迁移，与旧版本行为一致 |
-| `check` | 不应用，只比对 `_migrations` 记录与镜像里的 `resource/migrate`：**有落后的迁移就拒绝启动**，日志里列出缺哪些 |
-| `off` | 既不应用也不检查（迁移完全由外部步骤负责，注意此时表结构缺失不会被拦下） |
-
-```bash
-# 迁移由外部步骤（比如单独的 Job）负责，本容器只校验
-docker run -d ... -e MIGRATION_MODE=check ghcr.io/alexazhou/gt_ai_gateway:latest
-```
-
-取值写错（例如 `checks`）会在启动时报错退出，不会静默按默认行为执行。手工迁移仍可用
-`npm run db:migrate:node`（在容器内执行），它不受这个变量影响。
+手工迁移仍可用 `npm run db:migrate:node`（在容器内执行），它不受这个变量影响。
 
 ### 数据持久化说明
 

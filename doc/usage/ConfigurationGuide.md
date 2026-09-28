@@ -87,3 +87,92 @@
 - 在 Cloudflare 环境中，使用 R2 存储可以显著提升性能，避免大文本拖累数据库查询
 - 如果您的 Cloudflare 账户中没有开启 R2，系统会自动切换到使用数据库存储
 - 本地 Docker 部署默认使用数据库存储
+
+---
+
+## 附录：环境变量
+
+上面几步都在管理界面里完成。下面这些变量在**部署时**设置（启动进程 / 容器之前），改完需要重启服务。
+
+各部署方式怎么传：
+
+- [Docker 部署](../deploy/DockerDeployment.md)（`docker run -e` / compose 的 `environment`）
+- [源码部署](../deploy/SourceCodeDeployment.md)（`.dev.vars`）
+- Cloudflare 部署见对应的自动 / 手动部署文档
+
+### 服务与网络
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PORT` | `8720` | 监听端口。Docker 镜像内为 `8787` |
+| `HOST` | `127.0.0.1` | 监听地址。需要对外服务时改成 `0.0.0.0`；Docker 镜像内已是 `0.0.0.0` |
+
+### 鉴权
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `ROOT_TOKEN` | 无 | 最高权限 Token，用于登录管理后台 |
+
+`ROOT_TOKEN` 必须自己生成（`openssl rand -hex 32`）。**未设置、或沿用仓库里公开的示例值时，root 权限失效**：服务照常启动并在启动日志里提示，但管理后台登录不上。桌面端不经过这个变量——客户端每次安装会自己生成随机 Token。
+
+### 数据库
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DB_DRIVER` | `sqlite` | `sqlite` / `mysql` |
+| `DB_PATH` | `<当前目录>/local.db` | `DB_DRIVER=sqlite` 时的库文件路径。Docker 镜像内为 `/app/data/local.db` |
+| `DB_HOST` | `127.0.0.1` | `DB_DRIVER=mysql` 时：主机 |
+| `DB_PORT` | `3306` | `DB_DRIVER=mysql` 时：端口 |
+| `DB_USER` | 空 | `DB_DRIVER=mysql` 时：用户名 |
+| `DB_PASSWORD` | 空 | `DB_DRIVER=mysql` 时：密码 |
+| `DB_NAME` | 空 | `DB_DRIVER=mysql` 时：库名 |
+| `DB_URL` | 无 | `DB_DRIVER=mysql` 时：可选连接串 `mysql://user:pass@host:port/db`，设置后优先于上面几个离散变量 |
+
+### 迁移
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `MIGRATION_DIR` | `<当前目录>/resource/migrate` | 迁移目录 |
+| `MIGRATION_MODE` | `execute` | 启动时怎么处理迁移，见下表 |
+
+| `MIGRATION_MODE` | 行为 |
+|------------------|------|
+| `execute` | 应用待执行的迁移（默认，与旧版本一致） |
+| `check` | 不应用，只比对迁移记录与迁移目录；**有落后的迁移就拒绝启动**，日志里列出缺哪些 |
+| `off` | 既不应用也不检查（迁移完全由外部步骤负责；注意此时表结构缺失不会被拦下） |
+
+几点说明：
+
+- 取值写错（例如 `checks`）会在启动时报错退出，不会静默按默认行为执行。
+- 只控制**启动时的自动迁移**。显式命令（`npm run db:migrate:node` / `db:init:node`）不受影响——你明确要迁移时就该迁移。
+- 桌面端由客户端注入环境，不走这个变量（始终 `execute`）；Cloudflare Workers 也不适用——D1 的迁移在部署时执行（`npm run deploy`）。
+
+### 日志
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `LOG_DIR` | `<当前目录>/log` | 应用日志目录。Docker 镜像内为 `/app/data/log` |
+| `RECORD_LOG_ENABLED` | 空 | 仅当值为 `true` 时打印请求记录的创建 / 更新日志 |
+
+### Cloudflare 自动部署
+
+`npm run deploy` 用的这几个，只在部署脚本里读取：
+
+| 变量 | 说明 |
+|------|------|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API Token（必填） |
+| `CLOUDFLARE_ACCOUNT_ID` | 账号 ID（必填） |
+| `CLOUDFLARE_D1_NAME` | 可选，D1 数据库名，默认取 `wrangler.toml` |
+| `CLOUDFLARE_R2_NAME` | 可选，R2 存储桶名，默认取 `wrangler.toml` |
+| `CLOUDFLARE_KV_NAME` | 可选，缓存 KV namespace 名，默认取 `wrangler.toml` |
+
+Worker 的 D1 / R2 / KV 绑定写在 `wrangler.toml`，不是环境变量。
+
+### 已不再生效
+
+以下变量曾经可用，现已不读取，写在配置里也不会起作用：
+
+| 变量 | 现状 |
+|------|------|
+| `STREAM_LOG_ENABLED` | 改为数据库配置项，请在管理界面或 `config` 表中修改 |
+| `TEST_*`（`TEST_PORT` / `TEST_DB_PATH` / `TEST_UPSTREAM_*` 等） | 仅供测试进程读取，业务进程不读 |

@@ -69,8 +69,10 @@ interface MigrationState {
 }
 
 /**
- * 只读读取迁移状态：不建表、不写入。migrate / status 会先自行建好 _migrations 表
- * （它们要写记录），check 刻意不建。
+ * 只读读取迁移状态：不建表、不写入。
+ *
+ * 三个调用方里只有 migrate 会先自行建好 _migrations 表（它要写记录），
+ * status 与 check 都不建——表不存在就按「一条记录都没有」处理。
  *
  * 迁移目录读不到时抛错：此时「已应用 / 待应用」无从比对，不能当成"全都应用过了"。
  */
@@ -327,7 +329,8 @@ export function getMigrationMode(): MigrationMode {
 
 /**
  * 只读比对：返回已应用与待应用的迁移名，不修改数据库。
- * 与 migrate() / status() 共用 readMigrationState()，区别只在于这里不建 _migrations 表。
+ * 与 migrate() / status() 共用 readMigrationState()；这里连 _migrations 表都不建，
+ * 所以空库（表都还没建）也能检查出「全部待应用」。
  */
 export async function check(
     adapter: DBAdapter,
