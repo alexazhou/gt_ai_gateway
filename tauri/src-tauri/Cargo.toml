@@ -1,6 +1,6 @@
 [package]
 name = "ai-gateway"
-version = "1.8.8-beta4"
+version = "1.8.8-beta5"
 description = "AI Gateway Desktop App"
 authors = []
 edition = "2021"
