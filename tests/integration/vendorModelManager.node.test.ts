@@ -54,22 +54,37 @@ describe("vendorModelManager (node, real db)", () => {
         expect(await vendorModelManager.remove(other.id, vendor.id)).toBe(false);
     });
 
-    it("syncByVendor replaces the full set", async () => {
+    it("syncByVendor only adds, keeping existing models", async () => {
         const vendor = await createVendor();
         await vendorModelManager.create(vendor.id, "gpt-4o");
 
         const synced = await vendorModelManager.syncByVendor(vendor.id, ["claude-3-5-sonnet"]);
-        expect(synced.length).toBe(1);
-        expect(synced[0].model_id).toBe("claude-3-5-sonnet");
+
+        expect(synced.map(m => m.model_id).sort()).toEqual(["claude-3-5-sonnet", "gpt-4o"]);
     });
 
-    it("syncByVendor with empty array clears all models", async () => {
+    it("syncByVendor with empty array keeps all models", async () => {
         const vendor = await createVendor();
         await vendorModelManager.create(vendor.id, "gpt-4o");
         await vendorModelManager.create(vendor.id, "gpt-4o-mini");
 
         const synced = await vendorModelManager.syncByVendor(vendor.id, []);
-        expect(synced.length).toBe(0);
+        expect(synced.map(m => m.model_id).sort()).toEqual(["gpt-4o", "gpt-4o-mini"]);
+    });
+
+    it("syncByVendor keeps ids of existing models so references stay resolvable", async () => {
+        const vendor = await createVendor();
+        const kept = await vendorModelManager.create(vendor.id, "deepseek-v4-flash");
+
+        // model.routing_config 引用了 kept.id；此后只勾选了新模型做同步
+        const synced = await vendorModelManager.syncByVendor(vendor.id, ["claude-3-5-sonnet"]);
+
+        expect(synced.find(m => m.model_id === "deepseek-v4-flash")?.id).toBe(kept.id);
+
+        // 旧引用仍可解析（对应 UI 退化成显示 #id 的回归）
+        const referenced = await vendorModelManager.getByIds([kept.id]);
+        expect(referenced.map(m => m.model_id)).toEqual(["deepseek-v4-flash"]);
+        expect(synced.map(m => m.model_id).sort()).toEqual(["claude-3-5-sonnet", "deepseek-v4-flash"]);
     });
 
     it("findById + findByVendorAndModel + create", async () => {

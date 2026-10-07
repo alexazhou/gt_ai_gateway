@@ -102,7 +102,7 @@
         <!-- 从供应商获取模型的确认弹窗 -->
         <a-modal
             v-model:open="syncModalVisible"
-            title="选择要保存的模型"
+            title="选择要添加的模型"
             width="600px"
             :confirm-loading="syncLoading"
             @ok="handleSyncConfirm"
@@ -125,13 +125,19 @@
                 />
                 <div class="model-checkbox-group">
                     <template v-for="modelId in filteredModels" :key="modelId">
-                        <div class="model-checkbox-item" @click="toggleModel(modelId, !selectedModelIds.includes(modelId))">
+                        <div
+                            class="model-checkbox-item"
+                            :class="{ 'is-saved': savedModelIds.has(modelId) }"
+                            @click="toggleModel(modelId, !selectedModelIds.includes(modelId))"
+                        >
                             <a-checkbox
                                 :checked="selectedModelIds.includes(modelId)"
+                                :disabled="savedModelIds.has(modelId)"
                                 @change="(e: Event) => { e.stopPropagation(); toggleModel(modelId, (e.target as HTMLInputElement).checked); }"
                                 @click.stop
                             />
                             <span class="model-checkbox-label">{{ modelId }}</span>
+                            <span v-if="savedModelIds.has(modelId)" class="model-saved-tag">已添加</span>
                         </div>
                     </template>
                     <div v-if="filteredModels.length === 0" class="empty-hint">
@@ -180,6 +186,9 @@ const filteredModels = computed(() =>
         ? fetchedModels.value.filter(id => id.toLowerCase().includes(modelSearch.value.toLowerCase()))
         : fetchedModels.value,
 );
+
+// 弹窗中预勾选且不可取消：保存是只增不删，取消勾选没有任何效果
+const savedModelIds = computed(() => new Set(models.value.map(m => m.model_id)));
 
 const FORMAT_OPTIONS = ['openai', 'anthropic', 'responses'] as const;
 const formatOptions = FORMAT_OPTIONS.map(f => ({ label: f.toUpperCase(), value: f }));
@@ -299,6 +308,8 @@ function handleDelete(record: VendorModel) {
 }
 
 function toggleModel(modelId: string, checked: boolean) {
+    if (savedModelIds.value.has(modelId)) return;
+
     if (checked) {
         if (!selectedModelIds.value.includes(modelId)) {
             selectedModelIds.value = [...selectedModelIds.value, modelId];
@@ -313,7 +324,8 @@ function selectAll() {
 }
 
 function selectNone() {
-    selectedModelIds.value = [];
+    // 只清掉未保存的勾选
+    selectedModelIds.value = selectedModelIds.value.filter(id => savedModelIds.value.has(id));
 }
 
 function handleEditFormats(record: VendorModel) {
@@ -407,6 +419,10 @@ function handleBack() {
     background: var(--bg-info-item, #fafafa);
 }
 
+.model-checkbox-item.is-saved {
+    cursor: default;
+}
+
 .model-checkbox-label {
     flex: 1;
     word-break: break-all;
@@ -414,6 +430,19 @@ function handleBack() {
     font-size: 13px;
     line-height: 1.4;
     padding-top: 1px;
+}
+
+.model-saved-tag {
+    flex: 0 0 auto;
+    margin-top: 1px;
+    padding: 0 6px;
+    border: 1px solid var(--tag-default-border, #d9d9d9);
+    border-radius: 4px;
+    background: var(--bg-info-item, #fafafa);
+    color: var(--text-secondary, #888);
+    font-size: 11px;
+    line-height: 18px;
+    white-space: nowrap;
 }
 
 .empty-hint {
