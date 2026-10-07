@@ -188,7 +188,7 @@ describe("Upstream Timeout & Orphan Recovery", () => {
         expect(record.response_data).toContain("上游响应超时");
     }, 15000);
 
-    it("should keep raw fetch error with cause when upstream is unreachable", async () => {
+    it("should classify an unreachable upstream as upstream_unreachable and keep the raw error", async () => {
         await requestHelper.post(
             "/llm/v1/chat/completions",
             { model: unreachableModelName, messages: [{ role: "user", content: "hi" }] },
@@ -199,13 +199,10 @@ describe("Upstream Timeout & Orphan Recovery", () => {
         const record = records[0];
 
         expect(record.status).toBe("failed");
-        // 网络层失败补上 UPSTREAM_UNREACHABLE（原先落 null，详情页报错块整个不显示，用户只看到「失败」）。
         expect(record.failed_code).toBe("upstream_unreachable");
-        // response_data 保留**原始错误**，不按失败码生成文案。
-        // 具体文案由运行时决定，所以只断言两处共有的事实：有原文、且不冒充超时。
-        // undici 下是 "TypeError: fetch failed; cause: ... ECONNREFUSED"，
-        // workerd 下是 "Error: Network connection lost."（无 cause / errno，见 cloudflare/workerd#7195）；
-        // name + cause 的拼接格式由 tests/unit/util/abortTimeoutUtil.test.ts 精确覆盖。
+        // response_data 保留原始错误而非按失败码生成的文案；具体文案按运行时不同
+        // （undici "TypeError: fetch failed; cause: ..."，workerd "Error: Network connection lost."），
+        // 故只断言有原文、且不冒充超时。拼接格式由单测覆盖。
         expect(record.response_data).toBeTruthy();
         expect(record.response_data).not.toContain("上游响应超时");
     }, 15000);
