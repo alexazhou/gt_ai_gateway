@@ -179,7 +179,7 @@ async function runSSELoop(
         // 其余 = 循环体异常（写客户端 / 转换 / 日志写入）：写客户端失败 → 客户端断开，
         // 其他与上下游连接无关（内部错误），不冒充上游断开
         console.error(`${SSE_LOOP_LOG_PREFIX} Stream error:`, e);
-        if (e instanceof abortTimeoutUtil.TaggedError) {
+        if (abortTimeoutUtil.isTaggedError(e)) {
             markFailure(e.failedCode, e.message);
         } else {
             markFailure(
@@ -290,7 +290,7 @@ export async function handleNonStreamResponse(
     } catch (e) {
         // 打标错误（TaggedError 自带失败码与文案）直接认领；其余兜底 → 上游断开。
         // 报错文案从错误对象提取，不按失败码事后生成
-        const failedCode = e instanceof abortTimeoutUtil.TaggedError
+        const failedCode = abortTimeoutUtil.isTaggedError(e)
             ? e.failedCode
             : FailedCode.UPSTREAM_DISCONNECTED;
         await recordService.markFailed(record.id, failedCode, {

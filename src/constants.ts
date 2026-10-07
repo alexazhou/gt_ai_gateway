@@ -8,6 +8,8 @@ export enum SgRecordStatus {
 export enum FailedCode {
     CLIENT_DISCONNECTED = "client_disconnected",
     UPSTREAM_DISCONNECTED = "upstream_disconnected",
+    // 上游请求根本没发出去 / 没连上（连接被拒、DNS 失败、连接被重置等网络层失败）
+    UPSTREAM_UNREACHABLE = "upstream_unreachable",
     STREAM_INCOMPLETE = "stream_incomplete",
     // 上游明确返回了错误（协议错误事件 / error 事件）
     UPSTREAM_ERROR = "upstream_error",

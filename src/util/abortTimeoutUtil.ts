@@ -52,6 +52,10 @@ async function readTextWithSignal(res: Response, signal: AbortSignal): Promise<s
 }
 
 
+/** TaggedError 的 name，也是识别它时的标记（见 isTaggedError） */
+const TAGGED_ERROR_NAME = "TaggedError";
+
+
 /**
  * 网关自产的打标错误：失败码与可读文案挂在错误对象上，catch 处只做提取，不按码事后生成文案。
  * 两类场景共用：
@@ -59,12 +63,75 @@ async function readTextWithSignal(res: Response, signal: AbortSignal): Promise<s
  *   由 abort 方创建并作为 abort 原因（fetch 会以该错误本身 reject，undici / workerd 均如此）
  * - 响应体读取失败（上游断开等无对应 abort 的失败）—— 读取包装处创建
  * cause 可选携带底层原始错误，供日志排查用（不进对用户展示的文案）。
+ *
+ * 注意：本类在 workerd 下跨 fetch 边界后**原型会丢失**——workerd 会重新造一个普通 Error，
+ * 只把 name 与自定义属性复制过去，`instanceof TaggedError` 因此不成立。判断一律走 isTaggedError()。
  */
 export class TaggedError extends Error {
     constructor(public readonly failedCode: FailedCode, message: string, cause?: unknown) {
         super(message);
+        this.name = TAGGED_ERROR_NAME;
         if (cause !== undefined) this.cause = cause;
     }
+}
+
+
+/**
+ * 判断一个错误是不是我们打的标。
+ *
+ * 不能只写 `e instanceof TaggedError`：abort 的 reason 在 workerd 里穿过 fetch 边界时原型会丢，
+ * workerd 用 `new Error(...)` 重建、只把 name 与自定义属性复制过去（见 workerd `jsg/util.c++`
+ * 的 tunneled-error 处理），于是 instanceof 在 Worker 下恒为 false、失败码全部丢失。
+ *
+ * 这依赖 compat flag `enhanced_error_serialization`（workerd 默认启用日期 2026-04-21，
+ * 我们 wrangler 配置里显式开启）把 name 与自定义属性带过边界；关掉该 flag 时 workerd 会把
+ * 原始 name 折进 message（"TaggedError: ..."）、属性全丢，本判断随之失效。
+ * 这是已知缺陷，见 cloudflare/workerd#7035。
+ *
+ * 非 Error 的普通值直接排除，避免把上游返回的任意对象误判成我们的失败。
+ */
+export function isTaggedError(e: unknown): e is TaggedError {
+    return e instanceof TaggedError
+        || (e instanceof Error && e.name === TAGGED_ERROR_NAME && typeof (e as TaggedError).failedCode === "string");
+}
+
+
+/**
+ * 判断是不是「网络层失败」——即请求根本没发出去 / 没连上（连接被拒、DNS 失败、连接被重置）。
+ *
+ * 两个运行时给的错误形态完全不同：
+ * - undici：网络失败统一是 `TypeError("fetch failed")`，真实 errno（ECONNREFUSED 等）在 e.cause 里；
+ * - workerd：所有 DISCONNECTED 异常都被映射成一个**硬编码文案**的普通 Error，无 cause、无 errno
+ *   （workerd `jsg/util.c++`）。文案匹配是唯一可行的判据，属已知脆弱点，见 cloudflare/workerd#7195。
+ *
+ * 注意这里只判「是不是网络失败」，判不出「哪种网络失败」：workerd 把拒绝连接 / DNS 失败 /
+ * 连接被重置抹成了同一句话，那部分信息在 Worker 上不可得。
+ */
+function isNetworkError(e: unknown): boolean {
+    if (!(e instanceof Error)) return false;
+    // undici：网络失败固定为 TypeError("fetch failed")，真实 errno 在 cause 里。
+    // 必须连 message 一起判：TypeError 是通用类型错误，new URL(代理地址) 配错、
+    // 代码里访问空值都会抛 TypeError，只看类型会把「代理配置错」误判成「连不上上游」
+    // ——那些请求根本没发出去，是配置/代码问题，不是上游不可达。
+    if (e instanceof TypeError && e.message === "fetch failed") return true;
+    // workerd：所有 DISCONNECTED 异常都被映射成一个**硬编码文案**的普通 Error，无 cause、无 errno
+    return e.name === "Error" && e.message === "Network connection lost.";
+}
+
+
+/**
+ * 给「发起上游请求」阶段的失败补上失败码，供 catch 处记账与回传。
+ * - 我们自己的 abort（超时 / 客户端断开）→ 原样透传，abort 现场归因最准
+ * - 网络层失败 → UPSTREAM_UNREACHABLE
+ * - 其余（模块加载 / 代理配置等非网络错误）→ UNKNOWN，不冒充上游不可达
+ *
+ * 文案一律取**原始错误**（describeError(e)），不按失败码生成：失败码只负责分类，
+ * 原始错误才是排查依据。原始错误对象同时挂到 cause 上。
+ */
+export function classifyUpstreamFetchError(e: unknown): TaggedError {
+    if (isTaggedError(e)) return e;
+    const failedCode = isNetworkError(e) ? FailedCode.UPSTREAM_UNREACHABLE : FailedCode.UNKNOWN;
+    return new TaggedError(failedCode, describeError(e), e);
 }
 
 
@@ -75,7 +142,7 @@ export class TaggedError extends Error {
  *   e.message 只有 "fetch failed"）
  */
 function describeError(e: unknown): string {
-    if (e instanceof TaggedError) return e.message;
+    if (isTaggedError(e)) return e.message;
     if (!(e instanceof Error)) return String(e);
     let desc = `${e.name}: ${e.message}`;
     const cause = (e as any).cause;
@@ -197,6 +264,8 @@ async function readChunk(
 export default {
     TimeoutAbortController,
     TaggedError,
+    isTaggedError,
+    classifyUpstreamFetchError,
     describeError,
     onSignalAbort,
     readTextWithTimeoutAndAbort,

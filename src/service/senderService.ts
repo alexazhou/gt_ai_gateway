@@ -283,9 +283,10 @@ async function sendRequestToUpstream(
         });
     } catch (e: any) {
         console.error("Upstream fetch failed:", e);
-        // 我们的失败（TaggedError，自带失败码与可读文案）直接认领；普通网络错误 failedCode 为 null，
-        // 文案走 describeError 的 name + cause（真实原因只在 e.cause 里）
-        const failedCode = e instanceof abortTimeoutUtil.TaggedError ? e.failedCode : null;
+        // 补上失败码：我们自己的 abort 原样透传；普通网络错误 → UPSTREAM_UNREACHABLE；
+        // 其余（如 getDispatcher 里模块加载 / 代理配置出错）如实归 UNKNOWN，不冒充上游不可达。
+        const err = abortTimeoutUtil.classifyUpstreamFetchError(e);
+        // response_data 落**原始错误**（不按失败码生成文案）：失败码负责分类，原文负责排查。
         const errorText = abortTimeoutUtil.describeError(e);
         const markOptions: MarkFailedOptions = {
             stage: RequestActivityStage.UPSTREAM_ATTEMPT,
@@ -299,8 +300,9 @@ async function sendRequestToUpstream(
             },
             response_data: errorText,
         };
-        await recordService.markFailed(recordId, failedCode, markOptions);
-        throw e;
+        await recordService.markFailed(recordId, err.failedCode, markOptions);
+        // 向上抛归类后的错误：失败码与原始错误随错误对象带出，供上层 failover 记账与回传
+        throw err;
     } finally {
         clientAbortCtrl.dispose();
     }
