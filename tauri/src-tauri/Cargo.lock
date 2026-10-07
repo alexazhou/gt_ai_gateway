@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "ai-gateway"
-version = "1.8.8-beta5"
+version = "1.8.8"
 dependencies = [
  "libc",
  "open",
