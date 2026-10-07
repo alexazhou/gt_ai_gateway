@@ -164,6 +164,7 @@ async function markFailed(
         end_at: new Date(),
     };
     if (opts.response_data !== undefined) {
+        // 报错文案由调用方从错误对象提取，这里不按失败码生成文案
         updateData.response_data = opts.response_data;
     }
     await update(recordId, updateData);

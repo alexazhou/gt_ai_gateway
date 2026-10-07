@@ -826,6 +826,8 @@ describe("Stream Failure Handling", () => {
 
             expect(record.status).toBe("failed");
             expect(record.failed_code).toBe("client_disconnected");
+            // 详情页报错文案可读：写明客户端断开
+            expect(record.response_data).toContain("客户端断开");
         }, 15000);
 
         it("should set failed_code=client_disconnected for Anthropic /llm/v1/messages", async () => {
@@ -841,6 +843,8 @@ describe("Stream Failure Handling", () => {
 
             expect(record.status).toBe("failed");
             expect(record.failed_code).toBe("client_disconnected");
+            // 详情页报错文案可读：写明客户端断开
+            expect(record.response_data).toContain("客户端断开");
         }, 15000);
 
         it("should set failed_code=client_disconnected for Responses /llm/v1/responses", async () => {
@@ -855,6 +859,8 @@ describe("Stream Failure Handling", () => {
 
             expect(record.status).toBe("failed");
             expect(record.failed_code).toBe("client_disconnected");
+            // 详情页报错文案可读：写明客户端断开
+            expect(record.response_data).toContain("客户端断开");
         }, 15000);
 
         it("should keep status=success when client disconnects after response.completed was already received (Responses)", async () => {

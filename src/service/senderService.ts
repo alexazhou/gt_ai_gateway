@@ -4,6 +4,7 @@ import { SgUser } from "../model/sgUser";
 import { SgVendor } from "../model/sgVendor";
 import { SgRecord } from "../model/sgRecord";
 import recordService from "./recordService";
+import type { MarkFailedOptions } from "./recordService";
 import requestActivityService from "./requestActivityService";
 import { SgRecordStatus, ApiFormat, VendorAuthMode, FailedCode, RequestActivityStage, ActivityLevel, ConfigKey } from "../constants";
 import pluginService from "./pluginService";
@@ -282,18 +283,23 @@ async function sendRequestToUpstream(
         });
     } catch (e: any) {
         console.error("Upstream fetch failed:", e);
-        await recordService.markFailed(recordId, clientAbortCtrl.failedCode(), {
+        // 我们的失败（TaggedError，自带失败码与可读文案）直接认领；普通网络错误 failedCode 为 null，
+        // 文案走 describeError 的 name + cause（真实原因只在 e.cause 里）
+        const failedCode = e instanceof abortTimeoutUtil.TaggedError ? e.failedCode : null;
+        const errorText = abortTimeoutUtil.describeError(e);
+        const markOptions: MarkFailedOptions = {
             stage: RequestActivityStage.UPSTREAM_ATTEMPT,
             message: "上游请求失败",
             level: ActivityLevel.ERROR,
-            response_data: String(e),
             detail: {
                 vendor_id: vendor.id,
                 vendor_name: vendor.name,
                 url,
-                error: e instanceof Error ? e.message : String(e),
+                error: errorText,
             },
-        });
+            response_data: errorText,
+        };
+        await recordService.markFailed(recordId, failedCode, markOptions);
         throw e;
     } finally {
         clientAbortCtrl.dispose();
