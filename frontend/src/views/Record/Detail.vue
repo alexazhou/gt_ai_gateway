@@ -149,7 +149,15 @@
                             </div>
                         </a-tab-pane>
 
-                        <a-tab-pane key="request_json" tab="请求数据 (JSON)">
+                        <a-tab-pane key="request_json">
+                            <template #tab>
+                                <span class="json-tab-title">
+                                    请求数据 (JSON)
+                                    <a-tooltip title="此处为客户端发送的原始请求 JSON，未经过插件改写、协议转换或上游模型名替换">
+                                        <InfoCircleOutlined class="json-tab-info-icon" />
+                                    </a-tooltip>
+                                </span>
+                            </template>
                             <div class="json-pane-content">
                                 <div v-if="!recordStore.currentRecord.request_data" class="no-payload-hint">
                                     <div class="no-payload-title">请求内容未记录</div>
@@ -159,7 +167,15 @@
                             </div>
                         </a-tab-pane>
 
-                        <a-tab-pane key="response_json" tab="响应数据 (JSON)">
+                        <a-tab-pane key="response_json">
+                            <template #tab>
+                                <span class="json-tab-title">
+                                    响应数据 (JSON)
+                                    <a-tooltip title="此处为返回给客户端的响应 JSON（跨协议调用时已由上游协议转换回客户端协议格式）">
+                                        <InfoCircleOutlined class="json-tab-info-icon" />
+                                    </a-tooltip>
+                                </span>
+                            </template>
                             <div class="json-pane-content">
                                 <div v-if="!recordStore.currentRecord.response_data" class="no-payload-hint">
                                     <div class="no-payload-title">响应内容未记录</div>
@@ -193,7 +209,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, watch, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { DownloadOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons-vue';
+import { DownloadOutlined, ArrowUpOutlined, ArrowDownOutlined, InfoCircleOutlined } from '@ant-design/icons-vue';
 import { useRecordStore } from '@/stores/record';
 import { deleteRecord } from '@/api/record';
 import { formatDate } from '@/utils/format';
@@ -533,5 +549,17 @@ async function downloadJson(data: string | null, type: 'request' | 'response') {
 
 .json-pane-content {
     margin-top: 8px;
+}
+
+.json-tab-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.json-tab-info-icon {
+    font-size: 12px;
+    color: var(--text-secondary, #999);
+    cursor: help;
 }
 </style>
