@@ -11,6 +11,7 @@ import type {
     ResponsesNonStreamResponse,
     ResponsesOutputItem,
     ResponsesInputItem,
+    ResponsesContentPart,
     ResponsesEventError,
     ResponsesEventResponseFailed,
 } from "./responsesTypes";
@@ -90,13 +91,10 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                             }
                         } else if (block.type === "tool_result") {
                             // tool_result → function_call_output
-                            const content = typeof block.content === "string"
-                                ? block.content
-                                : JSON.stringify(block.content);
                             input.push({
                                 type: "function_call_output",
                                 call_id: block.tool_use_id || "",
-                                output: content,
+                                output: this.convertToolResultOutput(block.content),
                             });
                         }
                     }
@@ -198,6 +196,41 @@ export class AnthropicToResponsesConverter extends BaseConverter {
 
         return responsesReq;
     }
+
+
+    /**
+     * Anthropic tool_result content → Responses function_call_output.output：
+     * 字符串原样透传；内容块数组按 text / image 映射成 input_text / input_image。
+     * Responses 的 output 原生支持内容数组，图片因此不再降级成 JSON 文本。
+     */
+    private convertToolResultOutput(
+        content: string | AnthropicContentBlock[] | undefined,
+    ): string | ResponsesContentPart[] {
+        if (!content || typeof content === "string") {
+            return content || "";
+        }
+
+        const parts: ResponsesContentPart[] = [];
+        for (const block of content) {
+            if (block.type === "text") {
+                if (block.text) {
+                    parts.push({ type: "input_text", text: block.text });
+                }
+            } else if (block.type === "image" && block.source) {
+                const source = block.source;
+                if (source.type === "base64" && source.data) {
+                    parts.push({
+                        type: "input_image",
+                        image_url: `data:${source.media_type || "image/png"};base64,${source.data}`,
+                    });
+                } else if (source.url) {
+                    parts.push({ type: "input_image", image_url: source.url });
+                }
+            }
+        }
+        return parts.length > 0 ? parts : "";
+    }
+
 
     // ─── 非流式响应转换 ───
 

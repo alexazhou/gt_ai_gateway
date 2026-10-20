@@ -50,7 +50,7 @@ export interface ResponsesFunctionCallItem {
 export interface ResponsesFunctionCallOutputItem {
     type: "function_call_output";
     call_id: string;
-    output: string;
+    output: string | ResponsesContentPart[];
 }
 
 export interface ResponsesReasoningItem {
@@ -63,7 +63,7 @@ export interface ResponsesReasoningItem {
 export type ResponsesContentPart =
     | { type: "input_text"; text: string }
     | { type: "output_text"; text: string }
-    | { type: "input_image"; image_url?: string; url?: string; detail?: string }
+    | { type: "input_image"; image_url?: string; url?: string; file_id?: string; detail?: string }
     | { type: "input_file"; file_data?: string; filename?: string };
 
 export interface ResponsesTool {

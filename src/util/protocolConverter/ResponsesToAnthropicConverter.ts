@@ -1,3 +1,4 @@
+import customError from "../../customError";
 import { BaseConverter } from "./BaseConverter";
 import type {
     AnthropicRequest,
@@ -97,7 +98,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                     pendingToolResults.push({
                         type: "tool_result",
                         tool_use_id: item.call_id,
-                        content: item.output,
+                        content: this.convertFunctionCallOutput(item.output),
                     });
                 } else {
                     // 遇到其他类型，先 flush 之前收集的内容
@@ -191,7 +192,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             const toolResult: AnthropicContentBlock = {
                 type: "tool_result",
                 tool_use_id: item.call_id,
-                content: item.output,
+                content: this.convertFunctionCallOutput(item.output),
             };
             messages.push({ role: "user", content: [toolResult] });
             return;
@@ -241,21 +242,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                     if (part.type === "input_text" || part.type === "output_text") {
                         blocks.push({ type: "text", text: part.text });
                     } else if (part.type === "input_image") {
-                        const url = part.image_url || (part as any).url || "";
-                        if (url.startsWith("data:")) {
-                            const match = url.match(/^data:([^;]+);base64,(.+)$/);
-                            if (match) {
-                                blocks.push({
-                                    type: "image",
-                                    source: { type: "base64", media_type: match[1], data: match[2] },
-                                });
-                            }
-                        } else {
-                            blocks.push({
-                                type: "image",
-                                source: { type: "url", url },
-                            });
-                        }
+                        blocks.push(this.convertInputImage(part));
                     }
                 }
                 if (blocks.length > 0) {
@@ -264,6 +251,61 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             }
         }
     }
+
+    /**
+     * Responses function_call_output.output → Anthropic tool_result content。
+     * 数组输出支持文本和图片；file_id 图片无法由网关解析，明确报错。
+     */
+    private convertFunctionCallOutput(
+        output: string | ResponsesContentPart[],
+    ): string | AnthropicContentBlock[] {
+        if (typeof output === "string") {
+            return output;
+        }
+
+        const blocks: AnthropicContentBlock[] = [];
+        for (const part of output) {
+            if (part.type === "input_text" || part.type === "output_text") {
+                blocks.push({ type: "text", text: part.text });
+            } else if (part.type === "input_image") {
+                blocks.push(this.convertInputImage(part));
+            }
+        }
+        return blocks.length > 0 ? blocks : "";
+    }
+
+
+    /**
+     * Responses input_image → Anthropic image block
+     */
+    private convertInputImage(
+        part: { image_url?: string; url?: string; file_id?: string },
+    ): AnthropicContentBlock {
+        const url = part.image_url || part.url || "";
+        if (!url) {
+            throw new customError.AppError(
+                "Responses input_image with file_id cannot be converted to Anthropic",
+                400,
+            );
+        }
+
+        if (url.startsWith("data:")) {
+            const match = url.match(/^data:([^;]+);base64,(.+)$/);
+            if (!match) {
+                throw new customError.AppError(
+                    "Unsupported image data URL for protocol conversion: expected data:<mime>;base64,<data>",
+                    400,
+                );
+            }
+            return {
+                type: "image",
+                source: { type: "base64", media_type: match[1], data: match[2] },
+            };
+        }
+
+        return { type: "image", source: { type: "url", url } };
+    }
+
 
     private extractText(content: string | ResponsesContentPart[]): string {
         if (typeof content === "string") return content;

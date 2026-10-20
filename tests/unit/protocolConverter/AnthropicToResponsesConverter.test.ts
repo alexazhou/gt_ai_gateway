@@ -142,6 +142,112 @@ describe("AnthropicToResponsesConverter - convertRequest", () => {
         expect(funcOutput.output).toBe("Sunny, 25°C");
     });
 
+    it("should convert text and base64 images in tool_result content to function_call_output parts", () => {
+        const req: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool_use", id: "toolu_123", name: "read_image", input: {} },
+                    ],
+                },
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "tool_result",
+                            tool_use_id: "toolu_123",
+                            content: [
+                                { type: "text", text: "截图如下" },
+                                { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(req);
+
+        const funcOutput = (result.input as ResponsesInputItem[]).find((item: any) => item.type === "function_call_output") as any;
+        expect(funcOutput.output).toEqual([
+            { type: "input_text", text: "截图如下" },
+            { type: "input_image", image_url: "data:image/png;base64,AAAA" },
+        ]);
+    });
+
+    it("should convert url images in tool_result content to input_image outputs", () => {
+        const req: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool_use", id: "toolu_123", name: "read_image", input: {} },
+                    ],
+                },
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "tool_result",
+                            tool_use_id: "toolu_123",
+                            content: [
+                                { type: "image", source: { type: "url", url: "https://example.com/cat.png" } },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(req);
+
+        const funcOutput = (result.input as ResponsesInputItem[]).find((item: any) => item.type === "function_call_output") as any;
+        expect(funcOutput.output).toEqual([
+            { type: "input_image", image_url: "https://example.com/cat.png" },
+        ]);
+    });
+
+    it("should convert text-only tool_result content arrays to input_text parts", () => {
+        const req: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool_use", id: "toolu_123", name: "read_text", input: {} },
+                    ],
+                },
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "tool_result",
+                            tool_use_id: "toolu_123",
+                            content: [
+                                { type: "text", text: "第一行" },
+                                { type: "text", text: "第二行" },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(req);
+
+        const funcOutput = (result.input as ResponsesInputItem[]).find((item: any) => item.type === "function_call_output") as any;
+        expect(funcOutput.output).toEqual([
+            { type: "input_text", text: "第一行" },
+            { type: "input_text", text: "第二行" },
+        ]);
+    });
+
     it("should convert thinking block to reasoning item", () => {
         const req: AnthropicRequest = {
             model: "claude-3-sonnet-20240229",

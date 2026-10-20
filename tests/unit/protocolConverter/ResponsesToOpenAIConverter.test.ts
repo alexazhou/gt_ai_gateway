@@ -167,6 +167,109 @@ describe("ResponsesToOpenAIConverter", () => {
             });
         });
 
+        it("should move images from function_call_output arrays into a following user message", () => {
+            const req: ResponsesRequest = {
+                model: "gpt-4",
+                input: [
+                    {
+                        type: "function_call_output",
+                        call_id: "call_123",
+                        output: [
+                            { type: "input_text", text: "截图如下" },
+                            { type: "input_image", image_url: "data:image/png;base64,AAAA" },
+                        ],
+                    },
+                ],
+            };
+            const result = converter.convertRequest(req);
+
+            expect(result.messages).toHaveLength(2);
+            expect(result.messages[0]).toEqual({
+                role: "tool",
+                tool_call_id: "call_123",
+                content: "截图如下",
+            });
+            expect(result.messages[1]).toEqual({
+                role: "user",
+                content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } }],
+            });
+        });
+
+        it("should keep tool messages contiguous when multiple function_call_output items carry images", () => {
+            const req: ResponsesRequest = {
+                model: "gpt-4",
+                input: [
+                    { type: "function_call", call_id: "call_1", name: "read_image", arguments: "{}" },
+                    { type: "function_call", call_id: "call_2", name: "read_image", arguments: "{}" },
+                    {
+                        type: "function_call_output",
+                        call_id: "call_1",
+                        output: [
+                            { type: "input_text", text: "第一张" },
+                            { type: "input_image", image_url: "https://example.com/1.png" },
+                        ],
+                    },
+                    {
+                        type: "function_call_output",
+                        call_id: "call_2",
+                        output: [
+                            { type: "input_image", image_url: "https://example.com/2.png" },
+                        ],
+                    },
+                ],
+            };
+            const result = converter.convertRequest(req);
+
+            expect(result.messages).toHaveLength(4);
+            expect(result.messages[1]).toEqual({ role: "tool", tool_call_id: "call_1", content: "第一张" });
+            expect(result.messages[2]).toEqual({ role: "tool", tool_call_id: "call_2", content: "" });
+            expect(result.messages[3]).toEqual({
+                role: "user",
+                content: [
+                    { type: "image_url", image_url: { url: "https://example.com/1.png" } },
+                    { type: "image_url", image_url: { url: "https://example.com/2.png" } },
+                ],
+            });
+        });
+
+        it("should convert text-only function_call_output arrays to joined tool text", () => {
+            const req: ResponsesRequest = {
+                model: "gpt-4",
+                input: [
+                    {
+                        type: "function_call_output",
+                        call_id: "call_123",
+                        output: [
+                            { type: "input_text", text: "第一行" },
+                            { type: "output_text", text: "第二行" },
+                        ],
+                    },
+                ],
+            };
+            const result = converter.convertRequest(req);
+
+            expect(result.messages).toEqual([
+                { role: "tool", tool_call_id: "call_123", content: "第一行\n第二行" },
+            ]);
+        });
+
+        it("should reject function_call_output images that only carry file_id", () => {
+            const req: ResponsesRequest = {
+                model: "gpt-4",
+                input: [
+                    {
+                        type: "function_call_output",
+                        call_id: "call_123",
+                        output: [
+                            { type: "input_image", file_id: "file-123" },
+                        ],
+                    },
+                ],
+            };
+
+            expect(() => converter.convertRequest(req)).toThrow(/file_id/);
+        });
+
         it("should merge consecutive function_calls into one assistant message", () => {
             const req: ResponsesRequest = {
                 model: "gpt-4",

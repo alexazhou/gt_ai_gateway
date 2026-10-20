@@ -194,6 +194,75 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         expect(content[0].content).toBe("Sunny, 25°C");
     });
 
+    it("should convert function_call_output content arrays with images to tool_result blocks", () => {
+        const req: ResponsesRequest = {
+            model: "gpt-4.1",
+            input: [
+                {
+                    type: "function_call_output",
+                    call_id: "call_123",
+                    output: [
+                        { type: "input_text", text: "截图如下" },
+                        { type: "input_image", image_url: "data:image/png;base64,AAAA" },
+                        { type: "input_image", image_url: "https://example.com/cat.png" },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(req);
+
+        const userMsg = result.messages[0];
+        const content = userMsg.content as AnthropicContentBlock[];
+        expect(content[0].type).toBe("tool_result");
+        expect(content[0].content).toEqual([
+            { type: "text", text: "截图如下" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+            { type: "image", source: { type: "url", url: "https://example.com/cat.png" } },
+        ]);
+    });
+
+    it("should convert text-only function_call_output arrays to tool_result text blocks", () => {
+        const req: ResponsesRequest = {
+            model: "gpt-4.1",
+            input: [
+                {
+                    type: "function_call_output",
+                    call_id: "call_123",
+                    output: [
+                        { type: "input_text", text: "第一行" },
+                        { type: "output_text", text: "第二行" },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(req);
+
+        const content = result.messages[0].content as AnthropicContentBlock[];
+        expect(content[0].content).toEqual([
+            { type: "text", text: "第一行" },
+            { type: "text", text: "第二行" },
+        ]);
+    });
+
+    it("should reject function_call_output images that only carry file_id", () => {
+        const req: ResponsesRequest = {
+            model: "gpt-4.1",
+            input: [
+                {
+                    type: "function_call_output",
+                    call_id: "call_123",
+                    output: [
+                        { type: "input_image", file_id: "file-123" },
+                    ],
+                },
+            ],
+        };
+
+        expect(() => converter.convertRequest(req)).toThrow(/file_id/);
+    });
+
     it("should convert reasoning item to thinking block", () => {
         const req: ResponsesRequest = {
             model: "gpt-4.1",

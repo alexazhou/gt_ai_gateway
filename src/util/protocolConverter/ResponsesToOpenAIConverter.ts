@@ -1,3 +1,4 @@
+import customError from "../../customError";
 import { BaseConverter } from "./BaseConverter";
 import type {
     OpenAIRequest,
@@ -83,7 +84,21 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                 }
             };
 
+            // Responses 的 function_call_output 支持图片，但 OpenAI tool 消息只支持文本：
+            // 图片先攒起来，等连续的 tool 消息全部输出完后，再作为一条 user 消息补上。
+            const pendingToolImages: Array<Record<string, unknown>> = [];
+            const flushToolImages = () => {
+                if (pendingToolImages.length > 0) {
+                    // splice(0) 交出副本，避免随后清空数组时把已写入消息的内容一起清掉
+                    messages.push({ role: "user", content: pendingToolImages.splice(0) as any });
+                }
+            };
+
             for (const item of req.input) {
+                if (!("type" in item && item.type === "function_call_output")) {
+                    flushToolImages();
+                }
+
                 if ("type" in item && item.type === "function_call") {
                     // 收集 function_call
                     if (!pendingToolCalls) {
@@ -109,12 +124,13 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                 } else {
                     // 遇到其他类型，先 flush 之前收集的 tool_calls
                     flushToolCalls();
-                    this.convertInputItem(item, messages);
+                    this.convertInputItem(item, messages, pendingToolImages);
                 }
             }
 
-            // flush 剩余的 tool_calls
+            // flush 剩余的 tool_calls 与工具结果图片
             flushToolCalls();
+            flushToolImages();
         }
 
         const openaiReq: OpenAIRequest = {
@@ -177,6 +193,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
     private convertInputItem(
         item: ResponsesInputItem,
         messages: OpenAIMessage[],
+        toolImages: Array<Record<string, unknown>>,
     ): void {
         if ("type" in item && item.type === "function_call") {
             // function_call → assistant message with tool_calls
@@ -196,11 +213,32 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
         }
 
         if ("type" in item && item.type === "function_call_output") {
-            // function_call_output → tool message
+            // function_call_output → tool message；图片从数组输出中拆出，稍后放进 user 消息。
+            let content = "";
+            if (typeof item.output === "string") {
+                content = item.output;
+            } else {
+                const texts: string[] = [];
+                for (const part of item.output) {
+                    if (part.type === "input_text" || part.type === "output_text") {
+                        texts.push(part.text);
+                    } else if (part.type === "input_image") {
+                        const url = part.image_url || part.url || "";
+                        if (!url) {
+                            throw new customError.AppError(
+                                "Responses input_image with file_id cannot be converted to OpenAI",
+                                400,
+                            );
+                        }
+                        toolImages.push({ type: "image_url", image_url: { url } });
+                    }
+                }
+                content = texts.join("\n");
+            }
             messages.push({
                 role: "tool",
                 tool_call_id: item.call_id,
-                content: item.output,
+                content,
             });
             return;
         }
@@ -237,7 +275,13 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                     if (part.type === "input_text" || part.type === "output_text") {
                         texts.push(part.text);
                     } else if (part.type === "input_image") {
-                        const url = (part as any).image_url || (part as any).url || "";
+                        const url = part.image_url || part.url || "";
+                        if (!url) {
+                            throw new customError.AppError(
+                                "Responses input_image with file_id cannot be converted to OpenAI",
+                                400,
+                            );
+                        }
                         imageParts.push({
                             type: "image_url",
                             image_url: { url },
