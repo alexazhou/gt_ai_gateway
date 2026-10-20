@@ -38,6 +38,66 @@ describe("OpenAIToAnthropicConverter - convertRequest", () => {
         expect(result.max_tokens).toBe(1024);
     });
 
+    it("should convert data-URL image content into an Anthropic base64 image block", () => {
+        const openaiReq: OpenAIRequest = {
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "描述这张图片" },
+                        { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+                    ] as any,
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(openaiReq) as AnthropicRequest;
+
+        expect(result.messages[0].content).toEqual([
+            { type: "text", text: "描述这张图片" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+        ]);
+    });
+
+    it("should convert remote image URLs into Anthropic url image blocks", () => {
+        const openaiReq: OpenAIRequest = {
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "描述这张图片" },
+                        { type: "image_url", image_url: { url: "https://example.com/cat.png" } },
+                    ] as any,
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(openaiReq) as AnthropicRequest;
+
+        expect(result.messages[0].content).toEqual([
+            { type: "text", text: "描述这张图片" },
+            { type: "image", source: { type: "url", url: "https://example.com/cat.png" } },
+        ]);
+    });
+
+    it("should keep text-only content arrays unchanged", () => {
+        const openaiReq: OpenAIRequest = {
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Hello" }] as any,
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(openaiReq) as AnthropicRequest;
+
+        expect(result.messages[0].content).toEqual([{ type: "text", text: "Hello" }]);
+    });
+
     it("should extract system messages into Anthropic system field", () => {
         const openaiReq: OpenAIRequest = {
             model: "gpt-4",

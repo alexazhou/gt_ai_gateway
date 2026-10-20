@@ -38,6 +38,98 @@ describe("AnthropicToOpenAIConverter - convertRequest", () => {
         expect(result.max_tokens).toBe(1024);
     });
 
+    it("should convert Anthropic base64 image blocks to OpenAI image_url parts", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "描述这张图片" },
+                        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "BBBB" } },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
+
+        expect(result.messages[0].content).toEqual([
+            { type: "text", text: "描述这张图片" },
+            { type: "image_url", image_url: { url: "data:image/jpeg;base64,BBBB" } },
+        ]);
+    });
+
+    it("should convert Anthropic url image blocks to OpenAI image_url parts", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "描述这张图片" },
+                        { type: "image", source: { type: "url", url: "https://example.com/cat.png" } },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
+
+        expect(result.messages[0].content).toEqual([
+            { type: "text", text: "描述这张图片" },
+            { type: "image_url", image_url: { url: "https://example.com/cat.png" } },
+        ]);
+    });
+
+    it("should keep text-only content arrays as a joined string", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "first" },
+                        { type: "text", text: "second" },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
+
+        expect(result.messages[0].content).toBe("first\nsecond");
+    });
+
+    it("should keep tool_result messages before multimodal user content", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "tool_result", tool_use_id: "call_1", content: "ok" },
+                        { type: "text", text: "描述这张图片" },
+                        { type: "image", source: { type: "url", url: "https://example.com/cat.png" } },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
+
+        expect(result.messages).toHaveLength(2);
+        expect(result.messages[0]).toEqual({ role: "tool", tool_call_id: "call_1", content: "ok" });
+        expect(result.messages[1].content).toEqual([
+            { type: "text", text: "描述这张图片" },
+            { type: "image_url", image_url: { url: "https://example.com/cat.png" } },
+        ]);
+    });
+
     it("should convert system prompt from string to system message", () => {
         const anthropicReq: AnthropicRequest = {
             model: "claude-3-sonnet-20240229",
@@ -300,6 +392,136 @@ describe("AnthropicToOpenAIConverter - convertRequest", () => {
         const toolMsg = result.messages.find((m: any) => m.role === "tool")!;
         expect(toolMsg.content).toBe("Sunny, 25°C");
         expect(toolMsg.tool_call_id).toBe("toolu_123");
+    });
+
+    it("should move images from tool_result content into a following user message", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool_use", id: "toolu_123", name: "read_image", input: {} },
+                    ],
+                },
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "tool_result",
+                            tool_use_id: "toolu_123",
+                            content: [
+                                { type: "text", text: "截图如下" },
+                                { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
+
+        expect(result.messages).toHaveLength(3);
+        expect(result.messages[1]).toEqual({
+            role: "tool",
+            tool_call_id: "toolu_123",
+            content: "截图如下",
+        });
+        expect(result.messages[2]).toEqual({
+            role: "user",
+            content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } }],
+        });
+    });
+
+    it("should keep an empty tool message when tool_result only contains images", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool_use", id: "toolu_123", name: "read_image", input: {} },
+                    ],
+                },
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "tool_result",
+                            tool_use_id: "toolu_123",
+                            content: [
+                                { type: "image", source: { type: "url", url: "https://example.com/cat.png" } },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
+
+        expect(result.messages).toHaveLength(3);
+        expect(result.messages[1]).toEqual({
+            role: "tool",
+            tool_call_id: "toolu_123",
+            content: "",
+        });
+        expect(result.messages[2]).toEqual({
+            role: "user",
+            content: [{ type: "image_url", image_url: { url: "https://example.com/cat.png" } }],
+        });
+    });
+
+    it("should collect images from multiple tool results after all tool messages", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool_use", id: "call_1", name: "read_image", input: {} },
+                        { type: "tool_use", id: "call_2", name: "read_image", input: {} },
+                    ],
+                },
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "tool_result",
+                            tool_use_id: "call_1",
+                            content: [
+                                { type: "text", text: "第一张" },
+                                { type: "image", source: { type: "url", url: "https://example.com/1.png" } },
+                            ],
+                        },
+                        {
+                            type: "tool_result",
+                            tool_use_id: "call_2",
+                            content: [
+                                { type: "image", source: { type: "url", url: "https://example.com/2.png" } },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
+
+        expect(result.messages).toHaveLength(4);
+        expect(result.messages[1]).toEqual({ role: "tool", tool_call_id: "call_1", content: "第一张" });
+        expect(result.messages[2]).toEqual({ role: "tool", tool_call_id: "call_2", content: "" });
+        expect(result.messages[3]).toEqual({
+            role: "user",
+            content: [
+                { type: "image_url", image_url: { url: "https://example.com/1.png" } },
+                { type: "image_url", image_url: { url: "https://example.com/2.png" } },
+            ],
+        });
     });
 
     it("should place tool_result before normal user text when converting mixed content blocks", () => {

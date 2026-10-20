@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import requestHelper from "../../helpers/requestHelper";
 import mockHelper from "../../helpers/mockHelper";
+import upstreamCaptureHelper from "../../helpers/upstreamCaptureHelper";
 import modelFixtures from "../../fixtures/modelFixtures";
 import dbHelper from "../../helpers/dbHelper";
 import { setupAdminUser } from "../../globalSetup";
@@ -196,6 +197,76 @@ describe("AI Protocol Conversion API", () => {
         expect(responseData.type).toBe("message");
         expect(responseData.content[0].text).toBe(response.body.content[0].text);
         expect(responseData.usage.input_tokens).toBe(response.body.usage.input_tokens);
+    }, 30000);
+
+
+    it("should forward OpenAI image content as an Anthropic image block", async () => {
+        const chatRequest = mockHelper.generateOpenAIChatRequest({
+            model: openAIClientModelName,
+            stream: false,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "描述这张图片" },
+                        { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+                    ],
+                },
+            ],
+        });
+
+        const response = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            chatRequest,
+            testUserToken,
+        );
+
+        expect(response.status).toBe(200);
+
+        const captured = (await upstreamCaptureHelper.list())
+            .filter((request) => request.json?.model === openAIClientModelName)
+            .filter((request) => Array.isArray(request.json?.messages?.[0]?.content)
+                && request.json.messages[0].content.some((part: any) => part.type === "image"));
+        expect(captured).toHaveLength(1);
+        expect(captured[0].json.messages[0].content).toEqual([
+            { type: "text", text: "描述这张图片" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+        ]);
+    }, 30000);
+
+
+    it("should forward Anthropic image content as an OpenAI image_url part", async () => {
+        const messageRequest = mockHelper.generateAnthropicMessageRequest({
+            model: anthropicClientModelName,
+            stream: false,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "描述这张图片" },
+                        { type: "image", source: { type: "base64", media_type: "image/png", data: "BBBB" } },
+                    ],
+                },
+            ],
+        });
+
+        const response = await requestHelper.postWithAnthropicStyleApiKey(
+            "/llm/v1/messages",
+            messageRequest,
+            testUserToken,
+        );
+
+        expect(response.status).toBe(200);
+
+        const captured = (await upstreamCaptureHelper.list())
+            .filter((request) => request.json?.model === anthropicClientModelName)
+            .filter((request) => Array.isArray(request.json?.messages?.[0]?.content)
+                && request.json.messages[0].content.some((part: any) => part.type === "image_url"));
+        expect(captured).toHaveLength(1);
+        expect(captured[0].json.messages[0].content).toEqual([
+            { type: "text", text: "描述这张图片" },
+            { type: "image_url", image_url: { url: "data:image/png;base64,BBBB" } },
+        ]);
     }, 30000);
 
 

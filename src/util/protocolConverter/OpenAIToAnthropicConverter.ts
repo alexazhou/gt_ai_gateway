@@ -1,3 +1,4 @@
+import customError from "../../customError";
 import { BaseConverter } from "./BaseConverter";
 import type {
     AnthropicRequest,
@@ -88,7 +89,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
             if (msg.role === "user" || msg.role === "assistant") {
                 messages.push({
                     role: msg.role,
-                    content: msg.content || "",
+                    content: this.convertMessageContent(msg.content),
                 });
             }
         }
@@ -152,6 +153,68 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
         }
 
         return anthropicReq;
+    }
+
+
+    /**
+     * OpenAI content → Anthropic content：
+     * - 纯文本数组保持原样（两种协议的文本块形状一致）
+     * - 含 image_url 时逐块转换，图片 URL 拆成 Anthropic 的 base64 / url source
+     */
+    private convertMessageContent(content: unknown): string | AnthropicContentBlock[] {
+        if (!Array.isArray(content)) {
+            return (content as string) || "";
+        }
+
+        const hasImage = content.some((part: any) => part?.type === "image_url");
+        if (!hasImage) {
+            return content as AnthropicContentBlock[];
+        }
+
+        const blocks: AnthropicContentBlock[] = [];
+        for (const part of content as any[]) {
+            if (part?.type === "text") {
+                blocks.push({ type: "text", text: part.text ?? "" });
+            } else if (part?.type === "image_url") {
+                blocks.push(this.convertImageUrl(part.image_url));
+            }
+        }
+        return blocks;
+    }
+
+
+    /**
+     * OpenAI image_url → Anthropic image block
+     * data URL 拆成 base64 source，其余按远程 URL 透传
+     */
+    private convertImageUrl(imageUrl: unknown): AnthropicContentBlock {
+        const url = typeof imageUrl === "string"
+            ? imageUrl
+            : (imageUrl as { url?: string } | undefined)?.url || "";
+
+        if (!url) {
+            throw new customError.AppError("image_url.url is required for image protocol conversion", 400);
+        }
+
+        const dataUrlMatch = url.match(/^data:([^;,]+);base64,([\s\S]+)$/);
+        if (dataUrlMatch) {
+            return {
+                type: "image",
+                source: {
+                    type: "base64",
+                    media_type: dataUrlMatch[1],
+                    data: dataUrlMatch[2],
+                },
+            };
+        }
+        if (url.startsWith("data:")) {
+            throw new customError.AppError(
+                "Unsupported image data URL for protocol conversion: expected data:<mime>;base64,<data>",
+                400,
+            );
+        }
+
+        return { type: "image", source: { type: "url", url } };
     }
 
 

@@ -86,17 +86,36 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                     const normalBlocks = msg.content.filter((b) => b.type !== "tool_result");
 
                     // OpenAI requires tool responses to immediately follow assistant tool_calls.
+                    // tool 消息只支持文本：图片从工具结果里取出，随后统一放进一条 user 消息。
+                    const toolResultImages: Array<Record<string, unknown>> = [];
                     for (const tr of toolResults) {
+                        const textContent = typeof tr.content === "string"
+                            ? tr.content
+                            : (tr.content ?? [])
+                                .filter((b) => b.type === "text")
+                                .map((b) => b.text || "")
+                                .join("\n");
                         messages.push({
                             role: "tool",
                             tool_call_id: tr.tool_use_id,
-                            content: typeof tr.content === "string" ? tr.content : JSON.stringify(tr.content),
+                            content: textContent,
                         });
+
+                        const imageBlocks = typeof tr.content === "string" ? [] : tr.content ?? [];
+                        for (const block of imageBlocks) {
+                            if (block.type !== "image" || !block.source) continue;
+                            const url = this.imageSourceToUrl(block.source);
+                            if (url) {
+                                toolResultImages.push({ type: "image_url", image_url: { url } });
+                            }
+                        }
                     }
 
-                    if (normalBlocks.length > 0) {
-                        const texts = normalBlocks.map((b) => b.text || "").join("\n");
-                        messages.push({ role: "user", content: texts });
+                    if (normalBlocks.length > 0 || toolResultImages.length > 0) {
+                        messages.push({
+                            role: "user",
+                            content: this.convertUserContent(normalBlocks, toolResultImages) as any,
+                        });
                     }
                 }
             } else if (msg.role === "assistant") {
@@ -190,6 +209,51 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
         }
 
         return openaiReq;
+    }
+
+
+    /**
+     * Anthropic 普通 user 内容块 → OpenAI content：
+     * - 无图片时保持原有的文本拼接行为
+     * - 含图片时输出多模态 parts，保留文本与图片的原始顺序
+     * - extraImageParts 承接从 tool_result 中拆出的图片，追加在普通内容之后
+     */
+    private convertUserContent(
+        blocks: AnthropicContentBlock[],
+        extraImageParts: Array<Record<string, unknown>> = [],
+    ): string | Array<Record<string, unknown>> {
+        const hasImage = extraImageParts.length > 0
+            || blocks.some((b) => b.type === "image" && b.source);
+        if (!hasImage) {
+            return blocks.map((b) => b.text || "").join("\n");
+        }
+
+        const parts: Array<Record<string, unknown>> = [];
+        for (const block of blocks) {
+            if (block.type === "text") {
+                if (block.text) {
+                    parts.push({ type: "text", text: block.text });
+                }
+            } else if (block.type === "image" && block.source) {
+                const url = this.imageSourceToUrl(block.source);
+                if (url) {
+                    parts.push({ type: "image_url", image_url: { url } });
+                }
+            }
+        }
+        parts.push(...extraImageParts);
+        return parts.length > 0 ? parts : "";
+    }
+
+
+    private imageSourceToUrl(source: NonNullable<AnthropicContentBlock["source"]>): string | null {
+        if (source.type === "base64" && source.data) {
+            return `data:${source.media_type || "image/png"};base64,${source.data}`;
+        }
+        if (source.type === "url" && source.url) {
+            return source.url;
+        }
+        return null;
     }
 
 
