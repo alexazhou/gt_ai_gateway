@@ -6,9 +6,10 @@ Serverless AI Gateway 的核心特性之一是**透明且自动的协议转换**
 
 ## 什么是自动协议转换？
 
-目前市面上的大语言模型 API 规范主要分为两大学派：
-1. **OpenAI 规范** (`/v1/chat/completions`)
-2. **Anthropic 规范** (`/v1/messages`)
+目前网关支持的 API 规范主要有三种：
+1. **OpenAI Chat Completions** (`/v1/chat/completions`)
+2. **Anthropic Messages** (`/v1/messages`)
+3. **OpenAI Responses** (`/v1/responses`)
 
 通常情况下，如果你在项目中同时使用了 GPT-4 和 Claude 3，你需要准备两套 SDK，编写两套完全不同的组装参数和解析响应（包括解析复杂的 SSE Stream 流）的代码。
 
@@ -24,10 +25,15 @@ Serverless AI Gateway 的核心特性之一是**透明且自动的协议转换**
 
 | 客户端请求的端点 | 后台模型实际支持的协议 | 网关的行为 | 结果 |
 | :--- | :--- | :--- | :--- |
-| `/llm/v1/chat/completions` (OpenAI 格式) | **OpenAI** 协议 | 透传 (Pass-through) | 不做转换，直接代理请求。 |
-| `/llm/v1/chat/completions` (OpenAI 格式) | **Anthropic** 协议 | **触发转换** | 将请求转为 Anthropic 格式，响应转为 OpenAI 格式。 |
-| `/llm/v1/messages` (Anthropic 格式) | **Anthropic** 协议 | 透传 (Pass-through) | 不做转换，直接代理请求。 |
-| `/llm/v1/messages` (Anthropic 格式) | **OpenAI** 协议 | **触发转换** | 将请求转为 OpenAI 格式，响应转为 Anthropic 格式。 |
+| `/llm/v1/chat/completions` (OpenAI) | **OpenAI** | 透传 | 不做转换，直接代理请求。 |
+| `/llm/v1/chat/completions` (OpenAI) | **Anthropic** | **触发转换** | 请求转为 Anthropic，响应转为 OpenAI。 |
+| `/llm/v1/chat/completions` (OpenAI) | **Responses** | **触发转换** | 请求转为 Responses，响应转为 OpenAI。 |
+| `/llm/v1/messages` (Anthropic) | **Anthropic** | 透传 | 不做转换，直接代理请求。 |
+| `/llm/v1/messages` (Anthropic) | **OpenAI** | **触发转换** | 请求转为 OpenAI，响应转为 Anthropic。 |
+| `/llm/v1/messages` (Anthropic) | **Responses** | **触发转换** | 请求转为 Responses，响应转为 Anthropic。 |
+| `/llm/v1/responses` (Responses) | **Responses** | 透传 | 不做转换，直接代理请求。 |
+| `/llm/v1/responses` (Responses) | **OpenAI** | **触发转换** | 请求转为 OpenAI，响应转为 Responses。 |
+| `/llm/v1/responses` (Responses) | **Anthropic** | **触发转换** | 请求转为 Anthropic，响应转为 Responses。 |
 
 简单来说：**只要客户端使用的协议，与实际提供模型的供应商协议不一致，就会自动触发双向转换。**
 
@@ -43,7 +49,7 @@ Serverless AI Gateway 的核心特性之一是**透明且自动的协议转换**
    如果在“供应商模型”中没有单独指定协议，网关会**自动根据其归属供应商所填写的 API URL** 来进行判断。
    - 如果该供应商配置了 `OpenAI API URL`，则认为该供应商下的所有模型默认支持 OpenAI 协议。
    - 如果该供应商配置了 `Anthropic API URL`，则认为默认支持 Anthropic 协议。
-   - 如果同时填写了两者，则说明该供应商原生支持双协议。在原生支持双协议的情况下，如果客户端发来的请求刚好是其中一种，网关就会直接透传，从而避免不必要的转换开销。
+   - 如果填写了多种协议 URL，则说明该供应商原生支持多协议。客户端请求的协议刚好是其中之一时，网关会直接透传，避免不必要的转换开销。
 
 ---
 
@@ -110,9 +116,21 @@ for chunk in response:
 - **基础对话结构**: `system` prompt 映射、`messages` 角色 (`user`/`assistant`) 的转换与合并。
 - **参数映射**: `max_tokens`, `temperature`, `top_p` 等生成参数的对齐。
 - **流式传输 (SSE Stream)**: 实时、低延迟的双向事件流解析与重组。
-- **多模态 (Vision / Image)**: 支持将 OpenAI 格式的图片输入（Base64 / URL）转译为 Anthropic 支持的图像块格式，反之亦然。
+- **多模态 (Vision / Image)**: 三种协议之间的消息图片互转，支持 base64 / data URL / 公网 URL：
+  - OpenAI `image_url` ↔ Anthropic `image`（base64 / url source）
+  - OpenAI `image_url` ↔ Responses `input_image`
+  - Anthropic `image` ↔ Responses `input_image`
+  - 工具结果中的图片同样支持：Anthropic `tool_result` 内容数组、Responses `function_call_output.output` 内容数组
+  - OpenAI 的 `tool` 消息协议上只支持文本，工具结果图片会被拆分到后续 user 消息
 - **工具调用 (Function Calling / Tool Use)**: 支持将 OpenAI 规范的 `tools` 和 `tool_choice` 转译为 Anthropic 的 `tools` 规范。能够正确解析模型返回的 `tool_calls`，并支持客户端将 `tool` 角色的结果回传。
 
 ## 注意事项
 
-虽然网关尽最大努力保证协议转换的无缝兼容，但受限于两家 API 规范的底层设计差异，可能会有极少数边界情况的差异（例如某些特定供应商的实验性参数不兼容）。对于 99% 以上的标准对话、流式输出、图片识别和工具调用，自动转换都是完全稳定且可靠的。
+虽然网关尽最大努力保证协议转换的无缝兼容，但受限于不同 API 规范的底层设计差异，可能会有极少数边界情况的差异（例如某些特定供应商的实验性参数不兼容）。对于绝大多数标准对话、流式输出、图片识别和工具调用，自动转换都是稳定可靠的。
+
+### 已知限制
+
+- `input_image.file_id`、`input_file` 等需要 OpenAI 侧文件解析的内容无法转换为其他协议，会明确返回 400
+- 非 base64 的 data URL 在转换为 Anthropic 时会返回 400
+- `image_url.detail` 等非通用字段在部分转换方向会被丢弃
+- 少数供应商对内容块顺序或字段有额外要求，如遇问题请保留实际请求体用于排查

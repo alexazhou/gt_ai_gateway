@@ -51,6 +51,24 @@ Authorization: Bearer YOUR_API_KEY
 }
 ```
 
+### 多模态消息内容
+
+`messages[].content` 除了字符串，还可以是内容块数组（多模态输入）：
+
+```json
+{
+  "role": "user",
+  "content": [
+    { "type": "text", "text": "描述这张图片" },
+    { "type": "image_url", "image_url": { "url": "data:image/png;base64,..." } }
+  ]
+}
+```
+
+- `image_url.url` 支持 `data:<mime>;base64,<data>` 内联图片，也支持公网图片 URL
+- `image_url.detail` 可选（`low` / `high` / `auto`）
+- `role="tool"` 的消息只支持文本内容（字符串或 `text` 内容块），**不能携带图片**；需要回传图片时只能作为后续 `user` 消息发送
+
 ---
 
 ## 2. 流式请求格式（SSE）

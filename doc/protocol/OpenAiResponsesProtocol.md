@@ -82,6 +82,43 @@ Authorization: Bearer YOUR_API_KEY
 }
 ```
 
+### 输入数组与多模态内容
+
+`input` 可以是字符串，也可以是 item 数组。常用 item 类型：
+
+- `message`：`{ "type": "message", "role": "user", "content": [...] }`
+- `function_call`：`{ "type": "function_call", "call_id": "...", "name": "...", "arguments": "..." }`
+- `function_call_output`：`{ "type": "function_call_output", "call_id": "...", "output": ... }`
+- `reasoning`：`{ "type": "reasoning", "summary": [...] }`
+
+`message.content` 支持以下内容块：
+
+- `input_text`：`{ "type": "input_text", "text": "..." }`
+- `input_image`：`{ "type": "input_image", "image_url": "data:image/png;base64,..." }`
+- `input_file`：`{ "type": "input_file", "file_data": "...", "filename": "..." }`
+
+`input_image.image_url` 支持 data URL 或公网 URL，也可以用 `file_id` 引用已上传文件；`detail` 可选。
+
+**多模态示例：**
+
+```json
+{
+  "model": "gpt-5.4",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        { "type": "input_text", "text": "描述这张图片" },
+        { "type": "input_image", "image_url": "data:image/png;base64,..." }
+      ]
+    }
+  ]
+}
+```
+
+`function_call_output.output` 除了字符串，也可以是内容块数组（`input_text` / `input_image` / `input_file`），用于工具返回文本、图片或文件。
+
 ---
 
 ## 2. 流式请求（SSE）

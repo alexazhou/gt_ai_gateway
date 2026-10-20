@@ -1,5 +1,7 @@
 # 协议转换集成设计文档
 
+> **历史设计稿**：本文记录初次引入协议转换时的集成方案，其中部分内容（如“Responses API 不参与转换”“图片只做占位处理”“仅支持 OpenAI ↔ Anthropic”）已被后续实现取代。当前转换行为请以 [MessageFormatConversion.md](./MessageFormatConversion.md)、[ResponsesAPIConversion.md](./ResponsesAPIConversion.md) 和 [ProtocolConversion.md](../usage/ProtocolConversion.md) 为准。
+
 本文档描述将 `protocolConverter.ts` 集成到网关转发流程中的完整方案。在开发代码之前，需以此文档为准对齐实现逻辑。
 
 ---

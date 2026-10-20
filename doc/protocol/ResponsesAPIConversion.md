@@ -50,6 +50,8 @@ Responses API 是 OpenAI 推出的新一代 API 格式，与传统的 Chat Compl
 }
 ```
 
+> `function_call_output.output` 除了字符串，也可以是内容块数组（`input_text` / `input_image` / `input_file`），转换时会映射为 `tool_result` 的文本/图片块。
+
 ### 2.3 请求转换映射表
 
 | Responses API | Anthropic API | 方向 |
@@ -58,7 +60,8 @@ Responses API 是 OpenAI 推出的新一代 API 格式，与传统的 Chat Compl
 | `input[].type === "message", role === "user"` | `messages[].role = "user"` | Responses → Anthropic |
 | `input[].type === "message", role === "assistant"` | `messages[].role = "assistant"` | Responses → Anthropic |
 | `input[].type === "function_call"` | `messages[].role = "assistant", content = [tool_use]` | Responses → Anthropic |
-| `input[].type === "function_call_output"` | `messages[].role = "user", content = [tool_result]` | Responses → Anthropic |
+| `input[].type === "function_call_output"` | `messages[].role = "user", content = [tool_result]` | Responses → Anthropic；`output` 为数组时按 text / image 块映射 |
+| `input[].content[].type === "input_image"` | `messages[].content[].type = "image"` | Responses → Anthropic；data URL 拆成 base64 source，普通 URL 保留 |
 | `input[].type === "reasoning"` | `messages[].role = "assistant", content = [thinking]` | Responses → Anthropic |
 | `max_output_tokens` | `max_tokens` | Responses → Anthropic |
 | `tools[].parameters` | `tools[].input_schema` | Responses → Anthropic |
@@ -70,12 +73,36 @@ Responses API 是 OpenAI 推出的新一代 API 格式，与传统的 Chat Compl
 | `messages[].role = "user"` | `input[].type = "message", role = "user"` | Anthropic → Responses |
 | `messages[].role = "assistant"` | `input[].type = "message", role = "assistant"` | Anthropic → Responses |
 | `content[].type = "tool_use"` | `input[].type = "function_call"` | Anthropic → Responses |
-| `content[].type = "tool_result"` | `input[].type = "function_call_output"` | Anthropic → Responses |
+| `content[].type = "tool_result"` | `input[].type = "function_call_output"` | Anthropic → Responses；`content` 为数组时按 input_text / input_image 映射 |
+| `content[].type = "image"` | `input[].content[].type = "input_image"` | Anthropic → Responses；base64 source 组装成 data URL，url source 原样保留 |
 | `content[].type = "thinking"` | `input[].type = "reasoning"` | Anthropic → Responses |
 | `max_tokens` | `max_output_tokens` | Anthropic → Responses |
 | `tool_choice: {type: "any"}` | `tool_choice: "required"` | Anthropic → Responses |
 | `tool_choice: {type: "tool", name}` | `tool_choice: {type: "function", name}` | Anthropic → Responses |
 | `thinking: {type: "enabled"}` | `reasoning: {effort: "high"}` | Anthropic → Responses |
+
+### 2.4 多模态与工具结果
+
+**图片消息**
+
+- Responses → Anthropic：`input_image.image_url` 为 data URL 时拆成 `{type:"base64", media_type, data}`；普通 URL 转为 `{type:"url", url}`
+- Anthropic → Responses：base64 source 组装成 `data:<media_type>;base64,<data>`；url source 原样作为 `input_image.image_url`
+- `input_image.file_id` 无法由网关解析成图片内容，转换为其他协议时直接返回 400
+
+**工具结果**
+
+- Anthropic `tool_result.content` 是字符串时，`function_call_output.output` 保持字符串
+- `tool_result.content` 是数组时：
+  - `text` → `input_text`
+  - `image` → `input_image`（base64 source 组装成 data URL）
+- Responses `function_call_output.output` 是数组时反向映射：
+  - `input_text` / `output_text` → `text`
+  - `input_image` → `image`
+- `input_file` 暂不转换
+
+**Responses → OpenAI 方向**
+
+OpenAI 的 `tool` 消息只支持文本，因此 `function_call_output.output` 数组中的文本会进入 tool 消息，图片会被收集到所有连续 tool 消息之后的一条 `user` 消息中。
 
 ---
 
@@ -230,15 +257,17 @@ src/util/protocolConverter/
 ├── BaseConverter.ts                    # 抽象基类
 ├── AnthropicToOpenAIConverter.ts       # Anthropic → OpenAI ChatCompletions
 ├── OpenAIToAnthropicConverter.ts       # OpenAI ChatCompletions → Anthropic
-├── ResponsesToAnthropicConverter.ts    # Responses → Anthropic（新增）
-├── AnthropicToResponsesConverter.ts    # Anthropic → Responses（新增）
-└── ConverterFactory.ts                 # 工厂类（已更新支持 Responses）
+├── ResponsesToAnthropicConverter.ts    # Responses → Anthropic
+├── AnthropicToResponsesConverter.ts    # Anthropic → Responses
+├── OpenAIToResponsesConverter.ts       # OpenAI → Responses
+├── ResponsesToOpenAIConverter.ts       # Responses → OpenAI
+└── ConverterFactory.ts                 # 工厂类
 ```
 
 ### ConverterFactory 转换矩阵
 
 | 客户端 ↓ / 上游 → | OPENAI | ANTHROPIC | RESPONSES |
 |---|---|---|---|
-| **OPENAI** | null | OpenAI→Anthropic | *(暂不支持)* |
+| **OPENAI** | null | OpenAI→Anthropic | OpenAI→Responses |
 | **ANTHROPIC** | Anthropic→OpenAI | null | Anthropic→Responses |
-| **RESPONSES** | *(暂不支持)* | Responses→Anthropic | null |
+| **RESPONSES** | Responses→OpenAI | Responses→Anthropic | null |
