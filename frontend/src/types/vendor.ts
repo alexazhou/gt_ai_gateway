@@ -19,7 +19,7 @@ export interface VendorConfig {
     auth_mode?: VendorAuthMode;
     skip_tls_verify?: boolean;
     proxy?: VendorProxyConfig | null;
-    [key: string]: any;
+    [key: string]: unknown;
 }
 
 export interface Vendor extends BaseEntity {

@@ -1,3 +1,4 @@
+import { isAxiosError } from 'axios';
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { status } from '@/api/system';
@@ -42,16 +43,18 @@ export const useAuthStore = defineStore('auth', () => {
             userId.value = data?.user_id ?? null;
             userName.value = data?.user_name ?? '';
             return { success: true };
-        } catch (error: any) {
+        } catch (error) {
             // 只有明确的 401/403 认证失败才清 Token
             // 网络错误时保留 Token（例如后端还没启动）
-            const status = error?.response?.status;
+            const response = isAxiosError(error) ? error.response : undefined;
+            const status = response?.status;
             const isAuthError = status === 401 || status === 403;
             if (isAuthError) {
                 clearToken();
             }
+            const responseError = (response?.data as { error?: string } | undefined)?.error;
             const message = isAuthError
-                ? (error?.response?.data?.error || 'Token 验证失败')
+                ? (responseError || 'Token 验证失败')
                 : '连接后端失败，请稍后重试';
             return { success: false, message };
         } finally {

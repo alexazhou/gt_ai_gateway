@@ -254,7 +254,12 @@ import { ref, computed, reactive, watch, nextTick } from 'vue';
 import { InfoCircleOutlined } from '@ant-design/icons-vue';
 import { ClientName, ClientConnectionMode } from '@/types/clientConfig';
 import { ApiFormat } from '@/types/gateway';
-import type { ClientConfigStatus, ClientConfigBackupInfo, CurrentClientConfig } from '@/types/clientConfig';
+import type {
+    ClientConfigStatus,
+    ClientConfigBackupInfo,
+    CurrentClientConfig,
+    CreateClientConfigRequest,
+} from '@/types/clientConfig';
 import type { User } from '@/types/user';
 import type { Model } from '@/types/model';
 import type { Vendor, VendorModel } from '@/types/vendor';
@@ -304,7 +309,7 @@ async function loadOptions() {
 
 const emit = defineEmits<{
     (e: 'update:open', value: boolean): void;
-    (e: 'save', request: any): void;
+    (e: 'save', request: CreateClientConfigRequest): void;
 }>();
 
 const saving = ref(false);
@@ -487,22 +492,24 @@ async function onVendorChange(): Promise<void> {
     form.upstreamModel = vendorModels.value[0]?.model_id || '';
 }
 
-function buildRequest(): any {
+function buildRequest(): CreateClientConfigRequest | null {
     if (!form.client) return null;
 
-    const request: any = {
+    const request: CreateClientConfigRequest = {
         client: form.client,
         connectionMode: form.connectionMode,
         effortLevel: form.effortLevel,
+        gatewayUrl: '',
+        model: '',
     };
 
     if (form.connectionMode === ClientConnectionMode.GATEWAY) {
         request.gatewayUrl = form.gatewayUrl;
-        request.userId = form.userId;
+        if (form.userId != null) request.userId = form.userId;
         request.model = form.model;
     } else if (form.connectionMode === ClientConnectionMode.VENDOR) {
         request.gatewayUrl = isVendorRecognized.value ? form.upstreamUrl : unrecognizedVendorUrl.value;
-        request.vendorId = form.vendorId;
+        if (form.vendorId != null) request.vendorId = form.vendorId;
         request.model = form.upstreamModel;
         if (!isVendorRecognized.value) {
             request.apiKey = unrecognizedVendorApiKey.value;

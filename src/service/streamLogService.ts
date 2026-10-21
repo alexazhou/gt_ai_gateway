@@ -21,7 +21,7 @@ export async function prepareStreamLog(record: SgRecord): Promise<WriteStream | 
 
     try {
         await fs.mkdir(logDir, { recursive: true });
-    } catch (e: any) {
+    } catch (e) {
         console.log("[streamLogService] Failed to create log dir:", e);
         return null;
     }
@@ -40,7 +40,7 @@ export async function writeRequestLog(record: SgRecord, body: string): Promise<v
     const logDir = join(getLogDir(), "stream");
     try {
         await fs.mkdir(logDir, { recursive: true });
-    } catch (e: any) {
+    } catch (e) {
         console.log("[streamLogService] Failed to create log dir:", e);
         return;
     }

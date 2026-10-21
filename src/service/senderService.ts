@@ -58,6 +58,20 @@ function buildRateLimitResponse(c: Context, error: InstanceType<typeof customErr
 }
 
 
+/** inspect 模式注入到 Context 的上游请求快照 */
+export interface UpstreamRequestSnapshot {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    body: string;
+    client_format: ApiFormat;
+    upstream_format: ApiFormat;
+    vendor: { id: number; name: string };
+    vendor_model_name: string;
+    proxy: { type: "http" | "socks5"; url: string } | null;
+}
+
+
 // inspect 模式下脱敏上游请求头，避免认证信息泄露给调用方
 function sanitizeUpstreamHeaders(headers: Headers): Record<string, string> {
     const result: Record<string, string> = {};
@@ -279,9 +293,9 @@ async function sendRequestToUpstream(
             body: upstreamBody,
             signal: clientAbortCtrl.signal,
             // dispatcher 是 undici (Node.js) 特有选项，不在 Cloudflare Workers 的 RequestInit 类型定义中
-            ...(dispatcher ? { dispatcher: dispatcher } as any : {}),
+            ...(dispatcher ? { dispatcher } : {}),
         });
-    } catch (e: any) {
+    } catch (e) {
         console.error("Upstream fetch failed:", e);
         // 补上失败码：我们自己的 abort 原样透传；普通网络错误 → UPSTREAM_UNREACHABLE；
         // 其余（如 getDispatcher 里模块加载 / 代理配置出错）如实归 UNKNOWN，不冒充上游不可达。
@@ -496,7 +510,7 @@ async function sendRequest(
             }
 
             return response;
-        } catch (e: any) {
+        } catch (e) {
             if (c.req.raw.signal.aborted || e instanceof customError.AppError) {
                 throw e;
             }

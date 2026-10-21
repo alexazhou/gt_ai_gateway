@@ -1,4 +1,5 @@
 import customError from "../../customError";
+import objectUtil from "../objectUtil";
 import type { AnthropicContentBlock, AnthropicRequest } from "../protocol/anthropicTypes";
 import type { ResponsesContentPart } from "../protocol/responsesTypes";
 
@@ -32,8 +33,8 @@ function appendAnthropicMessage(
  */
 function parseToolArguments(args: string): Record<string, unknown> {
     try {
-        const parsed = JSON.parse(args);
-        return typeof parsed === "object" && parsed !== null ? parsed : {};
+        const parsed: unknown = JSON.parse(args);
+        return objectUtil.isRecord(parsed) ? parsed : {};
     } catch {
         return {};
     }

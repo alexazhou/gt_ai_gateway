@@ -1,6 +1,7 @@
 import { SgVendor } from "../model/sgVendor";
 import { resolveUpstreamFormat } from "../util/protocolUtil/protocolUtil";
 import fetchUtil from "../util/fetchUtil";
+import abortTimeoutUtil from "../util/abortTimeoutUtil";
 import { ApiFormat, VendorAuthMode } from "../constants";
 
 
@@ -148,7 +149,7 @@ export async function testVendorConnectivity(
             method: "POST",
             headers,
             body,
-            ...(dispatcher ? { dispatcher: dispatcher } as any : {}),
+            ...(dispatcher ? { dispatcher } : {}),
         });
         const duration = Date.now() - startTime;
         const responseText = await response.text();
@@ -172,17 +173,12 @@ export async function testVendorConnectivity(
             request_body: requestBodyDisplay,
             response: responseData,
         };
-    } catch (error: any) {
+    } catch (error) {
         console.error(`[testVendor] Fetch failed for vendor ${vendor.name} (${vendor.id}) at ${url}:`, error);
-
-        let errorMessage = error.message || String(error);
-        if (error.cause) {
-            errorMessage += `\nCause: ${error.cause.message || String(error.cause)}`;
-        }
 
         return {
             success: false,
-            error: errorMessage,
+            error: abortTimeoutUtil.describeError(error),
             url,
             proxy: proxyInfo,
             request_method: "POST",

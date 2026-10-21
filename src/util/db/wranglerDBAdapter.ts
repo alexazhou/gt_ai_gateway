@@ -22,10 +22,11 @@ export class WranglerDBAdapter implements DBAdapter {
         try {
             const output = execSync(cmd, { encoding: "utf-8", stdio: "pipe" });
             return output;
-        } catch (e: any) {
-            console.error("Wrangler command failed:", e.message);
-            if (e.stdout) console.error("stdout:", e.stdout);
-            if (e.stderr) console.error("stderr:", e.stderr);
+        } catch (e) {
+            const error = e as { message?: string; stdout?: unknown; stderr?: unknown };
+            console.error("Wrangler command failed:", error.message);
+            if (error.stdout) console.error("stdout:", error.stdout);
+            if (error.stderr) console.error("stderr:", error.stderr);
             throw e;
         }
     }

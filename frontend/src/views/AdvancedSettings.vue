@@ -508,11 +508,11 @@ async function saveConfig() {
         appStore.moduleApiPlaygroundEnabled = form.module_api_playground_enabled;
         appStore.moduleClientConfigEnabled = form.module_client_config_enabled;
 
-        if ((window as any).posthog) {
+        if (window.posthog) {
             if (form.telemetry_disabled) {
-                (window as any).posthog.opt_out_capturing();
+                window.posthog.opt_out_capturing();
             } else {
-                (window as any).posthog.opt_in_capturing();
+                window.posthog.opt_in_capturing();
             }
         }
     } catch {

@@ -40,7 +40,7 @@ function getApiAddress(c: Context): string {
 
 
 function getStorageStatus(c: Context) {
-    const objectBucket = (c.env as any)?.OBJECT_BUCKET;
+    const objectBucket = (c.env as { OBJECT_BUCKET?: unknown } | undefined)?.OBJECT_BUCKET;
     if (ormService.mode !== RunMode.WORKER) {
         return {
             r2_available: false,
@@ -106,7 +106,7 @@ function getDataCenter(c: Context): string | null {
     if (ormService.mode !== RunMode.WORKER) {
         return null;
     }
-    const cf = (c.req.raw as any)?.cf;
+    const cf = (c.req.raw as Request & { cf?: { colo?: unknown } }).cf;
     return typeof cf?.colo === "string" ? cf.colo : null;
 }
 
@@ -185,7 +185,7 @@ import updateService from "../service/updateService";
 
 async function checkUpdate(c: Context) {
     const force = c.req.query('force') === '1' || c.req.query('force') === 'true';
-    const status = await updateService.checkUpdate(c as any, force);
+    const status = await updateService.checkUpdate(force);
     return c.json(status);
 }
 

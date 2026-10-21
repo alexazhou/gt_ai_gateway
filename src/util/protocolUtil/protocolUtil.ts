@@ -1,5 +1,11 @@
 import { ApiFormat } from "../../constants";
 
+
+function isApiFormat(value: string): value is ApiFormat {
+    return value === ApiFormat.OPENAI || value === ApiFormat.ANTHROPIC || value === ApiFormat.RESPONSES;
+}
+
+
 /**
  * 解析上游支持的格式
  * 根据客户端请求的格式和支持的格式列表，计算最终应该用什么格式
@@ -35,5 +41,6 @@ export function resolveUpstreamFormat(
 }
 
 export default {
+    isApiFormat,
     resolveUpstreamFormat,
 };

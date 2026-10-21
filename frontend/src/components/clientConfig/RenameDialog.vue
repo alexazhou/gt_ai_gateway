@@ -20,7 +20,7 @@
 import { reactive, ref, watch } from 'vue';
 import { message } from 'ant-design-vue/es';
 import { renameClientConfigBackup } from '@/api/clientConfig';
-import type { ClientName } from '@/types/clientConfig';
+import type { ClientConfigBackupInfo, ClientName } from '@/types/clientConfig';
 
 const props = defineProps<{
     client: ClientName;
@@ -30,7 +30,7 @@ const props = defineProps<{
 
 const visible = defineModel<boolean>('open', { default: false });
 const emit = defineEmits<{
-    (e: 'renamed', backup: any): void;
+    (e: 'renamed', backup: ClientConfigBackupInfo): void;
 }>();
 
 const loading = ref(false);

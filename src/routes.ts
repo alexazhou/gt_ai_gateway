@@ -1,5 +1,6 @@
 import { Hono, MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { ApiFormat, UserType } from "./constants";
 import { SgUser } from "./model/sgUser";
 import { SgModel } from "./model/sgModel";
@@ -99,13 +100,13 @@ app.onError((err, c) => {
 
     const apiFormat = c.get("api_format");
     if (apiFormat) {
-        const formatted = customError.buildLlmErrorResponse(err as any, apiFormat);
+        const formatted = customError.buildLlmErrorResponse(err, apiFormat);
         // 限流拒绝：附加 Retry-After 头（令牌桶可精确计算补足 1 个令牌的等待秒数，见 rateLimitService）
         if (error.code === "rate_limit_error") {
             const retryAfter = (error as unknown as { retryAfterSeconds?: number }).retryAfterSeconds ?? 60;
             c.header("Retry-After", String(retryAfter));
         }
-        return c.json(formatted, statusCode as any);
+        return c.json(formatted, statusCode as ContentfulStatusCode);
     }
 
     if (error.statusCode && message) {
@@ -114,7 +115,7 @@ app.onError((err, c) => {
                 error: message,
                 code: error.code as string | undefined,
             },
-            statusCode as any,
+            statusCode as ContentfulStatusCode,
         );
     }
 
@@ -223,7 +224,8 @@ app.post("/llm/v1/responses", llmApiMiddleware.requireLlmRequestContext(ApiForma
 // Test endpoints
 app.delete("/test/cache/clear", async (c) => {
     // Only allow in test mode
-    const isTestMode = process.env.TEST_MODE || (c.env as any)?.TEST_MODE;
+    const env = c.env as { TEST_MODE?: string } | undefined;
+    const isTestMode = process.env.TEST_MODE || env?.TEST_MODE;
     if (!isTestMode) {
         return c.notFound();
     }
@@ -245,5 +247,5 @@ app.notFound((c) => {
     return c.text("404 Not Found", 404);
 });
 
-export { app, Env };
+export { app, type Env };
 export default app;

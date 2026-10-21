@@ -52,7 +52,7 @@ async function loadDesktopRuntimeConfig(): Promise<boolean> {
 
 // Override console.log to also send to Rust for debugging
 const _origLog = console.log.bind(console);
-console.log = function(...args: any[]) {
+console.log = function(...args: unknown[]) {
     _origLog(...args);
     try {
         if (isTauri()) {
@@ -83,7 +83,7 @@ async function bootstrap() {
     
     // Default to opt-in, we will opt-out later if the config says so
     // We attach it to window for easy access
-    (window as any).posthog = posthog;
+    window.posthog = posthog;
 
     app.use(pinia);
     app.use(router);

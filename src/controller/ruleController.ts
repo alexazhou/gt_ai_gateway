@@ -3,10 +3,11 @@ import ruleManager from "../manager/ruleManager";
 import ruleService from "../service/ruleService";
 import customError from "../customError";
 import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
+import type { TenantScope } from "../middleware/tenantScopeMiddleware";
 
 
 // 全局共享规则仅 main 租户可配置：非 main 视角置 cross_tenant = 1 时拒绝
-function assertCrossTenantAllowed(scope: any, crossTenant: unknown): void {
+function assertCrossTenantAllowed(scope: TenantScope, crossTenant: unknown): void {
     if ((crossTenant === true || crossTenant === 1) && scope.tenantId !== scope.mainTenantId) {
         throw new customError.AppError("Only rules in the main tenant can be globally shared", 400);
     }

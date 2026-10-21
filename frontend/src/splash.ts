@@ -82,7 +82,7 @@ async function initSplash() {
 
         splashLog('splash event listeners registered');
 
-    } catch (e: any) {
+    } catch (e) {
         splashLog(`catch splash error: ${formatError(e)}`);
         if (!hasError) {
             showInitializationError(formatError(e));

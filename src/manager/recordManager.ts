@@ -52,7 +52,7 @@ async function create(data: RecordCreateData) {
  * usage 同样直接以存储串写入（见 RecordUpdateData）。
  */
 async function update(recordId: number, data: RecordUpdateData) {
-    const { response_data: _omit, ...tableData } = data as any;
+    const { response_data: _omit, ...tableData } = data;
     if (tableData.cost !== undefined) {
         tableData.cost = billingUtil.toUnits(tableData.cost);
     }

@@ -2,16 +2,21 @@ import { SgVendor } from "../model/sgVendor";
 import { ApiFormat } from "../constants";
 import customError from "../customError";
 import vendorManager from "../manager/vendorManager";
+import objectUtil from "../util/objectUtil";
 
 
 /**
  * 校验代理配置：代理类型与 URL scheme 必须匹配
  */
-function validateProxyConfig(config?: Record<string, any>): void {
-    const proxy = config?.proxy;
-    if (!proxy || !proxy.url) return;
+function validateProxyConfig(config?: unknown): void {
+    if (!objectUtil.isRecord(config)) return;
 
-    const url = proxy.url as string;
+    const proxy = config.proxy;
+    if (!objectUtil.isRecord(proxy)) return;
+
+    const url = typeof proxy.url === "string" ? proxy.url : "";
+    if (!url) return;
+
     const isSocks = url.startsWith("socks");
 
     if (proxy.type === "http" && isSocks) {
@@ -25,7 +30,7 @@ function validateProxyConfig(config?: Record<string, any>): void {
 
 async function updateVendor(
     vendorId: number,
-    data: { type?: string; name?: string; token?: string; urls?: Record<string, string>; config?: Record<string, any> },
+    data: { type?: string; name?: string; token?: string; urls?: Record<string, string>; config?: Record<string, unknown> },
     tenantId?: number,
 ): Promise<SgVendor | null> {
     validateProxyConfig(data.config);
@@ -46,7 +51,13 @@ async function updateVendor(
         }
     }
 
-    const updateData: any = {
+    const updateData: {
+        type: string;
+        name: string;
+        token: string;
+        urls?: string;
+        config?: string;
+    } = {
         type: data.type ?? vendor.type,
         name: data.name ?? vendor.name,
         token: data.token ?? vendor.token,
@@ -148,16 +159,22 @@ export async function fetchUpstreamModels(vendor: SgVendor): Promise<string[]> {
             );
         }
 
-        const data: any = await response.json();
+        const data: unknown = await response.json();
 
-        const models: string[] = Array.isArray(data?.data)
-            ? data.data.map((m: any) => m.id).filter(Boolean).filter(isLlmModel)
+        const models: string[] = objectUtil.isRecord(data) && Array.isArray(data.data)
+            ? data.data
+                .map((model) => objectUtil.isRecord(model) && typeof model.id === "string" ? model.id : null)
+                .filter((id): id is string => Boolean(id))
+                .filter(isLlmModel)
             : [];
 
         return models;
-    } catch (err: any) {
-        if (err.statusCode) throw err;
-        throw new customError.AppError(`Failed to fetch models: ${err.message}`, 502);
+    } catch (err) {
+        if (err instanceof customError.AppError) throw err;
+        throw new customError.AppError(
+            `Failed to fetch models: ${err instanceof Error ? err.message : String(err)}`,
+            502,
+        );
     }
 }
 

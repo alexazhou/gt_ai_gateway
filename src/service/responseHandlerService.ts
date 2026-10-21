@@ -70,7 +70,7 @@ async function writeEventToClient(
                 id: event.id,
             });
         }
-    } catch (e: any) {
+    } catch (e) {
         throw new customError.ClientWriteError(e);
     }
 }
@@ -173,7 +173,7 @@ async function runSSELoop(
                 break;
             }
         }
-    } catch (e: any) {
+    } catch (e) {
         // 失败一律记日志（含预期内的空闲超时，日志里保留完整失败流水）。
         // TaggedError = 读上游失败（超时 / 上游断开，readChunk 已归因）；
         // 其余 = 循环体异常（写客户端 / 转换 / 日志写入）：写客户端失败 → 客户端断开，

@@ -1,5 +1,11 @@
 import { Context } from "hono";
+import { ClientName } from "../constants";
 import clientConfigService from "../service/clientConfigService/core";
+
+
+function isClientName(value: string): value is ClientName {
+    return value === ClientName.CLAUDE_CODE || value === ClientName.CODEX;
+}
 
 
 async function status(c: Context) {
@@ -43,10 +49,10 @@ async function updateBackup(c: Context) {
 
 async function readLocal(c: Context) {
     const client = c.req.query('client');
-    if (!client) {
+    if (!client || !isClientName(client)) {
         return c.json({ error: 'client is required' }, 400);
     }
-    return c.json(await clientConfigService.readLocalConfig(client as any));
+    return c.json(await clientConfigService.readLocalConfig(client));
 }
 
 async function syncFromLocal(c: Context) {

@@ -7,7 +7,7 @@ import ormService from "./service/ormService";
 import recordService from "./service/recordService";
 import hostService from "./service/hostService";
 import userService from "./service/userService";
-import app, { Env } from "./routes";
+import app, { type Env } from "./routes";
 import initLogger, { Logger } from "./util/loggerUtil";
 import maskUtil from "./util/maskUtil";
 import { RunMode } from "./constants";
@@ -176,7 +176,7 @@ async function startServer() {
         hostname,
     });
 
-    server.on('error', (e: any) => {
+    server.on('error', (e: Error & { code?: string }) => {
         if (e.code === 'EADDRINUSE') {
             console.error(`ERROR: Port ${port} is already in use. Exiting...`);
             process.exit(98);

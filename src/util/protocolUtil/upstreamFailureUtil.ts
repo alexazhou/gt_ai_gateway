@@ -1,4 +1,5 @@
 import { ApiFormat } from "../../constants";
+import objectUtil from "../objectUtil";
 
 
 /**
@@ -9,17 +10,14 @@ export interface UpstreamBodyFailure {
 }
 
 
-function parseBody(responseText: string): Record<string, any> | null {
-    let json: any;
+function parseBody(responseText: string): Record<string, unknown> | null {
+    let json: unknown;
     try {
         json = JSON.parse(responseText);
     } catch {
         return null;
     }
-    if (!json || typeof json !== "object") {
-        return null;
-    }
-    return json;
+    return objectUtil.isRecord(json) ? json : null;
 }
 
 
@@ -33,9 +31,10 @@ function stringOrNull(value: unknown): string | null {
  * 注意 status:"incomplete"（被 max_output_tokens 等截断）是被截断的正常返回，不算失败。
  * 部分兼容上游直接回传错误事件体 {type:"error", code, message}，一并认掉。
  */
-function detectResponses(json: Record<string, any>): UpstreamBodyFailure | null {
+function detectResponses(json: Record<string, unknown>): UpstreamBodyFailure | null {
+    const error = objectUtil.isRecord(json.error) ? json.error : null;
     if (json.status === "failed") {
-        return { code: stringOrNull(json.error?.code) };
+        return { code: stringOrNull(error?.code) };
     }
     if (json.type === "error") {
         return { code: stringOrNull(json.code) };
@@ -48,9 +47,10 @@ function detectResponses(json: Record<string, any>): UpstreamBodyFailure | null 
  * OpenAI：错误体为 {error:{message,type,code,param}}。
  * 用 != null 判定——上游正常响应里带显式 error:null 的情况不算失败。
  */
-function detectOpenAI(json: Record<string, any>): UpstreamBodyFailure | null {
+function detectOpenAI(json: Record<string, unknown>): UpstreamBodyFailure | null {
     if (json.error != null) {
-        return { code: stringOrNull(json.error.code) ?? stringOrNull(json.error.type) };
+        const error = objectUtil.isRecord(json.error) ? json.error : null;
+        return { code: stringOrNull(error?.code) ?? stringOrNull(error?.type) };
     }
     return null;
 }
@@ -60,9 +60,10 @@ function detectOpenAI(json: Record<string, any>): UpstreamBodyFailure | null {
  * Anthropic：错误体为 {type:"error", error:{type,message}}，没有 code 字段，
  * 错误类别在 error.type 里（overloaded_error / rate_limit_error 等），因此取 error.type 作为码。
  */
-function detectAnthropic(json: Record<string, any>): UpstreamBodyFailure | null {
+function detectAnthropic(json: Record<string, unknown>): UpstreamBodyFailure | null {
     if (json.type === "error" || json.error != null) {
-        return { code: stringOrNull(json.error?.type) ?? stringOrNull(json.error?.code) };
+        const error = objectUtil.isRecord(json.error) ? json.error : null;
+        return { code: stringOrNull(error?.type) ?? stringOrNull(error?.code) };
     }
     return null;
 }

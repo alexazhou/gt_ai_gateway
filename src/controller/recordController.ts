@@ -18,9 +18,13 @@ function normalizeTimestampField(value: unknown): string | number | null {
     return value as string | number;
 }
 
+interface RecordWithAttributes {
+    getAttributes?: () => Record<string, unknown>;
+}
+
 function serializeRecord(record: SgRecord) {
-    const data = record.toData() as Record<string, unknown>;
-    const rawAttributes = (record as any).getAttributes?.() as Record<string, unknown> | undefined;
+    const data = record.toData();
+    const rawAttributes = (record as unknown as RecordWithAttributes).getAttributes?.();
 
     return {
         ...data,

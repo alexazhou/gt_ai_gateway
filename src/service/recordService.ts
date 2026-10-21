@@ -116,7 +116,7 @@ async function update(recordId: number, data: RecordUpdateData) {
     if (Object.prototype.hasOwnProperty.call(data, "response_data")) {
         if (await isPayloadRecordingEnabled()) {
             const payload = await readPayload(recordId);
-            payload.response = (data as any).response_data ?? null;
+            payload.response = data.response_data ?? null;
             await writePayload(recordId, payload);
         }
     }

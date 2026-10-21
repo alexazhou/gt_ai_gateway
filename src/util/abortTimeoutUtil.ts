@@ -145,7 +145,7 @@ function describeError(e: unknown): string {
     if (isTaggedError(e)) return e.message;
     if (!(e instanceof Error)) return String(e);
     let desc = `${e.name}: ${e.message}`;
-    const cause = (e as any).cause;
+    const cause = e.cause;
     if (cause) {
         desc += `; cause: ${cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause)}`;
     }

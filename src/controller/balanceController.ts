@@ -17,7 +17,7 @@ async function listRechargeRecords(c: Context) {
             offset,
         }, scope.tenantId);
         return c.json(records);
-    } catch (error: any) {
+    } catch (error) {
         console.error("[balanceController] Error listing recharge records:", error);
         return c.json(
             { error: "Failed to list recharge records", message: String(error) },
@@ -41,7 +41,7 @@ async function getRechargeRecord(c: Context) {
             return c.json({ error: "Recharge record not found" }, 404);
         }
         return c.json(record);
-    } catch (error: any) {
+    } catch (error) {
         console.error("[balanceController] Error getting recharge record:", error);
         return c.json(
             { error: "Failed to get recharge record", message: String(error) },

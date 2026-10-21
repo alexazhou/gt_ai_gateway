@@ -14,12 +14,13 @@ interface VendorDefaultUrls {
  * @returns default URL, or null if not found
  */
 function getDefaultUrl(vendorType: string, format: ApiFormat): string | null {
-    return (defaultUrls as any)[vendorType]?.[format as string] || null;
+    const urls = defaultUrls as unknown as VendorDefaultUrls;
+    return urls[vendorType]?.[format] || null;
 }
 
 
 function getAllUrls(): VendorDefaultUrls {
-    return defaultUrls as VendorDefaultUrls;
+    return defaultUrls as unknown as VendorDefaultUrls;
 }
 
 

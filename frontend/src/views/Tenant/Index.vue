@@ -126,8 +126,8 @@ async function handleSubmit() {
             message.success('租户已创建');
         }
         modalOpen.value = false;
-    } catch (e: any) {
-        message.error(e?.message || '操作失败');
+    } catch (error) {
+        message.error(error instanceof Error ? error.message : '操作失败');
     } finally {
         submitting.value = false;
     }
@@ -137,8 +137,8 @@ async function handleDelete(record: Tenant) {
     try {
         await tenantStore.deleteTenant(record.id);
         message.success('租户已删除');
-    } catch (e: any) {
-        message.error(e?.message || '删除失败');
+    } catch (error) {
+        message.error(error instanceof Error ? error.message : '删除失败');
     }
 }
 
