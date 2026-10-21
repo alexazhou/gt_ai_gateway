@@ -50,7 +50,7 @@ Responses API 是 OpenAI 推出的新一代 API 格式，与传统的 Chat Compl
 }
 ```
 
-> `function_call_output.output` 除了字符串，也可以是内容块数组（`input_text` / `input_image` / `input_file`），转换时会映射为 `tool_result` 的文本/图片块。
+> `function_call_output.output` 除了字符串，也可以是内容块数组（`input_text` / `input_image` / `input_file`）。转换时文本和图片会映射为 `tool_result` 的内容块；`input_file` 暂不支持，会被忽略。
 
 ### 2.3 请求转换映射表
 
@@ -98,11 +98,15 @@ Responses API 是 OpenAI 推出的新一代 API 格式，与传统的 Chat Compl
 - Responses `function_call_output.output` 是数组时反向映射：
   - `input_text` / `output_text` → `text`
   - `input_image` → `image`
-- `input_file` 暂不转换
+- `input_file` 暂不支持转换，当前会被静默忽略（不会返回 400）
 
 **Responses → OpenAI 方向**
 
 OpenAI 的 `tool` 消息只支持文本，因此 `function_call_output.output` 数组中的文本会进入 tool 消息，图片会被收集到所有连续 tool 消息之后的一条 `user` 消息中。
+
+**顺序说明**
+
+Responses → OpenAI 和 Anthropic → Responses 会先输出文本、再输出图片，不保证与原始 `text → image → text` 的逐项顺序一致；Responses → Anthropic 与 Anthropic → OpenAI 的普通消息内容按原始块顺序输出（工具结果中的图片除外）。依赖严格交错顺序的请求需要自行拆分消息。
 
 ---
 

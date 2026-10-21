@@ -1,6 +1,6 @@
 # 协议转换集成设计文档
 
-> **历史设计稿**：本文记录初次引入协议转换时的集成方案，其中部分内容（如“Responses API 不参与转换”“图片只做占位处理”“仅支持 OpenAI ↔ Anthropic”）已被后续实现取代。当前转换行为请以 [MessageFormatConversion.md](./MessageFormatConversion.md)、[ResponsesAPIConversion.md](./ResponsesAPIConversion.md) 和 [ProtocolConversion.md](../usage/ProtocolConversion.md) 为准。
+> **历史设计稿**：本文记录初次引入协议转换时的集成方案，其中部分内容（如“Responses API 不参与转换”“图片只做占位处理”“仅支持 OpenAI ↔ Anthropic”“累积器按上游格式累积”）已被后续实现取代。当前转换行为请以 [MessageFormatConversion.md](./MessageFormatConversion.md)、[ResponsesAPIConversion.md](./ResponsesAPIConversion.md) 和 [ProtocolConversion.md](../usage/ProtocolConversion.md) 为准。
 
 本文档描述将 `protocolConverter.ts` 集成到网关转发流程中的完整方案。在开发代码之前，需以此文档为准对齐实现逻辑。
 
@@ -299,6 +299,8 @@ class OpenAIToAnthropicStreamConverter {
 | `data: [DONE]` | `message_stop` | 流结束 |
 
 ### 6.4 流式转换的 SSE 累积（Accumulator）
+
+> **已过时（2026-10-21）**：当前 Accumulator 按**客户端协议**累积，跨格式时消费的是 `convertStreamEvent` 转换后的事件；本节“按上游格式累积”的表述仅反映当时设计，现状见 [MessageFormatConversion.md](./MessageFormatConversion.md) 第 5 / 10 节。
 
 流式转换模式下，`SSEAccumulator` 仍然需要按**上游格式**累积，用于记录和计费：
 

@@ -95,7 +95,7 @@ Authorization: Bearer YOUR_API_KEY
 
 - `input_text`：`{ "type": "input_text", "text": "..." }`
 - `input_image`：`{ "type": "input_image", "image_url": "data:image/png;base64,..." }`
-- `input_file`：`{ "type": "input_file", "file_data": "...", "filename": "..." }`
+- `input_file`：`{ "type": "input_file", "file_id": "file-123" }` 或 `{ "type": "input_file", "file_data": "...", "filename": "..." }`
 
 `input_image.image_url` 支持 data URL 或公网 URL，也可以用 `file_id` 引用已上传文件；`detail` 可选。
 

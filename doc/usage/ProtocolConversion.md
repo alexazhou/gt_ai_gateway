@@ -130,7 +130,11 @@ for chunk in response:
 
 ### 已知限制
 
-- `input_image.file_id`、`input_file` 等需要 OpenAI 侧文件解析的内容无法转换为其他协议，会明确返回 400
+- `input_image.file_id` 需要 OpenAI 侧文件解析，转换为其他协议时会明确返回 400
+- `input_file` 暂不支持转换：当前会被静默忽略，包含文件输入的请求请不要依赖跨协议转换（后续计划改为返回 400）
 - 非 base64 的 data URL 在转换为 Anthropic 时会返回 400
 - `image_url.detail` 等非通用字段在部分转换方向会被丢弃
+- Responses → OpenAI 和 Anthropic → Responses 会把文本与图片分组输出（先文本后图片），不保证与原始 `text → image → text` 的逐项顺序一致
+- OpenAI `tool` 结果后紧跟 user 内容时，转换到 Anthropic 会形成连续 user 消息，依赖上游自动合并连续同角色消息
+- Anthropic `image` 块缺少有效 `source` / `data` / `url` 时，转换到 OpenAI 会跳过该图片，不会报错
 - 少数供应商对内容块顺序或字段有额外要求，如遇问题请保留实际请求体用于排查

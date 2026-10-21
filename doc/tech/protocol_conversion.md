@@ -110,7 +110,7 @@ OpenAIToAnthropicConverter
 1. 转换器只负责协议事件转换，不负责落库和扣费。
 2. accumulator 负责理解客户端协议语义，包括完成、错误、usage 和完整响应。
 
-当前普通 OpenAI / Anthropic 流使用 `SSEAccumulator`；Responses 流使用 `ResponsesAccumulator`。
+当前 OpenAI Chat 流使用 `OpenAIChatAccumulator`，Anthropic Messages 流使用 `AnthropicAccumulator`，Responses 流使用 `ResponsesAccumulator`。
 
 ## Responses 流式累积
 
@@ -171,15 +171,14 @@ response_data = 上游错误 payload
 
 ## Usage 和计费
 
-usage 以客户端协议的最终响应为准：
+流式与非流式的 usage 来源不同：
 
-| 客户端协议 | usage 来源 |
-|------------|------------|
-| OpenAI Chat | 最终累计的 OpenAI usage |
-| Anthropic Messages | 最终累计的 Anthropic usage |
-| Responses API | `ResponsesAccumulator.getUsage()`，也就是最终 response 的 `usage` |
+| 路径 | usage 来源 |
+|------|------------|
+| 流式 | 客户端协议对应的 Accumulator 累积值（跨格式时来自转换后的事件） |
+| 非流式 | 上游原始响应的 `usage`，按 `upstreamFormat` 解析 |
 
-转换器需要保证 usage 字段在协议间正确映射。例如 Anthropic 的缓存命中 token：
+流式场景下，转换器需要保证 usage 字段在协议间正确映射。例如 Anthropic 的缓存命中 token：
 
 ```json
 {
@@ -206,9 +205,10 @@ usage 以客户端协议的最终响应为准：
 | 路径 | 覆盖内容 |
 |------|----------|
 | `tests/unit/protocolConverter/` | 各转换器的请求、非流式响应、流式事件转换 |
-| `tests/util/sseAccumulator.test.ts` | OpenAI / Anthropic 普通流累积 |
-| `tests/util/responsesAccumulator.test.ts` | Responses 流累积、完成和错误状态 |
-| `tests/util/sseEvent.test.ts` | SSE 事件解析、完成和错误识别 |
+| `tests/unit/util/accumulator/openaiChatAccumulator.test.ts` | OpenAI Chat 流累积 |
+| `tests/unit/util/accumulator/anthropicAccumulator.test.ts` | Anthropic Messages 流累积 |
+| `tests/unit/util/accumulator/responsesAccumulator.test.ts` | Responses 流累积、完成和错误状态 |
+| `tests/unit/util/protocol/sseEventUtil.test.ts` | SSE 事件解析、完成和错误识别 |
 | `tests/api/ai/stream-failure.test.ts` | 流式异常终态落库 |
 | `tests/api/ai/protocol-conversion.test.ts` | API 层协议转换路径 |
 

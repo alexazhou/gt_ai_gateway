@@ -1,5 +1,7 @@
 # 测试请求支持多模态（图片）输入 - 开发任务表
 
+> **状态更新（2026-10-21）**：OpenAI ↔ Anthropic 图片转换已补齐，任务中的丢图判定与 `warning` 实现项已失效，跨协议场景按普通图片转换验证即可。
+
 ## 任务概览
 
 共 4 组开发任务，按依赖排序。前端任务依赖后端接口契约定稿，其余可并行。
@@ -12,7 +14,7 @@
 
 ### 任务 1: 共享测试请求构造器
 
-**描述**: 抽取两个测试入口的请求体构造逻辑，新增图片模式与协议转换丢图判定。
+**描述**: 抽取两个测试入口的请求体构造逻辑，新增图片模式。
 
 **依赖**: 无
 
@@ -25,7 +27,6 @@
 - [ ] `buildVendorTestBody`：文本模式与 `vendorTestService.buildRequest` 现有输出等价；图片模式按三种协议构造
 - [ ] `buildModelRouteTestBody`：文本模式与 `modelController.buildTestRequestBody` 现有输出等价；图片模式按三种协议构造
 - [ ] 图片模式 token 上限：供应商测试 64，模型路由测试 256
-- [ ] `isImageConversionLossy`：仅 `OPENAI → ANTHROPIC`、`ANTHROPIC → OPENAI` 返回 true
 - [ ] 单元测试覆盖 3 协议 × 2 模式，以及文本模式回归
 
 **验收标准**:
@@ -60,7 +61,7 @@
 
 ### 任务 3: 模型可用性测试支持多模态
 
-**描述**: 让 `POST /model/route-test.json` 接受 `content_mode`，并在跨协议转换会丢图时返回警告。
+**描述**: 让 `POST /model/route-test.json` 接受 `content_mode`，支持同协议与跨协议的多模态路由测试。
 
 **依赖**: 任务 1
 
@@ -72,13 +73,12 @@
 - [ ] 删除本地 `buildTestRequestBody`，改用 `testRequestUtil.buildModelRouteTestBody`
 - [ ] 读取并校验 `content_mode`
 - [ ] 成功 / 异常分支的响应补 `content_mode`
-- [ ] 根据 `upstreamRequestSnapshot` 的 `client_format` / `upstream_format` 生成 `warning`
 - [ ] API 用例：同协议图片模式路由测试成功，上游捕获到图片
-- [ ] API 用例：OpenAI ↔ Anthropic 转换方向返回 `warning`，文案区分「上游可能拒绝」与「图片被静默丢弃」
+- [ ] API 用例：跨协议（含 OpenAI ↔ Anthropic）图片模式路由测试成功，上游捕获到转换后的图片
 
 **验收标准**:
-- 同协议三种客户端格式的多模态测试均能走通
-- 丢图方向不再表现为无提示的失败或"模型好像没看到图片"
+- 三种客户端格式的多模态测试在相同协议与跨协议路由下均能走通
+- 图片经协议转换后仍能到达上游，而不是被丢弃或导致上游报错
 
 ---
 
@@ -99,13 +99,12 @@
 - [ ] 多模态模式展示提示文案，说明将发送内置图片
 - [ ] 切换类型清空测试结果；打开对话框时重置为文本
 - [ ] `testVendor` / `testModelRoute` 携带 `content_mode`
-- [ ] `VendorTestResponse` 补 `content_mode` 与 `warning` 类型
-- [ ] 结果摘要区渲染 `warning` 警告
+- [ ] `VendorTestResponse` 补 `content_mode` 类型
 - [ ] 组件测试：切换类型清空结果、请求参数正确
 
 **验收标准**:
 - 两个对话框均可切换并发出对应请求
-- 跨协议丢图时前端有明确提示，请求详情 Tab 能看到图片内容
+- 跨协议路由时图片仍能正确转发，请求详情 Tab 能看到图片内容
 
 ---
 
@@ -114,10 +113,14 @@
 - [ ] `npm run backend:test`（Node 模式）全部通过
 - [ ] `npm run backend:test:type` 无类型错误
 - [ ] `npm run frontend:build` 构建通过
-- [ ] 手工验证：三协议同协议图片测试、一次 OpenAI ↔ Anthropic 丢图警告、一次文本模式回归
+- [ ] 手工验证：三协议同协议图片测试、一次跨协议图片测试、一次文本模式回归
 
 ## 后续专项（不在本次范围）
 
-- 补齐 `OpenAIToAnthropicConverter` / `AnthropicToOpenAIConverter` 的图片内容转换，使模型路由测试在所有方向都能测多模态
 - 本地上传图片 / 图片 URL 输入
 - 音频、文件等其他模态
+
+## 已完成的前置专项
+
+- [x] 补齐 `OpenAIToAnthropicConverter` / `AnthropicToOpenAIConverter` 的图片内容转换
+- [x] 补齐 `tool_result` / `function_call_output` 中的图片转换

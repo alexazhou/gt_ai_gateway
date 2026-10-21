@@ -179,10 +179,10 @@ cat log/stream/123.log
 
 ```bash
 # 复制日志文件到测试资源目录
-cp log/stream/123.log tests/resource/anthropic-stream.log
+cp log/stream/123.log tests/resource/stream_logs/anthropic-stream.log
 
 # 或者
-cp log/stream/123.log tests/resource/openai-stream.log
+cp log/stream/123.log tests/resource/stream_logs/openai-stream.log
 ```
 
 然后在测试文件中使用：
@@ -191,7 +191,7 @@ cp log/stream/123.log tests/resource/openai-stream.log
 import { readFileSync } from "fs";
 import { join } from "path";
 
-const logFile = join(__dirname, "..", "resource", "anthropic-stream.log");
+const logFile = join(__dirname, "..", "..", "..", "resource", "stream_logs", "anthropic-stream.log");
 const content = readFileSync(logFile, "utf-8");
 
 // 按 \n\n 分割 SSE 事件
@@ -223,7 +223,7 @@ cat log/stream/{record_id}.log
 
 ```typescript
 // 将日志文件复制到测试资源目录
-cp log/stream/{record_id}.log tests/resource/anthropic-stream.log
+cp log/stream/{record_id}.log tests/resource/stream_logs/anthropic-stream.log
 
 // 在测试中读取并验证
 const content = readFileSync(logFile, "utf-8");
@@ -273,6 +273,6 @@ grep "usage" log/stream/123.log
 ## 相关文件
 
 - `src/service/senderService.ts` - 流式响应处理和日志记录
-- `tests/resource/anthropic-stream.log` - Anthropic 格式测试示例
-- `tests/resource/openai-stream.log` - OpenAI 格式测试示例
-- `tests/util/sseAccumulator.test.ts` - SSE 累加器测试用例
+- `tests/resource/stream_logs/anthropic-stream.log` - Anthropic 格式测试示例
+- `tests/resource/stream_logs/openai-stream.log` - OpenAI 格式测试示例
+- `tests/unit/util/accumulator/openaiChatAccumulator.test.ts` / `anthropicAccumulator.test.ts` - 流式累加器测试用例

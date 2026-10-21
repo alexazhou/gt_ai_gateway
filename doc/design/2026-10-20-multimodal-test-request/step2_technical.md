@@ -1,5 +1,7 @@
 # 测试请求支持多模态（图片）输入 - 技术文档
 
+> **状态更新（2026-10-21）**：OpenAI ↔ Anthropic 图片转换已补齐，`isImageConversionLossy` 与 `warning` 相关设计不再需要。实现本功能时，模型路由测试可以直接发送跨协议图片请求，其余设计不变。
+
 ## 架构概览
 
 改动集中在「测试请求构造」这一层，不触碰真实转发链路（`senderService` / `responseHandlerService`）：
@@ -41,7 +43,6 @@
 interface TestVendorResult {
     // ...existing fields
     content_mode: "text" | "image";
-    warning?: string;
 }
 ```
 
@@ -57,8 +58,8 @@ interface TestVendorResult {
 }
 ```
 
-- 同样可选、缺省 `text`；响应新增 `content_mode` 与 `warning`
-- `warning` 用于说明「本次路由经过图片无法正确转换的协议方向」
+- 同样可选、缺省 `text`；响应新增 `content_mode`
+- 跨协议图片转换已支持，不再需要 `warning` 字段
 
 ## 核心模块
 
@@ -76,9 +77,6 @@ const TEST_IMAGE_BASE64 = "...";  // 64×64 PNG，< 4KB
 // 两个入口的文本提示词与 token 上限保持现状
 export function buildVendorTestBody(format: ApiFormat, model: string, mode: TestContentMode): string;
 export function buildModelRouteTestBody(format: ApiFormat, model: string, mode: TestContentMode): string;
-
-// 供前端提示使用：判断该转换方向是否会丢图
-export function isImageConversionLossy(clientFormat: ApiFormat, upstreamFormat: ApiFormat): boolean;
 ```
 
 内部按协议分支，文本模式产出的 JSON 与现有实现逐字段等价（回归用例钉住）：
@@ -168,17 +166,7 @@ export function isImageConversionLossy(clientFormat: ApiFormat, upstreamFormat: 
 - 读取 `content_mode`，用 `testRequestUtil.buildModelRouteTestBody(format, modelName, mode)` 替换本地 `buildTestRequestBody`
 - 删除 `modelController.ts` 顶部的 `buildTestRequestBody`
 - 成功分支与异常分支共用同一套快照解析，在结果中补 `content_mode`
-- 根据 `snapshot.client_format` / `snapshot.upstream_format` 计算 `warning`：
-
-```ts
-if (contentMode === "image" && testRequestUtil.isImageConversionLossy(client, upstream)) {
-    warning = client === ApiFormat.OPENAI
-        ? "当前路由需要 OpenAI → Anthropic 转换：现有转换器不会把 image_url 转成 Anthropic 的 image block，上游可能直接拒绝该请求。"
-        : "当前路由需要 Anthropic → OpenAI 转换：现有转换器会丢弃图片块，模型只能看到文本提示。";
-}
-```
-
-> 当前两个方向的转换器行为并不一致：`OpenAIToAnthropicConverter` 把 OpenAI content 数组原样塞给 Anthropic，图片会被上游拒绝（通常 400）；`AnthropicToOpenAIConverter` 只取 `text` 字段，图片被静默丢弃。警告文案需要区分这两种表现，否则用户会误判为"模型不支持视觉"。补齐转换器列为后续专项，不在本次范围。
+- 跨协议图片转换已支持，结果中不再需要 `warning` 字段
 
 ### 前端改造
 
@@ -188,13 +176,12 @@ if (contentMode === "image" && testRequestUtil.isImageConversionLossy(client, up
 - 在协议选择下方增加「请求类型」单选（复用 `a-radio-group` / `a-radio-button`），多模态时展示提示文案
 - `watch(contentMode)` 清空 `result`，与现有 `watch(format)` 行为一致
 - 打开对话框时重置为 `text`，避免上一次选择造成误解
-- 结果摘要区在 `result.warning` 存在时渲染 `a-alert type="warning"`
 
 `frontend/src/api/vendor.ts` / `frontend/src/api/model.ts`：
 
 - `testVendor` 增加 `contentMode` 参数并放入请求体
 - `testModelRoute` 增加 `contentMode` 参数
-- `VendorTestResponse` 增加 `content_mode?: 'text' | 'image'`、`warning?: string`
+- `VendorTestResponse` 增加 `content_mode?: 'text' | 'image'`
 
 ## 兼容性与边界
 
@@ -207,9 +194,9 @@ if (contentMode === "image" && testRequestUtil.isImageConversionLossy(client, up
 
 | 层级 | 用例 |
 |------|------|
-| 单元 | `tests/unit/util/protocol/testRequestUtil.test.ts`：3 协议 × 2 模式共 6 组请求体形状；文本模式与旧实现 JSON 等价；`isImageConversionLossy` 只对 OpenAI↔Anthropic 返回 true |
+| 单元 | `tests/unit/util/protocol/testRequestUtil.test.ts`：3 协议 × 2 模式共 6 组请求体形状；文本模式与旧实现 JSON 等价 |
 | API | `tests/api/vendor/vendor-test.test.ts`：`content_mode=image` 时上游捕获到的请求体包含图片（OpenAI / Anthropic 断言各自结构）；非法 `content_mode` 返回 400 |
-| API | `tests/api/model/`：同协议多模态路由测试成功；故意路由到 OpenAI↔Anthropic 方向时返回 `warning` |
+| API | `tests/api/model/`：同协议与跨协议多模态路由测试成功 |
 | 前端 | `DialogTest` 组件测试：切换请求类型会清空结果、调用 API 时携带 `content_mode` |
 
 ## 相关文档

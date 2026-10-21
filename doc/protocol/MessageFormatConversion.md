@@ -14,7 +14,7 @@
 | Anthropic Messages | `anthropic` | `/llm/v1/messages` | Anthropic 消息格式 |
 | OpenAI Responses | `responses` | `/llm/v1/responses` | OpenAI 新一代 Responses API |
 
-**重要说明**：网关目前是**透传转发**模式，不做请求体的协议转换。客户端用什么格式请求，网关就以相同格式转发到对应的上游。转换逻辑体现在**SSE 流式响应的累积（Accumulator）**上——将不同格式的流式事件统一累积为内部存储格式，用于请求记录和计费。
+**重要说明**：客户端协议与上游协议一致时，网关**透传转发**；不一致时，由 `senderService` 通过 `ConverterFactory` 对请求体做协议转换后再转发。响应侧同理：同格式原样透传，跨格式时先转换为客户端协议再返回。流式响应的 Accumulator 消费的是**转换后的客户端协议事件**；非流式响应的 usage 仍按**上游格式**解析。
 
 ---
 
@@ -201,9 +201,9 @@ data: {"type":"message_stop"}
 
 ---
 
-## 5. 网关内部累积逻辑（SSEAccumulator）
+## 5. 网关内部累积逻辑（Accumulator）
 
-网关使用 `SSEAccumulator` 将两种格式的流式响应统一累积为以下内部格式，用于请求记录和计费：
+网关按客户端协议选择 Accumulator：OpenAI / Anthropic 流分别使用 `OpenAIChatAccumulator` / `AnthropicAccumulator`，统一累积为以下内部格式；Responses 流使用 `ResponsesAccumulator`（格式见第 6 节）。跨格式时，喂给 Accumulator 的是转换后的客户端协议事件。
 
 ### 5.1 统一累积格式（AccumulatedResponse）
 
@@ -349,16 +349,19 @@ interface ResponsesAccumulatedResponse {
 | `anthropic` | `/v1/messages` | `x-api-key: <token>` + `anthropic-version: 2023-06-01` | 无 |
 | `responses` | `/responses` | `Authorization: Bearer <token>` | 无 |
 
+客户端格式与上游格式不一致时，`senderService` 会在转发前通过 `ConverterFactory` 转换请求体；上表描述的是转换后的上游请求。
+
 ### 7.2 响应处理
 
 ```
-上游响应 → 判断是否流式 → 选择累加器 → 累积响应 → 保存记录 + 计费
+上游响应 → 判断是否流式
+              ├── 是 ──▶ 选择客户端协议对应的 Accumulator ──▶ 累积响应
+              └── 否 ──▶ 直接解析 JSON ──▶ 提取 usage
                               ↓
-                    content-type: text/event-stream?
-                              ↓ 是                    ↓ 否
-                    SSEAccumulator 或          直接解析 JSON
-                    ResponsesAccumulator         提取 usage
+                        保存记录 + 计费
 ```
+
+跨格式时，响应在返回客户端前还会经过 `convertResponse` / `convertStreamEvent` 转换为客户端协议。流式路径的 Accumulator 消费转换后的客户端协议事件；非流式 usage 仍从上游原始响应按 `upstreamFormat` 解析。
 
 ### 7.3 Token 统计字段映射
 
@@ -425,6 +428,7 @@ user: text
   - 图片从工具结果中取出，在所有连续 tool 消息输出完后，合并到一条 `user` 消息里
   - 如果工具结果只有图片没有文本，tool 消息的 `content` 为空字符串
 - 这样做的原因：OpenAI 的 `tool` 消息规范上只支持文本，图片只能通过 user 消息传入
+- Anthropic `image` 块缺少有效 `source` / `data` / `url` 时，该图片会被跳过，不会报错
 
 **OpenAI → Anthropic**
 
@@ -433,6 +437,7 @@ user: text
   - 普通 URL → `{type:"image", source:{type:"url", url}}`
 - 纯文本 content 数组保持原样（两种协议的 text 块结构一致）
 - 缺少 `image_url.url` 或 data URL 不是 base64 形式时，转换直接返回 400，不会把非法请求体发给上游
+- OpenAI 的 `tool` 消息逐条转成 Anthropic user 消息；若 tool 结果后紧跟普通 user 内容，会形成连续 Anthropic user 消息，依赖上游自动合并连续同角色消息
 
 ### 8.2 请求转换：OpenAI → Anthropic
 
@@ -535,11 +540,13 @@ Upstream Response
         └── 跨格式 ──▶ convertResponse / convertStreamEvent
         │
         ▼
-   Accumulator（始终按上游格式累积）──▶ 记录 + 计费
+   Accumulator（消费客户端协议事件）──▶ 记录 + 计费
 ```
 
 **关键点**：
 1. **请求体**：客户端格式与上游格式一致时原样转发；不一致时由 `ConverterFactory` 创建转换器并调用 `convertRequestBody`
 2. **响应**：同格式原样透传；跨格式时非流式调用 `convertResponse`，流式逐事件调用 `convertStreamEvent`
-3. Accumulator 始终按**上游格式**累积，用于请求记录和计费，不返回给客户端
+3. 流式响应的 Accumulator 按**客户端协议**消费事件（跨格式时已转换），用于请求记录和计费，不返回给客户端；非流式响应体按客户端协议落库，usage 按 `upstreamFormat` 解析
 4. 转换方向覆盖 OpenAI / Anthropic / Responses 两两组合，共 6 个方向
+
+> 注：历史设计稿 [ProtocolConversionIntegration.md](./ProtocolConversionIntegration.md) §6.4 仍保留“累积器按上游格式累积”的旧说法，仅反映当时设计，已被当前实现取代。
