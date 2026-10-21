@@ -6,11 +6,11 @@ import responsesAccumulator from "../../../src/util/accumulator/responsesAccumul
 import type {
     ResponsesRequest,
     ResponsesNonStreamResponse,
-} from "../../../src/util/protocolConverter/responsesTypes";
+} from "../../../src/util/protocol/responsesTypes";
 import type {
     OpenAIResponse,
     OpenAIChunk,
-} from "../../../src/util/protocolConverter/protocolTypes";
+} from "../../../src/util/protocol/openaiTypes";
 
 describe("ResponsesToOpenAIConverter", () => {
     const converter = new ResponsesToOpenAIConverter("gpt-4");
@@ -268,6 +268,69 @@ describe("ResponsesToOpenAIConverter", () => {
             };
 
             expect(() => converter.convertRequest(req)).toThrow(/file_id/);
+        });
+
+        it("should reject input_file in function_call_output instead of dropping it", () => {
+            const req: ResponsesRequest = {
+                model: "gpt-4",
+                input: [
+                    {
+                        type: "function_call_output",
+                        call_id: "call_123",
+                        output: [
+                            { type: "input_file", file_data: "AAAA", filename: "report.pdf" },
+                        ],
+                    },
+                ],
+            };
+
+            expect(() => converter.convertRequest(req)).toThrow(/input_file/);
+        });
+
+        it("should reject input_file in message content instead of dropping it", () => {
+            const req: ResponsesRequest = {
+                model: "gpt-4",
+                input: [
+                    {
+                        type: "message",
+                        role: "user",
+                        content: [
+                            { type: "input_text", text: "请总结这个文件" },
+                            { type: "input_file", file_data: "AAAA", filename: "report.pdf" },
+                        ],
+                    },
+                ],
+            };
+
+            expect(() => converter.convertRequest(req)).toThrow(/input_file/);
+        });
+
+        it("should preserve text/image part order in message content", () => {
+            const req: ResponsesRequest = {
+                model: "gpt-4",
+                input: [
+                    {
+                        type: "message",
+                        role: "user",
+                        content: [
+                            { type: "input_text", text: "before" },
+                            { type: "input_image", image_url: "https://example.com/a.png" },
+                            { type: "input_text", text: "after" },
+                        ],
+                    },
+                ],
+            };
+
+            const result = converter.convertRequest(req);
+
+            expect(result.messages[0]).toEqual({
+                role: "user",
+                content: [
+                    { type: "text", text: "before" },
+                    { type: "image_url", image_url: { url: "https://example.com/a.png" } },
+                    { type: "text", text: "after" },
+                ],
+            });
         });
 
         it("should merge consecutive function_calls into one assistant message", () => {

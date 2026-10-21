@@ -1,10 +1,12 @@
 import customError from "../../customError";
-import type { ProtocolStreamEvent } from "./protocolTypes";
+import type { ProtocolStreamEvent } from "../protocol/commonTypes";
 
 export abstract class BaseConverter {
     protected requestModel: string;
     protected responseId: string;
     protected contentBlockIndex = 0;
+    /** Responses 流事件的 sequence_number 计数 */
+    protected seq = 0;
 
     constructor(requestModel: string = "unknown", responseId?: string) {
         this.requestModel = requestModel;
@@ -15,7 +17,7 @@ export abstract class BaseConverter {
      * 将请求体字符串转换为上游所需格式的字符串
      */
     public convertRequestBody(bodyStr: string): string {
-        let bodyJson: any;
+        let bodyJson: unknown;
         try {
             bodyJson = JSON.parse(bodyStr);
         } catch (e) {
@@ -52,14 +54,22 @@ export abstract class BaseConverter {
     }
 
     /**
-     * 将客户端请求转换为上游请求格式
+     * 生成下一个 Responses 事件序号（从 1 开始）
      */
-    public abstract convertRequest(clientReq: any): any;
+    protected nextSeq(): number {
+        return ++this.seq;
+    }
+
+    /**
+     * 将客户端请求转换为上游请求格式
+     * 外部 JSON 入口按 unknown 处理，各实现声明自己的协议类型
+     */
+    public abstract convertRequest(clientReq: unknown): unknown;
 
     /**
      * 将上游非流式响应转换为客户端非流式响应格式
      */
-    public abstract convertResponse(upstreamRes: any, requestId?: string): any;
+    public abstract convertResponse(upstreamRes: unknown, requestId?: string): unknown;
 
     /**
      * 将上游流式事件转换为客户端流式事件列表

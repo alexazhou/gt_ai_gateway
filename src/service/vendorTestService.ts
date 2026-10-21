@@ -1,5 +1,5 @@
 import { SgVendor } from "../model/sgVendor";
-import { resolveUpstreamFormat } from "../util/protocol/protocolUtil";
+import { resolveUpstreamFormat } from "../util/protocolUtil/protocolUtil";
 import fetchUtil from "../util/fetchUtil";
 import { ApiFormat, VendorAuthMode } from "../constants";
 

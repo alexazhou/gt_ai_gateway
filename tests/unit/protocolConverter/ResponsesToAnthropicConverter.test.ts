@@ -11,23 +11,20 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { ResponsesToAnthropicConverter } from "../../../src/util/protocolConverter/ResponsesToAnthropicConverter";
 import { AnthropicToResponsesConverter } from "../../../src/util/protocolConverter/AnthropicToResponsesConverter";
 import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterFactory";
-import { ReasoningEffort } from "../../../src/util/protocolConverter/thinkingConfig";
+import { ReasoningEffort } from "../../../src/util/protocol/commonTypes";
 import { ApiFormat } from "../../../src/constants";
 import type {
+    AnthropicContentBlock,
     AnthropicRequest,
     AnthropicResponse,
-    AnthropicContentBlock,
-    ProtocolStreamEvent,
-} from "../../../src/util/protocolConverter/protocolTypes";
+} from "../../../src/util/protocol/anthropicTypes";
+import type { ProtocolStreamEvent } from "../../../src/util/protocol/commonTypes";
 import type {
-    ResponsesRequest,
-    ResponsesNonStreamResponse,
     ResponsesInputItem,
-} from "../../../src/util/protocolConverter/responsesTypes";
-
-function parseStreamEventData(events: ProtocolStreamEvent[], index: number = 0): any {
-    return JSON.parse(events[index].data);
-}
+    ResponsesNonStreamResponse,
+    ResponsesRequest,
+} from "../../../src/util/protocol/responsesTypes";
+import protocolConverterTestUtil from "./protocolConverterTestUtil";
 
 // ============================================================
 // ResponsesToAnthropicConverter - 请求转换
@@ -261,6 +258,79 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         };
 
         expect(() => converter.convertRequest(req)).toThrow(/file_id/);
+    });
+
+    it("should reject input_file in function_call_output instead of dropping it", () => {
+        const req: ResponsesRequest = {
+            model: "gpt-4.1",
+            input: [
+                {
+                    type: "function_call_output",
+                    call_id: "call_123",
+                    output: [
+                        { type: "input_file", file_data: "AAAA", filename: "report.pdf" },
+                    ],
+                },
+            ],
+        };
+
+        expect(() => converter.convertRequest(req)).toThrow(/input_file/);
+    });
+
+    it("should reject input_file in message content instead of dropping it", () => {
+        const req: ResponsesRequest = {
+            model: "gpt-4.1",
+            input: [
+                {
+                    type: "message",
+                    role: "user",
+                    content: [
+                        { type: "input_text", text: "请总结这个文件" },
+                        { type: "input_file", file_data: "AAAA", filename: "report.pdf" },
+                    ],
+                },
+            ],
+        };
+
+        expect(() => converter.convertRequest(req)).toThrow(/input_file/);
+    });
+
+    it("should merge consecutive user messages into one user message", () => {
+        const req: ResponsesRequest = {
+            model: "gpt-4.1",
+            input: [
+                { type: "message", role: "user", content: "first" },
+                { type: "message", role: "user", content: "second" },
+            ],
+        };
+
+        const result = converter.convertRequest(req);
+
+        expect(result.messages).toHaveLength(1);
+        expect(result.messages[0].content).toEqual([
+            { type: "text", text: "first" },
+            { type: "text", text: "second" },
+        ]);
+    });
+
+    it("should merge a following user message into the tool_result user message", () => {
+        const req: ResponsesRequest = {
+            model: "gpt-4.1",
+            input: [
+                { type: "function_call", call_id: "call_1", name: "get_weather", arguments: "{}" },
+                { type: "function_call_output", call_id: "call_1", output: "Sunny" },
+                { type: "message", role: "user", content: [{ type: "input_text", text: "谢谢" }] },
+            ],
+        };
+
+        const result = converter.convertRequest(req);
+
+        expect(result.messages.map((m) => m.role)).toEqual(["assistant", "user"]);
+        const content = result.messages[1].content as AnthropicContentBlock[];
+        expect(content).toEqual([
+            { type: "tool_result", tool_use_id: "call_1", content: "Sunny" },
+            { type: "text", text: "谢谢" },
+        ]);
     });
 
     it("should convert reasoning item to thinking block", () => {
@@ -525,8 +595,8 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
 
         const result = converter.convertRequest(req);
 
-        // 验证消息结构：user + assistant(3 tool_use) + user(3 tool_result) + user = 4
-        expect(result.messages).toHaveLength(4);
+        // 验证消息结构：user + assistant(3 tool_use) + user(3 tool_result + 后续文本) = 3
+        expect(result.messages).toHaveLength(3);
 
         // 验证 assistant 消息包含所有 3 个 tool_use
         const assistantMsg = result.messages[1];
@@ -537,14 +607,15 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         expect((assistantMsg.content as any[])[1].type).toBe("tool_use");
         expect((assistantMsg.content as any[])[2].type).toBe("tool_use");
 
-        // 验证 user 消息包含所有 3 个 tool_result
+        // 验证 user 消息包含所有 3 个 tool_result，并合并了随后的普通用户文本
         const toolResultMsg = result.messages[2];
         expect(toolResultMsg.role).toBe("user");
         expect(Array.isArray(toolResultMsg.content)).toBe(true);
-        expect((toolResultMsg.content as any[]).length).toBe(3);
+        expect((toolResultMsg.content as any[]).length).toBe(4);
         expect((toolResultMsg.content as any[])[0].type).toBe("tool_result");
         expect((toolResultMsg.content as any[])[1].type).toBe("tool_result");
         expect((toolResultMsg.content as any[])[2].type).toBe("tool_result");
+        expect((toolResultMsg.content as any[])[3]).toEqual({ type: "text", text: "Done" });
 
         // 验证 tool_result 的 tool_use_id 正确对应
         expect((toolResultMsg.content as any[])[0].tool_use_id).toBe("call_00");
@@ -705,11 +776,11 @@ describe("ResponsesToAnthropicConverter - convertStreamEvent (Anthropic SSE → 
 
         expect(events.length).toBeGreaterThanOrEqual(2);
 
-        const created = parseStreamEventData(events, 0);
+        const created = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(created.type).toBe("response.created");
         expect(created.response.status).toBe("in_progress");
 
-        const inProgress = parseStreamEventData(events, 1);
+        const inProgress = protocolConverterTestUtil.parseStreamEventData(events, 1);
         expect(inProgress.type).toBe("response.in_progress");
     });
 
@@ -730,7 +801,7 @@ describe("ResponsesToAnthropicConverter - convertStreamEvent (Anthropic SSE → 
         );
 
         expect(events.length).toBeGreaterThanOrEqual(1);
-        const added = parseStreamEventData(events, 0);
+        const added = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(added.type).toBe("response.output_item.added");
         expect(added.item.type).toBe("message");
     });
@@ -759,7 +830,7 @@ describe("ResponsesToAnthropicConverter - convertStreamEvent (Anthropic SSE → 
         );
 
         expect(events).toHaveLength(1);
-        const delta = parseStreamEventData(events, 0);
+        const delta = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(delta.type).toBe("response.output_text.delta");
         expect(delta.delta).toBe("Hello world");
     });
@@ -781,7 +852,7 @@ describe("ResponsesToAnthropicConverter - convertStreamEvent (Anthropic SSE → 
         );
 
         expect(events.length).toBeGreaterThanOrEqual(1);
-        const added = parseStreamEventData(events, 0);
+        const added = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(added.type).toBe("response.output_item.added");
         expect(added.item.type).toBe("function_call");
         expect(added.item.call_id).toBe("toolu_123");
@@ -812,7 +883,7 @@ describe("ResponsesToAnthropicConverter - convertStreamEvent (Anthropic SSE → 
         );
 
         expect(events).toHaveLength(1);
-        const delta = parseStreamEventData(events, 0);
+        const delta = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(delta.type).toBe("response.function_call_arguments.delta");
         expect(delta.delta).toBe('{"location"');
     });
@@ -834,7 +905,7 @@ describe("ResponsesToAnthropicConverter - convertStreamEvent (Anthropic SSE → 
         );
 
         expect(events.length).toBeGreaterThanOrEqual(1);
-        const added = parseStreamEventData(events, 0);
+        const added = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(added.type).toBe("response.output_item.added");
         expect(added.item.type).toBe("reasoning");
     });
@@ -863,7 +934,7 @@ describe("ResponsesToAnthropicConverter - convertStreamEvent (Anthropic SSE → 
         );
 
         expect(events).toHaveLength(1);
-        const delta = parseStreamEventData(events, 0);
+        const delta = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(delta.type).toBe("response.reasoning_summary_text.delta");
         expect(delta.delta).toBe("reasoning text");
     });

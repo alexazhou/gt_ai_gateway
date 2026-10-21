@@ -1,13 +1,5 @@
-import type { AnthropicThinkingConfig, AnthropicOutputConfig } from "./protocolTypes";
-
-export enum ReasoningEffort {
-    NONE = "none",
-    MINIMAL = "minimal",
-    LOW = "low",
-    MEDIUM = "medium",
-    HIGH = "high",
-    XHIGH = "xhigh",
-}
+import type { AnthropicThinkingConfig, AnthropicOutputConfig } from "../protocol/anthropicTypes";
+import { ReasoningEffort } from "../protocol/commonTypes";
 
 export interface ThinkingConfig {
     enabled: boolean;

@@ -3,7 +3,7 @@ import { CastsAttributes } from "sutando";
 import { inspect, InspectOptions } from "util";
 
 import { SgRecordStatus } from "../constants";
-import { MicroAmountCast } from "../util/protocol/billingUtil";
+import { MicroAmountCast } from "../util/protocolUtil/billingUtil";
 
 
 /**

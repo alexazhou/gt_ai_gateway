@@ -1,24 +1,27 @@
 import { BaseConverter } from "./BaseConverter";
 import type {
+    AnthropicContentBlock,
     AnthropicRequest,
     AnthropicResponse,
-    AnthropicContentBlock,
-    OpenAIMessage,
-    ProtocolStreamEvent,
-} from "./protocolTypes";
+} from "../protocol/anthropicTypes";
+import type { ProtocolStreamEvent } from "../protocol/commonTypes";
+import type { OpenAIMessage } from "../protocol/openaiTypes";
 import type {
-    ResponsesRequest,
-    ResponsesNonStreamResponse,
-    ResponsesOutputItem,
-    ResponsesInputItem,
     ResponsesContentPart,
     ResponsesEventError,
     ResponsesEventResponseFailed,
-} from "./responsesTypes";
+    ResponsesInputItem,
+    ResponsesNonStreamResponse,
+    ResponsesOutputItem,
+    ResponsesRequest,
+    ResponsesStreamItem,
+    ResponsesStreamResponse,
+} from "../protocol/responsesTypes";
 import {
     buildThinkingConfigFromAnthropic,
     thinkingConfigToOpenAIResponses,
 } from "./thinkingConfig";
+import protocolConverterUtil from "./protocolConverterUtil";
 
 const STOP_REASON_MAP: Record<string, string> = {
     completed: "end_turn",
@@ -64,33 +67,28 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                         content: [{ type: "input_text", text: msg.content }],
                     });
                 } else if (Array.isArray(msg.content)) {
-                    // 先收集普通内容
-                    const textParts: string[] = [];
-                    const imageParts: ResponsesInputItem[] = [];
+                    // 按原始顺序累积普通内容块；遇到 tool_result 先冲刷，保持与输入一致
+                    const parts: ResponsesContentPart[] = [];
+                    const flushParts = () => {
+                        if (parts.length === 0) return;
+                        input.push({
+                            type: "message",
+                            role: "user",
+                            content: parts.splice(0, parts.length),
+                        });
+                    };
 
                     for (const block of msg.content) {
                         if (block.type === "text") {
-                            textParts.push(block.text || "");
+                            parts.push({ type: "input_text", text: block.text || "" });
                         } else if (block.type === "image") {
-                            const src = block.source;
-                            if (src?.type === "base64" && src.data) {
-                                imageParts.push({
-                                    type: "message",
-                                    role: "user",
-                                    content: [{
-                                        type: "input_image",
-                                        image_url: `data:${src.media_type || "image/png"};base64,${src.data}`,
-                                    }],
-                                });
-                            } else if (src?.url) {
-                                imageParts.push({
-                                    type: "message",
-                                    role: "user",
-                                    content: [{ type: "input_image", image_url: src.url }],
-                                });
-                            }
+                            parts.push({
+                                type: "input_image",
+                                image_url: protocolConverterUtil.anthropicImageSourceToUrl(block.source),
+                            });
                         } else if (block.type === "tool_result") {
                             // tool_result → function_call_output
+                            flushParts();
                             input.push({
                                 type: "function_call_output",
                                 call_id: block.tool_use_id || "",
@@ -99,16 +97,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                         }
                     }
 
-                    if (textParts.length > 0) {
-                        input.push({
-                            type: "message",
-                            role: "user",
-                            content: [{ type: "input_text", text: textParts.join("\n") }],
-                        });
-                    }
-                    for (const img of imageParts) {
-                        input.push(img);
-                    }
+                    flushParts();
                 }
             } else if (msg.role === "assistant") {
                 if (typeof msg.content === "string") {
@@ -216,16 +205,11 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                 if (block.text) {
                     parts.push({ type: "input_text", text: block.text });
                 }
-            } else if (block.type === "image" && block.source) {
-                const source = block.source;
-                if (source.type === "base64" && source.data) {
-                    parts.push({
-                        type: "input_image",
-                        image_url: `data:${source.media_type || "image/png"};base64,${source.data}`,
-                    });
-                } else if (source.url) {
-                    parts.push({ type: "input_image", image_url: source.url });
-                }
+            } else if (block.type === "image") {
+                parts.push({
+                    type: "input_image",
+                    image_url: protocolConverterUtil.anthropicImageSourceToUrl(block.source),
+                });
             }
         }
         return parts.length > 0 ? parts : "";
@@ -249,7 +233,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                     type: "tool_use",
                     id: item.call_id || item.id,
                     name: item.name,
-                    input: this.safeParseArgs(item.arguments),
+                    input: protocolConverterUtil.parseToolArguments(item.arguments),
                 });
             } else if (item.type === "reasoning") {
                 const thinkingText = item.summary?.map((s) => s.text).join("\n") || "";
@@ -319,7 +303,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
             }
 
             case "response.created": {
-                const resp = (data as any).response;
+                const resp = data.response as ResponsesStreamResponse | undefined;
                 this.responseId = resp?.id || this.responseId;
                 const inputTokens = resp?.usage?.input_tokens ?? 0;
                 const cacheReadTokens = resp?.usage?.input_tokens_details?.cached_tokens;
@@ -352,7 +336,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
             }
 
             case "response.output_item.added": {
-                const item = (data as any).item;
+                const item = data.item as ResponsesStreamItem | undefined;
                 if (!item) break;
 
                 if (item.type === "message") {
@@ -405,7 +389,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                     data: JSON.stringify({
                         type: "content_block_delta",
                         index: this.currentContentBlockIndex,
-                        delta: { type: "text_delta", text: (data as any).delta || "" },
+                        delta: { type: "text_delta", text: (data.delta as string | undefined) || "" },
                     }),
                     event: "content_block_delta",
                 });
@@ -417,7 +401,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                     data: JSON.stringify({
                         type: "content_block_delta",
                         index: this.currentContentBlockIndex,
-                        delta: { type: "input_json_delta", partial_json: (data as any).delta || "" },
+                        delta: { type: "input_json_delta", partial_json: (data.delta as string | undefined) || "" },
                     }),
                     event: "content_block_delta",
                 });
@@ -429,7 +413,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                     data: JSON.stringify({
                         type: "content_block_delta",
                         index: this.currentContentBlockIndex,
-                        delta: { type: "thinking_delta", thinking: (data as any).delta || "" },
+                        delta: { type: "thinking_delta", thinking: (data.delta as string | undefined) || "" },
                     }),
                     event: "content_block_delta",
                 });
@@ -454,7 +438,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
             }
 
             case "response.output_item.done": {
-                const item = (data as any).item;
+                const item = data.item as ResponsesStreamItem | undefined;
                 if (!item) break;
 
                 if (item.type === "message") {
@@ -481,7 +465,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
             }
 
             case "response.completed": {
-                const resp = (data as any).response;
+                const resp = data.response as ResponsesStreamResponse | undefined;
                 const outputTokens = resp?.usage?.output_tokens || 0;
                 const inputTokensVal = resp?.usage?.input_tokens ?? this.inputTokens;
                 const cacheReadTokens = resp?.usage?.input_tokens_details?.cached_tokens;
@@ -490,7 +474,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                 // 判断 stop_reason
                 let stopReason = "end_turn";
                 if (resp?.output) {
-                    const hasToolUse = resp.output.some((o: any) => o.type === "function_call");
+                    const hasToolUse = resp.output.some((o) => o.type === "function_call");
                     if (hasToolUse) stopReason = "tool_use";
                 }
 
@@ -516,14 +500,5 @@ export class AnthropicToResponsesConverter extends BaseConverter {
         }
 
         return out;
-    }
-
-    private safeParseArgs(args: string): Record<string, unknown> {
-        try {
-            const parsed = JSON.parse(args);
-            return typeof parsed === "object" && parsed !== null ? parsed : {};
-        } catch {
-            return {};
-        }
     }
 }

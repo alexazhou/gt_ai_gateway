@@ -63,7 +63,7 @@
 `200 + {"error":{...}}` 返回，会被记成 `status=success`、`failed_code` 留空、活动时间线
 记"请求成功"——失败信息其实一直躺在 `response_data` 里，只是状态字段与它矛盾。
 
-修复：按协议各自的失败形态判定（新增 `src/util/protocol/upstreamFailureUtil.ts`，
+修复：按协议各自的失败形态判定（新增 `src/util/protocolUtil/upstreamFailureUtil.ts`，
 以 `upstreamFormat` 分发，写法对齐 `usageUtil.normalizeUsage`）：
 
 | 协议 | 失败判据 | 错误码来源 |
@@ -150,7 +150,7 @@ Responses 的 `response.output_item.added`），都早于真正的内容 delta�
 | 层级 | 覆盖 |
 |------|------|
 | 单元（`tests/unit/util/accumulator/`） | 各协议完成入口在已出错时不算完成；`error: null` 不误判；终止事件在前、错误在后仍算完成 |
-| 单元（`tests/unit/util/protocol/upstreamFailureUtil.test.ts`） | 三个协议各自的失败形态识别，以及正常响应（含 `status:"incomplete"`、`error:null`）不被误判 |
+| 单元（`tests/unit/util/protocolUtil/upstreamFailureUtil.test.ts`） | 三个协议各自的失败形态识别，以及正常响应（含 `status:"incomplete"`、`error:null`）不被误判 |
 | 端到端（`tests/api/ai/stream-failure.test.ts`） | 错误帧下发给客户端；上游报错后挂着不关连接时流能及时结束；非流式 200 + 失败体记 FAILED |
 
 未覆盖：同请求切换（§4.1 未实现）、冷却写入（§4.2 未实现）。

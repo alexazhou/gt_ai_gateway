@@ -7,8 +7,8 @@
 
 import { describe, it, expect } from "vitest";
 import senderService from "../../../src/service/senderService";
-import usageUtils from "../../../src/util/protocol/usageUtil";
-import protocolUtils from "../../../src/util/protocol/protocolUtil";
+import usageUtils from "../../../src/util/protocolUtil/usageUtil";
+import protocolUtils from "../../../src/util/protocolUtil/protocolUtil";
 import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterFactory";
 import { ApiFormat } from "../../../src/constants";
 import customError from "../../../src/customError";

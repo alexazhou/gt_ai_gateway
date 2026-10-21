@@ -1,4 +1,4 @@
-import type { ReasoningEffort } from "./thinkingConfig";
+import type { ReasoningEffort } from "./commonTypes";
 
 /**
  * Responses API 请求/响应类型定义
@@ -53,16 +53,29 @@ export interface ResponsesFunctionCallOutputItem {
     output: string | ResponsesContentPart[];
 }
 
+/** 输出文本内容块（非流式 item / 流式 content part 共用） */
+export interface ResponsesOutputTextPart {
+    type: "output_text";
+    text: string;
+    annotations?: unknown[];
+}
+
+/** 推理摘要块 */
+export interface ResponsesSummaryPart {
+    type: "summary_text";
+    text: string;
+}
+
 export interface ResponsesReasoningItem {
     type: "reasoning";
     id?: string;
     encrypted_content?: string;
-    summary?: Array<{ type: "summary_text"; text: string }>;
+    summary?: ResponsesSummaryPart[];
 }
 
 export type ResponsesContentPart =
     | { type: "input_text"; text: string }
-    | { type: "output_text"; text: string }
+    | ResponsesOutputTextPart
     | { type: "input_image"; image_url?: string; url?: string; file_id?: string; detail?: string }
     | { type: "input_file"; file_data?: string; filename?: string };
 
@@ -82,6 +95,25 @@ export type ResponsesToolChoice =
 
 // ─── Responses API 非流式响应类型 ───
 
+export interface ResponsesInputTokenDetails {
+    cached_tokens?: number;
+}
+
+export interface ResponsesOutputTokenDetails {
+    reasoning_tokens?: number;
+}
+
+export interface ResponsesUsage {
+    input_tokens: number;
+    input_tokens_details?: ResponsesInputTokenDetails;
+    output_tokens: number;
+    output_tokens_details?: ResponsesOutputTokenDetails;
+    total_tokens: number;
+}
+
+/** 流式事件中的 usage 可能只包含部分字段 */
+export type ResponsesStreamUsage = Partial<ResponsesUsage>;
+
 export interface ResponsesNonStreamResponse {
     id: string;
     object: "response";
@@ -89,17 +121,7 @@ export interface ResponsesNonStreamResponse {
     status: "completed" | "failed" | "in_progress";
     model: string;
     output: ResponsesOutputItem[];
-    usage?: {
-        input_tokens: number;
-        input_tokens_details?: {
-            cached_tokens?: number;
-        };
-        output_tokens: number;
-        output_tokens_details?: {
-            reasoning_tokens?: number;
-        };
-        total_tokens: number;
-    };
+    usage?: ResponsesUsage;
     instructions?: string;
     max_output_tokens?: number;
     temperature?: number;
@@ -118,11 +140,7 @@ export interface ResponsesOutputMessage {
     id: string;
     role: "assistant";
     status: "completed";
-    content: Array<{
-        type: "output_text";
-        text: string;
-        annotations?: unknown[];
-    }>;
+    content: ResponsesOutputTextPart[];
 }
 
 export interface ResponsesOutputFunctionCall {
@@ -138,7 +156,29 @@ export interface ResponsesOutputReasoning {
     type: "reasoning";
     id: string;
     encrypted_content?: string;
-    summary?: Array<{ type: "summary_text"; text: string }>;
+    summary?: ResponsesSummaryPart[];
+}
+
+// ─── Responses SSE 事件中转换器实际读取的最小载荷形状（各 converter 共用） ───
+
+export interface ResponsesStreamResponse {
+    id?: string;
+    model?: string;
+    usage?: ResponsesStreamUsage;
+    output?: Array<{ type?: string }>;
+}
+
+/** 流式 content part 的松散视图（累加器逐事件填充） */
+export type ResponsesStreamContentPart = Partial<ResponsesOutputTextPart>;
+
+export interface ResponsesStreamItem {
+    id?: string;
+    type?: string;
+    role?: string;
+    status?: string;
+    call_id?: string;
+    name?: string;
+    content?: ResponsesStreamContentPart[];
 }
 
 // ─── Responses API 流式事件类型 ───
@@ -188,7 +228,7 @@ export interface ResponsesEventContentPartAdded extends ResponsesEventBase {
     item_id: string;
     output_index: number;
     content_index: number;
-    part: { type: "output_text"; text: string };
+    part: ResponsesOutputTextPart;
 }
 
 export interface ResponsesEventOutputTextDelta extends ResponsesEventBase {
@@ -212,7 +252,7 @@ export interface ResponsesEventContentPartDone extends ResponsesEventBase {
     item_id: string;
     output_index: number;
     content_index: number;
-    part: { type: "output_text"; text: string; annotations?: unknown[] };
+    part: ResponsesOutputTextPart;
 }
 
 export interface ResponsesEventFunctionCallArgsDelta extends ResponsesEventBase {
@@ -234,7 +274,7 @@ export interface ResponsesEventReasoningSummaryPartAdded extends ResponsesEventB
     item_id: string;
     output_index: number;
     summary_index: number;
-    part: { type: "summary_text"; text: string };
+    part: ResponsesSummaryPart;
 }
 
 export interface ResponsesEventReasoningSummaryTextDelta extends ResponsesEventBase {
@@ -258,7 +298,7 @@ export interface ResponsesEventReasoningSummaryPartDone extends ResponsesEventBa
     item_id: string;
     output_index: number;
     summary_index: number;
-    part: { type: "summary_text"; text: string };
+    part: ResponsesSummaryPart;
 }
 
 export interface ResponsesEventOutputItemDone extends ResponsesEventBase {

@@ -1,4 +1,4 @@
-import type { ProtocolStreamEvent } from "../protocolConverter/protocolTypes";
+import type { ProtocolStreamEvent } from "../protocol/commonTypes";
 
 /** 完整解析出的 SSE 块：带 data 的真实事件，或仅含注释行的心跳 */
 interface SSESplitBlock extends ProtocolStreamEvent {

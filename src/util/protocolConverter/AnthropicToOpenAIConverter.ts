@@ -1,20 +1,25 @@
+import customError from "../../customError";
 import { BaseConverter } from "./BaseConverter";
 import type {
-    AnthropicRequest,
-    OpenAIRequest,
-    AnthropicResponse,
-    OpenAIResponse,
-    OpenAIMessage,
-    OpenAITool,
     AnthropicContentBlock,
+    AnthropicRequest,
+    AnthropicResponse,
     AnthropicSSEEvent,
+} from "../protocol/anthropicTypes";
+import type { ProtocolStreamEvent } from "../protocol/commonTypes";
+import type {
+    OpenAIContentPart,
     OpenAIChunk,
-    ProtocolStreamEvent,
-} from "./protocolTypes";
+    OpenAIMessage,
+    OpenAIRequest,
+    OpenAIResponse,
+    OpenAITool,
+} from "../protocol/openaiTypes";
 import {
     buildThinkingConfigFromAnthropic,
     thinkingConfigToOpenAI,
 } from "./thinkingConfig";
+import protocolConverterUtil from "./protocolConverterUtil";
 
 const OPENAI_TO_ANTHROPIC_STOP_REASON: Record<string, string> = {
     stop: "end_turn",
@@ -87,7 +92,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
 
                     // OpenAI requires tool responses to immediately follow assistant tool_calls.
                     // tool 消息只支持文本：图片从工具结果里取出，随后统一放进一条 user 消息。
-                    const toolResultImages: Array<Record<string, unknown>> = [];
+                    const toolResultImages: OpenAIContentPart[] = [];
                     for (const tr of toolResults) {
                         const textContent = typeof tr.content === "string"
                             ? tr.content
@@ -103,18 +108,16 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
 
                         const imageBlocks = typeof tr.content === "string" ? [] : tr.content ?? [];
                         for (const block of imageBlocks) {
-                            if (block.type !== "image" || !block.source) continue;
-                            const url = this.imageSourceToUrl(block.source);
-                            if (url) {
-                                toolResultImages.push({ type: "image_url", image_url: { url } });
-                            }
+                            if (block.type !== "image") continue;
+                            const url = protocolConverterUtil.anthropicImageSourceToUrl(block.source);
+                            toolResultImages.push({ type: "image_url", image_url: { url } });
                         }
                     }
 
                     if (normalBlocks.length > 0 || toolResultImages.length > 0) {
                         messages.push({
                             role: "user",
-                            content: this.convertUserContent(normalBlocks, toolResultImages) as any,
+                            content: this.convertUserContent(normalBlocks, toolResultImages),
                         });
                     }
                 }
@@ -220,40 +223,27 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
      */
     private convertUserContent(
         blocks: AnthropicContentBlock[],
-        extraImageParts: Array<Record<string, unknown>> = [],
-    ): string | Array<Record<string, unknown>> {
+        extraImageParts: OpenAIContentPart[] = [],
+    ): string | OpenAIContentPart[] {
         const hasImage = extraImageParts.length > 0
-            || blocks.some((b) => b.type === "image" && b.source);
+            || blocks.some((b) => b.type === "image");
         if (!hasImage) {
             return blocks.map((b) => b.text || "").join("\n");
         }
 
-        const parts: Array<Record<string, unknown>> = [];
+        const parts: OpenAIContentPart[] = [];
         for (const block of blocks) {
             if (block.type === "text") {
                 if (block.text) {
                     parts.push({ type: "text", text: block.text });
                 }
-            } else if (block.type === "image" && block.source) {
-                const url = this.imageSourceToUrl(block.source);
-                if (url) {
-                    parts.push({ type: "image_url", image_url: { url } });
-                }
+            } else if (block.type === "image") {
+                const url = protocolConverterUtil.anthropicImageSourceToUrl(block.source);
+                parts.push({ type: "image_url", image_url: { url } });
             }
         }
         parts.push(...extraImageParts);
         return parts.length > 0 ? parts : "";
-    }
-
-
-    private imageSourceToUrl(source: NonNullable<AnthropicContentBlock["source"]>): string | null {
-        if (source.type === "base64" && source.data) {
-            return `data:${source.media_type || "image/png"};base64,${source.data}`;
-        }
-        if (source.type === "url" && source.url) {
-            return source.url;
-        }
-        return null;
     }
 
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import urlUtil from "../../../../src/util/protocol/urlUtil";
+import urlUtil from "../../../../src/util/protocolUtil/urlUtil";
 
 describe("urlUtil.convertOpenaiToResponses", () => {
     it("converts a standard /chat/completions URL to /responses", () => {

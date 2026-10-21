@@ -11,24 +11,21 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { ResponsesToAnthropicConverter } from "../../../src/util/protocolConverter/ResponsesToAnthropicConverter";
 import { AnthropicToResponsesConverter } from "../../../src/util/protocolConverter/AnthropicToResponsesConverter";
 import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterFactory";
-import { ReasoningEffort } from "../../../src/util/protocolConverter/thinkingConfig";
+import { ReasoningEffort } from "../../../src/util/protocol/commonTypes";
 import { ApiFormat } from "../../../src/constants";
 import anthropicAccumulator from "../../../src/util/accumulator/anthropicAccumulator";
 import type {
+    AnthropicContentBlock,
     AnthropicRequest,
     AnthropicResponse,
-    AnthropicContentBlock,
-    ProtocolStreamEvent,
-} from "../../../src/util/protocolConverter/protocolTypes";
+} from "../../../src/util/protocol/anthropicTypes";
+import type { ProtocolStreamEvent } from "../../../src/util/protocol/commonTypes";
 import type {
-    ResponsesRequest,
-    ResponsesNonStreamResponse,
     ResponsesInputItem,
-} from "../../../src/util/protocolConverter/responsesTypes";
-
-function parseStreamEventData(events: ProtocolStreamEvent[], index: number = 0): any {
-    return JSON.parse(events[index].data);
-}
+    ResponsesNonStreamResponse,
+    ResponsesRequest,
+} from "../../../src/util/protocol/responsesTypes";
+import protocolConverterTestUtil from "./protocolConverterTestUtil";
 
 // ============================================================
 // ============================================================
@@ -246,6 +243,80 @@ describe("AnthropicToResponsesConverter - convertRequest", () => {
             { type: "input_text", text: "第一行" },
             { type: "input_text", text: "第二行" },
         ]);
+    });
+
+    it("should preserve text/image part order in a user message", () => {
+        const req: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "before" },
+                        { type: "image", source: { type: "url", url: "https://example.com/a.png" } },
+                        { type: "text", text: "after" },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(req);
+
+        expect(result.input).toHaveLength(1);
+        const msg = result.input[0] as any;
+        expect(msg.role).toBe("user");
+        expect(msg.content).toEqual([
+            { type: "input_text", text: "before" },
+            { type: "input_image", image_url: "https://example.com/a.png" },
+            { type: "input_text", text: "after" },
+        ]);
+    });
+
+    it("should reject image blocks without a valid source instead of dropping them", () => {
+        const req: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "image", source: { type: "base64", media_type: "image/png" } },
+                    ],
+                },
+            ],
+        };
+
+        expect(() => converter.convertRequest(req)).toThrow(/source/);
+    });
+
+    it("should reject invalid image sources inside tool_result instead of dropping them", () => {
+        const req: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool_use", id: "toolu_123", name: "read_image", input: {} },
+                    ],
+                },
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "tool_result",
+                            tool_use_id: "toolu_123",
+                            content: [
+                                { type: "image", source: { type: "file" } },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        expect(() => converter.convertRequest(req)).toThrow(/source/);
     });
 
     it("should convert thinking block to reasoning item", () => {
@@ -703,7 +774,7 @@ describe("AnthropicToResponsesConverter - convertStreamEvent (Responses SSE → 
 
         expect(events).toHaveLength(1);
         expect(events[0].event).toBe("message_start");
-        const data = parseStreamEventData(events, 0);
+        const data = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(data.type).toBe("message_start");
         expect(data.message.role).toBe("assistant");
         expect(data.message.id).toContain("msg_");
@@ -734,7 +805,7 @@ describe("AnthropicToResponsesConverter - convertStreamEvent (Responses SSE → 
 
         expect(events).toHaveLength(1);
         expect(events[0].event).toBe("content_block_start");
-        const data = parseStreamEventData(events, 0);
+        const data = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(data.content_block.type).toBe("text");
     });
 
@@ -764,7 +835,7 @@ describe("AnthropicToResponsesConverter - convertStreamEvent (Responses SSE → 
 
         expect(events).toHaveLength(1);
         expect(events[0].event).toBe("content_block_start");
-        const data = parseStreamEventData(events, 0);
+        const data = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(data.content_block.type).toBe("tool_use");
         expect(data.content_block.id).toBe("call_123");
         expect(data.content_block.name).toBe("get_weather");
@@ -797,7 +868,7 @@ describe("AnthropicToResponsesConverter - convertStreamEvent (Responses SSE → 
 
         expect(events).toHaveLength(1);
         expect(events[0].event).toBe("content_block_delta");
-        const data = parseStreamEventData(events, 0);
+        const data = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(data.delta.type).toBe("text_delta");
         expect(data.delta.text).toBe("Hello");
     });
@@ -828,7 +899,7 @@ describe("AnthropicToResponsesConverter - convertStreamEvent (Responses SSE → 
 
         expect(events).toHaveLength(1);
         expect(events[0].event).toBe("content_block_delta");
-        const data = parseStreamEventData(events, 0);
+        const data = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(data.delta.type).toBe("input_json_delta");
         expect(data.delta.partial_json).toBe('{"location"');
     });
@@ -860,7 +931,7 @@ describe("AnthropicToResponsesConverter - convertStreamEvent (Responses SSE → 
 
         expect(events).toHaveLength(1);
         expect(events[0].event).toBe("content_block_delta");
-        const data = parseStreamEventData(events, 0);
+        const data = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(data.delta.type).toBe("thinking_delta");
         expect(data.delta.thinking).toBe("thinking...");
     });
@@ -986,7 +1057,7 @@ describe("AnthropicToResponsesConverter - convertStreamEvent (Responses SSE → 
         expect(events[0].event).toBe("message_delta");
         expect(events[1].event).toBe("message_stop");
 
-        const deltaData = parseStreamEventData(events, 0);
+        const deltaData = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(deltaData.delta.stop_reason).toBe("end_turn");
         expect(deltaData.usage.input_tokens).toBe(6);
         expect(deltaData.usage.output_tokens).toBe(20);
@@ -1022,7 +1093,7 @@ describe("AnthropicToResponsesConverter - convertStreamEvent (Responses SSE → 
             }),
         );
 
-        const deltaData = parseStreamEventData(events, 0);
+        const deltaData = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(deltaData.delta.stop_reason).toBe("tool_use");
     });
 

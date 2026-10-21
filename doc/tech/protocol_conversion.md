@@ -208,7 +208,7 @@ response_data = 上游错误 payload
 | `tests/unit/util/accumulator/openaiChatAccumulator.test.ts` | OpenAI Chat 流累积 |
 | `tests/unit/util/accumulator/anthropicAccumulator.test.ts` | Anthropic Messages 流累积 |
 | `tests/unit/util/accumulator/responsesAccumulator.test.ts` | Responses 流累积、完成和错误状态 |
-| `tests/unit/util/protocol/sseEventUtil.test.ts` | SSE 事件解析、完成和错误识别 |
+| `tests/unit/util/protocolUtil/sseEventUtil.test.ts` | SSE 事件解析、完成和错误识别 |
 | `tests/api/ai/stream-failure.test.ts` | 流式异常终态落库 |
 | `tests/api/ai/protocol-conversion.test.ts` | API 层协议转换路径 |
 

@@ -1,20 +1,27 @@
 import customError from "../../customError";
 import { BaseConverter } from "./BaseConverter";
 import type {
-    AnthropicRequest,
-    OpenAIRequest,
-    AnthropicResponse,
-    OpenAIResponse,
     AnthropicContentBlock,
+    AnthropicRequest,
+    AnthropicResponse,
+    AnthropicStreamContentBlock,
+    AnthropicStreamDelta,
+    AnthropicStreamMessage,
+    AnthropicStreamUsage,
     AnthropicTool,
-    OpenAIMessage,
+} from "../protocol/anthropicTypes";
+import type { ProtocolStreamEvent } from "../protocol/commonTypes";
+import type {
     OpenAIChunk,
-    ProtocolStreamEvent,
-} from "./protocolTypes";
+    OpenAIMessage,
+    OpenAIRequest,
+    OpenAIResponse,
+} from "../protocol/openaiTypes";
 import {
     buildThinkingConfigFromOpenAI,
     thinkingConfigToAnthropic,
 } from "./thinkingConfig";
+import protocolConverterUtil from "./protocolConverterUtil";
 
 const ANTHROPIC_TO_OPENAI_STOP_REASON: Record<string, string> = {
     end_turn: "stop",
@@ -34,21 +41,18 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
 
         for (const msg of clientReq.messages) {
             if (msg.role === "system") {
-                systemPrompt = (systemPrompt ? systemPrompt + "\n\n" : "") + (msg.content || "");
+                systemPrompt = (systemPrompt ? systemPrompt + "\n\n" : "") + this.contentToText(msg.content);
                 continue;
             }
 
             if (msg.role === "tool") {
-                messages.push({
-                    role: "user",
-                    content: [
-                        {
-                            type: "tool_result",
-                            tool_use_id: msg.tool_call_id || "",
-                            content: msg.content || "",
-                        },
-                    ],
-                });
+                protocolConverterUtil.appendAnthropicMessage(messages, "user", [
+                    {
+                        type: "tool_result",
+                        tool_use_id: msg.tool_call_id || "",
+                        content: this.contentToText(msg.content),
+                    },
+                ]);
                 continue;
             }
 
@@ -60,8 +64,9 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                         contentBlocks.push({ type: "thinking", thinking: msg.reasoning_content });
                     }
 
-                    if (msg.content) {
-                        contentBlocks.push({ type: "text", text: msg.content });
+                    const textContent = this.contentToText(msg.content);
+                    if (textContent) {
+                        contentBlocks.push({ type: "text", text: textContent });
                     }
 
                     if (msg.tool_calls) {
@@ -87,10 +92,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
             }
 
             if (msg.role === "user" || msg.role === "assistant") {
-                messages.push({
-                    role: msg.role,
-                    content: this.convertMessageContent(msg.content),
-                });
+                protocolConverterUtil.appendAnthropicMessage(messages, msg.role, this.convertMessageContent(msg.content));
             }
         }
 
@@ -160,23 +162,25 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
      * OpenAI content → Anthropic content：
      * - 纯文本数组保持原样（两种协议的文本块形状一致）
      * - 含 image_url 时逐块转换，图片 URL 拆成 Anthropic 的 base64 / url source
+     * - 无法表达的内容块明确报错，不静默丢弃
      */
-    private convertMessageContent(content: unknown): string | AnthropicContentBlock[] {
+    private convertMessageContent(content: OpenAIMessage["content"]): string | AnthropicContentBlock[] {
         if (!Array.isArray(content)) {
-            return (content as string) || "";
-        }
-
-        const hasImage = content.some((part: any) => part?.type === "image_url");
-        if (!hasImage) {
-            return content as AnthropicContentBlock[];
+            return content || "";
         }
 
         const blocks: AnthropicContentBlock[] = [];
-        for (const part of content as any[]) {
-            if (part?.type === "text") {
+        for (const part of content) {
+            if (part.type === "text") {
                 blocks.push({ type: "text", text: part.text ?? "" });
-            } else if (part?.type === "image_url") {
+            } else if (part.type === "image_url") {
                 blocks.push(this.convertImageUrl(part.image_url));
+            } else {
+                const unsupportedType = (part as { type?: string }).type ?? "unknown";
+                throw new customError.AppError(
+                    `Unsupported OpenAI content part type for protocol conversion: ${unsupportedType}`,
+                    400,
+                );
             }
         }
         return blocks;
@@ -184,37 +188,32 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
 
 
     /**
+     * OpenAI content → 纯文本（system / tool 消息只承载文本）
+     */
+    private contentToText(content: OpenAIMessage["content"]): string {
+        if (typeof content === "string") return content;
+        if (!Array.isArray(content)) return "";
+        return content
+            .filter((part): part is { type: "text"; text: string } => part.type === "text")
+            .map((part) => part.text)
+            .join("\n");
+    }
+
+
+    /**
      * OpenAI image_url → Anthropic image block
      * data URL 拆成 base64 source，其余按远程 URL 透传
      */
-    private convertImageUrl(imageUrl: unknown): AnthropicContentBlock {
+    private convertImageUrl(imageUrl: string | { url?: string } | undefined): AnthropicContentBlock {
         const url = typeof imageUrl === "string"
             ? imageUrl
-            : (imageUrl as { url?: string } | undefined)?.url || "";
+            : imageUrl?.url || "";
 
         if (!url) {
             throw new customError.AppError("image_url.url is required for image protocol conversion", 400);
         }
 
-        const dataUrlMatch = url.match(/^data:([^;,]+);base64,([\s\S]+)$/);
-        if (dataUrlMatch) {
-            return {
-                type: "image",
-                source: {
-                    type: "base64",
-                    media_type: dataUrlMatch[1],
-                    data: dataUrlMatch[2],
-                },
-            };
-        }
-        if (url.startsWith("data:")) {
-            throw new customError.AppError(
-                "Unsupported image data URL for protocol conversion: expected data:<mime>;base64,<data>",
-                400,
-            );
-        }
-
-        return { type: "image", source: { type: "url", url } };
+        return { type: "image", source: protocolConverterUtil.anthropicImageSourceFromUrl(url) };
     }
 
 
@@ -278,8 +277,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
         }
 
         if (eventType === "message_start") {
-            const msgStart = data as any;
-            const message = msgStart.message;
+            const message = data.message as AnthropicStreamMessage | undefined;
             if (message?.model) this.updateModel(message.model);
             if (message?.id) {
                 this.updateResponseId(message.id.startsWith("chatcmpl-") ? message.id : `chatcmpl-${message.id.replace("msg_", "")}`);
@@ -303,8 +301,8 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
         }
 
         if (eventType === "content_block_start") {
-            const blockStart = data as any;
-            const block = blockStart.content_block;
+            const block = data.content_block as AnthropicStreamContentBlock | undefined;
+            if (!block) return [];
             if (block.type === "tool_use") {
                 this.currentToolCallIndex++;
                 const chunk: OpenAIChunk = {
@@ -350,8 +348,8 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
         }
 
         if (eventType === "content_block_delta") {
-            const blockDelta = data as any;
-            const delta = blockDelta.delta;
+            const delta = data.delta as AnthropicStreamDelta | undefined;
+            if (!delta) return [];
 
             if (delta.type === "text_delta") {
                 const chunk: OpenAIChunk = {
@@ -413,9 +411,10 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
         }
 
         if (eventType === "message_delta") {
-            const msgDelta = data as any;
-            const finishReason = msgDelta.delta?.stop_reason
-                ? ANTHROPIC_TO_OPENAI_STOP_REASON[msgDelta.delta.stop_reason] || "stop"
+            const delta = data.delta as AnthropicStreamDelta | undefined;
+            const usage = data.usage as AnthropicStreamUsage | undefined;
+            const finishReason = delta?.stop_reason
+                ? ANTHROPIC_TO_OPENAI_STOP_REASON[delta.stop_reason] || "stop"
                 : null;
 
             const chunk: OpenAIChunk = {
@@ -432,12 +431,12 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                 ],
             };
 
-            if (msgDelta.usage) {
-                const cacheReadTokens = msgDelta.usage.cache_read_input_tokens ?? 0;
-                const promptTokensBase = msgDelta.usage.input_tokens ?? this.inputTokens;
+            if (usage) {
+                const cacheReadTokens = usage.cache_read_input_tokens ?? 0;
+                const promptTokensBase = usage.input_tokens ?? this.inputTokens;
                 // OpenAI 口径：prompt_tokens 为含缓存命中总量，缓存部分单独经 prompt_tokens_details 透传
                 const promptTokens = promptTokensBase + cacheReadTokens;
-                const completionTokens = msgDelta.usage.output_tokens || 0;
+                const completionTokens = usage.output_tokens || 0;
                 chunk.usage = {
                     prompt_tokens: promptTokens,
                     completion_tokens: completionTokens,

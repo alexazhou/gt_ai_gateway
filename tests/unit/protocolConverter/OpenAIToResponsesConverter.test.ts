@@ -7,10 +7,10 @@ import type {
     OpenAIRequest,
     OpenAIResponse,
     OpenAIChunk,
-} from "../../../src/util/protocolConverter/protocolTypes";
+} from "../../../src/util/protocol/openaiTypes";
 import type {
     ResponsesNonStreamResponse,
-} from "../../../src/util/protocolConverter/responsesTypes";
+} from "../../../src/util/protocol/responsesTypes";
 
 describe("OpenAIToResponsesConverter", () => {
     const converter = new OpenAIToResponsesConverter("gpt-4");

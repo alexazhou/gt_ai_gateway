@@ -50,7 +50,7 @@ Responses API 是 OpenAI 推出的新一代 API 格式，与传统的 Chat Compl
 }
 ```
 
-> `function_call_output.output` 除了字符串，也可以是内容块数组（`input_text` / `input_image` / `input_file`）。转换时文本和图片会映射为 `tool_result` 的内容块；`input_file` 暂不支持，会被忽略。
+> `function_call_output.output` 除了字符串，也可以是内容块数组（`input_text` / `input_image` / `input_file`）。转换时文本和图片会映射为 `tool_result` 的内容块；`input_file` 暂不支持，遇到时会明确返回 400。
 
 ### 2.3 请求转换映射表
 
@@ -88,6 +88,7 @@ Responses API 是 OpenAI 推出的新一代 API 格式，与传统的 Chat Compl
 - Responses → Anthropic：`input_image.image_url` 为 data URL 时拆成 `{type:"base64", media_type, data}`；普通 URL 转为 `{type:"url", url}`
 - Anthropic → Responses：base64 source 组装成 `data:<media_type>;base64,<data>`；url source 原样作为 `input_image.image_url`
 - `input_image.file_id` 无法由网关解析成图片内容，转换为其他协议时直接返回 400
+- Anthropic `image` 块缺少有效 `source` / `data` / `url` 时，转换为 Responses 会直接返回 400
 
 **工具结果**
 
@@ -98,7 +99,7 @@ Responses API 是 OpenAI 推出的新一代 API 格式，与传统的 Chat Compl
 - Responses `function_call_output.output` 是数组时反向映射：
   - `input_text` / `output_text` → `text`
   - `input_image` → `image`
-- `input_file` 暂不支持转换，当前会被静默忽略（不会返回 400）
+- `input_file` 暂不支持转换，遇到该内容块时明确返回 400（不会静默丢弃）
 
 **Responses → OpenAI 方向**
 
@@ -106,7 +107,11 @@ OpenAI 的 `tool` 消息只支持文本，因此 `function_call_output.output` �
 
 **顺序说明**
 
-Responses → OpenAI 和 Anthropic → Responses 会先输出文本、再输出图片，不保证与原始 `text → image → text` 的逐项顺序一致；Responses → Anthropic 与 Anthropic → OpenAI 的普通消息内容按原始块顺序输出（工具结果中的图片除外）。依赖严格交错顺序的请求需要自行拆分消息。
+普通消息内容按原始块顺序输出，`text → image → text` 的逐项顺序会被保留；工具结果中的图片受目标协议限制，仍会被拆分到后续位置（Responses → OpenAI 的 tool 消息只支持文本，Anthropic → OpenAI 的 tool 消息同样只支持文本）。
+
+**连续 user 消息**
+
+Responses 的 `function_call_output` 后紧跟普通 user 消息时，转换到 Anthropic 会合并到同一条 user 消息，不会产生连续 user turn。
 
 ---
 
@@ -255,9 +260,16 @@ Responses API 的流式事件需要维护复杂的状态机来跟踪：
 ## 6. 代码结构
 
 ```
+src/util/protocol/                        # 各协议类型定义
+├── commonTypes.ts                        # 协议无关类型（ReasoningEffort、ProtocolStreamEvent）
+├── anthropicTypes.ts                     # Anthropic 请求 / 响应 / SSE 类型
+├── openaiTypes.ts                        # OpenAI Chat Completions 类型
+└── responsesTypes.ts                     # Responses API 类型
+
+src/util/protocolUtil/                    # 协议工具模块
+
 src/util/protocolConverter/
-├── protocolTypes.ts                    # OpenAI / Anthropic 类型定义
-├── responsesTypes.ts                   # Responses API 类型定义（新增）
+├── protocolConverterUtil.ts            # 转换器共享工具
 ├── BaseConverter.ts                    # 抽象基类
 ├── AnthropicToOpenAIConverter.ts       # Anthropic → OpenAI ChatCompletions
 ├── OpenAIToAnthropicConverter.ts       # OpenAI ChatCompletions → Anthropic

@@ -1,6 +1,6 @@
 import { SgRecord, RECORD_SUMMARY_COLUMNS } from "../model/sgRecord";
 import { SgRecordStatus, FailedCode, RequestActivityStage, ActivityLevel } from "../constants";
-import billingUtil from "../util/protocol/billingUtil";
+import billingUtil from "../util/protocolUtil/billingUtil";
 import requestActivityService from "../service/requestActivityService";
 import type { TenantScope } from "../middleware/tenantScopeMiddleware";
 

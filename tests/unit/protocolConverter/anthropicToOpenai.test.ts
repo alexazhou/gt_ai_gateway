@@ -5,13 +5,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { AnthropicToOpenAIConverter } from "../../../src/util/protocolConverter/AnthropicToOpenAIConverter";
 import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterFactory";
-import { ReasoningEffort } from "../../../src/util/protocolConverter/thinkingConfig";
+import { ReasoningEffort } from "../../../src/util/protocol/commonTypes";
 import { ApiFormat } from "../../../src/constants";
-import type { AnthropicRequest, OpenAIRequest, OpenAIResponse, ProtocolStreamEvent } from "../../../src/util/protocolConverter/protocolTypes";
-
-function parseStreamEventData(events: ProtocolStreamEvent[], index: number = 0): any {
-    return JSON.parse(events[index].data);
-}
+import type { AnthropicRequest } from "../../../src/util/protocol/anthropicTypes";
+import type { ProtocolStreamEvent } from "../../../src/util/protocol/commonTypes";
+import type { OpenAIRequest, OpenAIResponse } from "../../../src/util/protocol/openaiTypes";
+import protocolConverterTestUtil from "./protocolConverterTestUtil";
 
 describe("AnthropicToOpenAIConverter - convertRequest", () => {
     let converter: AnthropicToOpenAIConverter;
@@ -102,6 +101,70 @@ describe("AnthropicToOpenAIConverter - convertRequest", () => {
         const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
 
         expect(result.messages[0].content).toBe("first\nsecond");
+    });
+
+    it("should reject image blocks without a source instead of dropping them", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "描述这张图片" },
+                        { type: "image" },
+                    ],
+                },
+            ],
+        };
+
+        expect(() => converter.convertRequest(anthropicReq)).toThrow(/source/);
+    });
+
+    it("should reject base64 image blocks without data instead of dropping them", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "image", source: { type: "base64", media_type: "image/png" } },
+                    ],
+                },
+            ],
+        };
+
+        expect(() => converter.convertRequest(anthropicReq)).toThrow(/source/);
+    });
+
+    it("should reject invalid image sources inside tool_result instead of dropping them", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool_use", id: "toolu_123", name: "read_image", input: {} },
+                    ],
+                },
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "tool_result",
+                            tool_use_id: "toolu_123",
+                            content: [
+                                { type: "image", source: { type: "file" } },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        expect(() => converter.convertRequest(anthropicReq)).toThrow(/source/);
     });
 
     it("should keep tool_result messages before multimodal user content", () => {
@@ -814,7 +877,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
 
         expect(events).toHaveLength(1);
         expect(events[0].event).toBe("message_start");
-        const parsedData = parseStreamEventData(events);
+        const parsedData = protocolConverterTestUtil.parseStreamEventData(events);
         expect(parsedData.type).toBe("message_start");
         expect(parsedData.message.role).toBe("assistant");
     });
@@ -837,8 +900,8 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
         }));
 
         expect(events.map((event) => event.event)).toEqual(["content_block_start", "content_block_delta"]);
-        const startData = parseStreamEventData(events, 0);
-        const deltaData = parseStreamEventData(events, 1);
+        const startData = protocolConverterTestUtil.parseStreamEventData(events, 0);
+        const deltaData = protocolConverterTestUtil.parseStreamEventData(events, 1);
         expect(startData.type).toBe("content_block_start");
         expect(deltaData.type).toBe("content_block_delta");
         expect(deltaData.delta.text).toBe("Hello");
@@ -862,8 +925,8 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
         }));
 
         expect(reasoningEvents.map((event) => event.event)).toEqual(["content_block_start", "content_block_delta"]);
-        expect(parseStreamEventData(reasoningEvents, 0).content_block.type).toBe("thinking");
-        expect(parseStreamEventData(reasoningEvents, 1).delta.thinking).toBe("thinking");
+        expect(protocolConverterTestUtil.parseStreamEventData(reasoningEvents, 0).content_block.type).toBe("thinking");
+        expect(protocolConverterTestUtil.parseStreamEventData(reasoningEvents, 1).delta.thinking).toBe("thinking");
 
         const textEvents = converter.convertStreamEvent(JSON.stringify({
             id: "chatcmpl-123",
@@ -878,8 +941,8 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
             "content_block_start",
             "content_block_delta",
         ]);
-        expect(parseStreamEventData(textEvents, 1).content_block.type).toBe("text");
-        expect(parseStreamEventData(textEvents, 2).delta.text).toBe("answer");
+        expect(protocolConverterTestUtil.parseStreamEventData(textEvents, 1).content_block.type).toBe("text");
+        expect(protocolConverterTestUtil.parseStreamEventData(textEvents, 2).delta.text).toBe("answer");
     });
 
     it("should convert tool call stream events", () => {
@@ -915,7 +978,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
         }));
 
         expect(startEvents.map((event) => event.event)).toEqual(["content_block_start"]);
-        const toolStart = parseStreamEventData(startEvents);
+        const toolStart = protocolConverterTestUtil.parseStreamEventData(startEvents);
         expect(toolStart.content_block).toMatchObject({
             type: "tool_use",
             id: "call_123",
@@ -945,7 +1008,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
         }));
 
         expect(argEvents.map((event) => event.event)).toEqual(["content_block_delta"]);
-        const toolDelta = parseStreamEventData(argEvents);
+        const toolDelta = protocolConverterTestUtil.parseStreamEventData(argEvents);
         expect(toolDelta.delta).toEqual({
             type: "input_json_delta",
             partial_json: "{\"location\"",
@@ -989,7 +1052,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
 
         // Should have content_block_start with name "Bash"
         expect(startEvents1.map((e) => e.event)).toEqual(["content_block_start"]);
-        const startData1 = parseStreamEventData(startEvents1, 0);
+        const startData1 = protocolConverterTestUtil.parseStreamEventData(startEvents1, 0);
         expect(startData1.content_block.type).toBe("tool_use");
         expect(startData1.content_block.name).toBe("Bash");
         expect(startData1.content_block.id).toBe("chatcmpl-tool-xxx");
@@ -1020,7 +1083,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
 
         // Should NOT create another content_block_start, only input_json_delta
         expect(startEvents2.map((e) => e.event)).toEqual(["content_block_delta"]);
-        const deltaData2 = parseStreamEventData(startEvents2, 0);
+        const deltaData2 = protocolConverterTestUtil.parseStreamEventData(startEvents2, 0);
         expect(deltaData2.delta.type).toBe("input_json_delta");
         expect(deltaData2.delta.partial_json).toBe('{"command": "ls"}');
 
@@ -1050,7 +1113,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
 
         // Should still NOT create another content_block_start
         expect(startEvents3.map((e) => e.event)).toEqual(["content_block_delta"]);
-        const deltaData3 = parseStreamEventData(startEvents3, 0);
+        const deltaData3 = protocolConverterTestUtil.parseStreamEventData(startEvents3, 0);
         expect(deltaData3.delta.type).toBe("input_json_delta");
         expect(deltaData3.delta.partial_json).toBe(" doc");
     });
@@ -1095,10 +1158,10 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
         const doneEvents = converter.convertStreamEvent("[DONE]");
 
         expect(doneEvents.map((event) => event.event)).toEqual(["message_delta", "message_stop"]);
-        expect(parseStreamEventData(doneEvents, 0).type).toBe("message_delta");
-        expect(parseStreamEventData(doneEvents, 0).usage.input_tokens).toBe(15);
-        expect(parseStreamEventData(doneEvents, 0).usage.output_tokens).toBe(5);
-        expect(parseStreamEventData(doneEvents, 1).type).toBe("message_stop");
+        expect(protocolConverterTestUtil.parseStreamEventData(doneEvents, 0).type).toBe("message_delta");
+        expect(protocolConverterTestUtil.parseStreamEventData(doneEvents, 0).usage.input_tokens).toBe(15);
+        expect(protocolConverterTestUtil.parseStreamEventData(doneEvents, 0).usage.output_tokens).toBe(5);
+        expect(protocolConverterTestUtil.parseStreamEventData(doneEvents, 1).type).toBe("message_stop");
     });
 
     it("should normalize input_tokens to non-cached in deferred usage chunk", () => {
@@ -1120,7 +1183,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
             },
         }));
         const doneEvents2 = converter2.convertStreamEvent("[DONE]");
-        const usageDelta = parseStreamEventData(doneEvents2, 0);
+        const usageDelta = protocolConverterTestUtil.parseStreamEventData(doneEvents2, 0);
         expect(usageDelta.usage.input_tokens).toBe(100);
         expect(usageDelta.usage.output_tokens).toBe(50);
         expect(usageDelta.usage.cache_read_input_tokens).toBe(900);
@@ -1145,7 +1208,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
         }));
 
         const events = converter.convertStreamEvent("[DONE]");
-        const messageDelta = parseStreamEventData(events, 0);
+        const messageDelta = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(events.map((event) => event.event)).toEqual(["message_delta", "message_stop"]);
         expect(messageDelta.delta.stop_reason).toBe("tool_use");
         expect(messageDelta.usage.output_tokens).toBe(20);
@@ -1166,7 +1229,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
             },
         }));
         const events = converter2.convertStreamEvent("[DONE]");
-        const messageDelta = parseStreamEventData(events, 0);
+        const messageDelta = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(messageDelta.usage.input_tokens).toBe(20);
         expect(messageDelta.usage.output_tokens).toBe(30);
         expect(messageDelta.usage.cache_read_input_tokens).toBe(480);

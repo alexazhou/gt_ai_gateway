@@ -428,7 +428,7 @@ user: text
   - 图片从工具结果中取出，在所有连续 tool 消息输出完后，合并到一条 `user` 消息里
   - 如果工具结果只有图片没有文本，tool 消息的 `content` 为空字符串
 - 这样做的原因：OpenAI 的 `tool` 消息规范上只支持文本，图片只能通过 user 消息传入
-- Anthropic `image` 块缺少有效 `source` / `data` / `url` 时，该图片会被跳过，不会报错
+- Anthropic `image` 块缺少有效 `source` / `data` / `url` 时，转换直接返回 400，不会静默跳过图片
 
 **OpenAI → Anthropic**
 
@@ -437,7 +437,7 @@ user: text
   - 普通 URL → `{type:"image", source:{type:"url", url}}`
 - 纯文本 content 数组保持原样（两种协议的 text 块结构一致）
 - 缺少 `image_url.url` 或 data URL 不是 base64 形式时，转换直接返回 400，不会把非法请求体发给上游
-- OpenAI 的 `tool` 消息逐条转成 Anthropic user 消息；若 tool 结果后紧跟普通 user 内容，会形成连续 Anthropic user 消息，依赖上游自动合并连续同角色消息
+- OpenAI 的 `tool` 消息逐条转成 Anthropic user 消息；若 tool 结果后紧跟普通 user 内容，会合并到同一条 user 消息，不产生连续 user turn
 
 ### 8.2 请求转换：OpenAI → Anthropic
 
