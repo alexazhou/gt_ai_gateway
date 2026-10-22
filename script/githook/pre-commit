@@ -6,56 +6,15 @@ set -e
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 
 # ---- 1. Version consistency check ----
+# 口径唯一来源：script/verify_versions.sh（CI 的 docker.yml / tauri.yml 也调它）。
+# 这里不要再内联一份判定逻辑 —— 之前内联的版本漏了 tauri/src-tauri/Cargo.lock，
+# 结果「本地钩子 + CI 都绿，但锁文件里还是旧版本」。
 echo "[pre-commit] Checking version consistency..."
-
-PKG_VERSION=$(node -p "require('$ROOT_DIR/package.json').version")
-PKG_LOCK_VERSION=$(node -p "require('$ROOT_DIR/package-lock.json').version")
-FE_VERSION=$(node -p "require('$ROOT_DIR/frontend/package.json').version")
-FE_LOCK_VERSION=$(node -p "require('$ROOT_DIR/frontend/package-lock.json').version")
-TAURI_VERSION=$(node -p "require('$ROOT_DIR/tauri/package.json').version")
-TAURI_LOCK_VERSION=$(node -p "require('$ROOT_DIR/tauri/package-lock.json').version")
-TAURI_CONF_VERSION=$(node -p "require('$ROOT_DIR/tauri/src-tauri/tauri.conf.json').version")
-CARGO_VERSION=$(grep '^version' "$ROOT_DIR/tauri/src-tauri/Cargo.toml" | head -1 | sed 's/.*"\(.*\)"/\1/')
-
-ERRORS=()
-
-if [ "$PKG_VERSION" != "$PKG_LOCK_VERSION" ]; then
-    ERRORS+=("package.json ($PKG_VERSION) != package-lock.json ($PKG_LOCK_VERSION)")
-fi
-
-if [ "$PKG_VERSION" != "$FE_VERSION" ]; then
-    ERRORS+=("package.json ($PKG_VERSION) != frontend/package.json ($FE_VERSION)")
-fi
-
-if [ "$FE_VERSION" != "$FE_LOCK_VERSION" ]; then
-    ERRORS+=("frontend/package.json ($FE_VERSION) != frontend/package-lock.json ($FE_LOCK_VERSION)")
-fi
-
-if [ "$PKG_VERSION" != "$TAURI_VERSION" ]; then
-    ERRORS+=("package.json ($PKG_VERSION) != tauri/package.json ($TAURI_VERSION)")
-fi
-
-if [ "$TAURI_VERSION" != "$TAURI_LOCK_VERSION" ]; then
-    ERRORS+=("tauri/package.json ($TAURI_VERSION) != tauri/package-lock.json ($TAURI_LOCK_VERSION)")
-fi
-
-if [ "$PKG_VERSION" != "$TAURI_CONF_VERSION" ]; then
-    ERRORS+=("package.json ($PKG_VERSION) != tauri.conf.json ($TAURI_CONF_VERSION)")
-fi
-
-if [ "$PKG_VERSION" != "$CARGO_VERSION" ]; then
-    ERRORS+=("package.json ($PKG_VERSION) != Cargo.toml ($CARGO_VERSION)")
-fi
-
-if [ ${#ERRORS[@]} -gt 0 ]; then
-    echo "❌ Version mismatch:"
-    for err in "${ERRORS[@]}"; do
-        echo "   $err"
-    done
+if ! bash "$ROOT_DIR/script/verify_versions.sh"; then
+    echo ""
+    echo "❌ Version mismatch detected! Commit blocked."
     exit 1
 fi
-
-echo "✅ Version consistent: $PKG_VERSION"
 
 # ---- 2. Commit message check (claude) ----
 COMMIT_MSG_FILE="$ROOT_DIR/.git/COMMIT_MSG"
