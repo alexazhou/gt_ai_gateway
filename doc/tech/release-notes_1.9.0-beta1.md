@@ -110,7 +110,7 @@
 |---|---|---|
 | 类型检查 | `npx tsc --noEmit` | exit 0 |
 | Node 全量 | `npm run test:locked` | **140 文件 / 1456 passed + 3 skipped (1459)**，exit 0（批次5 新增 10 个用例文件 / 65 例后） |
-| Worker 全量 | `npm run test:locked:worker` | **96 文件 / 1147 passed + 1 skipped**，exit 0（批次5 新增用例的 worker 侧已单文件复跑绿；P2-27/P2-02 修完后需整体复跑一次） |
+| Worker 全量 | `npm run test:locked:worker` | **107 文件 / 1215 passed + 1 skipped (1216)**，exit 0（批次5 新增用例后；唯一 skipped 是 P2-27 的幂等用例，等修复后打开） |
 | 覆盖率 | `npm run test:locked:coverage` | stmts **65.31** / branch **57.45** / funcs **68.28** / lines **65.53**，地板已抬到 **60/52/60/60**，exit 0 |
 
 > 覆盖率提升不是靠补入口文件：新增的两个**进程内**用例（`tests/api/inprocess/adminRoutes.test.ts` 打 14 条只读管理端链路、`tests/unit/entry/spaFallback.test.ts` 驱动 index.ts 的 fallback）让 routes/controllers/middleware 的进程内计数从 0% 起来，lines 57.84% → 65.53%。
