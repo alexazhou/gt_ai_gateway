@@ -170,7 +170,7 @@ async function listIdsByTenant(tenantId: number): Promise<number[]> {
  * start_at 经 model datetime cast（dayjs local）写入该格式；raw query 绑定 Date 会存成 epoch 毫秒，
  * 两者混比会因 SQLite TEXT/NUMERIC 排序规则失真，因此查询必须用同格式字符串比较。
  */
-function formatDbDatetime(d: Date): string {
+export function formatDbDatetime(d: Date): string {
     const p = (n: number) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }

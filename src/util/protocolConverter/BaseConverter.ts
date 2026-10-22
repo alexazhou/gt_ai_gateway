@@ -1,4 +1,5 @@
 import customError from "../../customError";
+import { FailedCode } from "../../constants";
 import type { ProtocolStreamEvent } from "../protocol/commonTypes";
 
 export abstract class BaseConverter {
@@ -31,10 +32,17 @@ export abstract class BaseConverter {
             const converted = this.convertRequest(bodyJson);
             return JSON.stringify(converted);
         } catch (e) {
-            if (e instanceof customError.AppError) throw e;
+            // 转换器自己抛的 AppError（如"不支持的内容块类型"）保留文案与状态码，
+            // 但要补上 failed_code，避免终态失败在记录里被糊成 unknown_error。
+            if (e instanceof customError.AppError) {
+                if (e.failedCode) throw e;
+                throw new customError.AppError(e.message, e.statusCode, e.code, FailedCode.CONVERSION_ERROR);
+            }
             throw new customError.AppError(
                 `Protocol conversion failed: ${e instanceof Error ? e.message : String(e)}`,
                 400,
+                undefined,
+                FailedCode.CONVERSION_ERROR,
             );
         }
     }

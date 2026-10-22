@@ -114,14 +114,24 @@ async function update(recordId: number, data: RecordUpdateData) {
 
     // response_data 存在对象存储，写入表前先落存储
     if (Object.prototype.hasOwnProperty.call(data, "response_data")) {
-        if (await isPayloadRecordingEnabled()) {
-            const payload = await readPayload(recordId);
-            payload.response = data.response_data ?? null;
-            await writePayload(recordId, payload);
-        }
+        await storeResponsePayload(recordId, data.response_data ?? null);
     }
 
     return recordManager.update(recordId, data);
+}
+
+/**
+ * 只把响应体写进对象存储（不写 record 表）。
+ * 供"结算写表走原子批处理"的路径复用：对象存储写入是幂等的，放在事务之前完成，
+ * 事务内只保留必须一起生效的跨表 UPDATE（见 billingSettlementService）。
+ */
+async function storeResponsePayload(recordId: number, response: string | null): Promise<void> {
+    if (!(await isPayloadRecordingEnabled())) {
+        return;
+    }
+    const payload = await readPayload(recordId);
+    payload.response = response;
+    await writePayload(recordId, payload);
 }
 
 async function latest(limit: number = 10, summaryOnly: boolean = false, tenantId?: number) {
@@ -220,6 +230,7 @@ async function recordFailedRequest(
 export default {
     create,
     update,
+    storeResponsePayload,
     latest,
     markFailed,
     recordFailedRequest,

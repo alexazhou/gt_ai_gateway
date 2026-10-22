@@ -15,6 +15,8 @@ export enum FailedCode {
     UPSTREAM_ERROR = "upstream_error",
     // 网关解析上游 SSE 流失败（上游返回的内容不符合协议，无法解析）
     SSE_PARSE_ERROR = "sse_parse_error",
+    // 协议转换失败（请求侧：客户端请求无法转成上游格式；响应侧：上游响应无法转成客户端格式）
+    CONVERSION_ERROR = "conversion_error",
     NO_AVAILABLE_UPSTREAM = "no_available_upstream",
     INSUFFICIENT_BALANCE = "insufficient_balance",
     // 上游在响应头/响应体阶段僵死（长时间无数据），触发超时兜底
