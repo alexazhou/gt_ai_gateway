@@ -2,6 +2,7 @@ import { SgRecord, RECORD_SUMMARY_COLUMNS } from "../model/sgRecord";
 import { SgRecordStatus, FailedCode, RequestActivityStage, ActivityLevel } from "../constants";
 import billingUtil from "../util/protocolUtil/billingUtil";
 import requestActivityService from "../service/requestActivityService";
+import ormService from "../service/ormService";
 import type { TenantScope } from "../middleware/tenantScopeMiddleware";
 
 interface RecordListOptions {
@@ -181,30 +182,68 @@ export function formatDbDatetime(d: Date): string {
  * start_at 距现在超过 thresholdMs）统一标 FAILED + recovered_orphan，并追加 RESULT 活动。
  * 返回回收条数。
  */
+// 单批回收条数：SQLite 的变量上限是 999，200 条 × 3 个参数还有余量，也不至于一条语句太大
+const RECOVER_ORPHAN_BATCH = 200;
+
+
+/**
+ * 回收孤儿记录（P2-10）。
+ *
+ * 原实现是「一次查全 + 逐行 update + 逐行 append 活动」，每行 2 次写：
+ * 孤儿多的时候（比如一次 Worker 重启留下几百条 processing）等于几百轮串行往返，
+ * 既慢又容易在 D1 上触发写限流。现在改为「分页查 + 单条批量 UPDATE + 活动并行写」。
+ */
 async function recoverOrphans(thresholdMs: number, tenantId?: number): Promise<number> {
     const cutoff = formatDbDatetime(new Date(Date.now() - thresholdMs));
-    const q = SgRecord.query()
-        .whereIn("status", [SgRecordStatus.INIT, SgRecordStatus.PROCESSING])
-        .whereNull("end_at")
-        .where("start_at", "<", cutoff);
-    if (tenantId !== undefined) {
-        q.where("tenant_id", tenantId);
-    }
-    const orphans = await q.get();
-    const rows = orphans.all();
+    const seen = new Set<number>();
+    let recovered = 0;
 
-    for (const row of rows) {
-        await update(Number(row.id), {
-            status: SgRecordStatus.FAILED,
-            failed_code: FailedCode.RECOVERED_ORPHAN,
-            end_at: new Date(),
-        });
-        await requestActivityService.append(Number(row.id), RequestActivityStage.RESULT, "孤儿记录回收", {
-            status: SgRecordStatus.FAILED,
-            failed_code: FailedCode.RECOVERED_ORPHAN,
-        }, ActivityLevel.WARN);
+    for (;;) {
+        const q = SgRecord.query()
+            .whereIn("status", [SgRecordStatus.INIT, SgRecordStatus.PROCESSING])
+            .whereNull("end_at")
+            .where("start_at", "<", cutoff)
+            .limit(RECOVER_ORPHAN_BATCH);
+        if (tenantId !== undefined) {
+            q.where("tenant_id", tenantId);
+        }
+        const rows = (await q.get()).all();
+
+        // 过滤掉本函数已经处理过的 id：UPDATE 若因并发/事务可见性没生效，也不会死循环
+        const ids: number[] = [];
+        for (const row of rows) {
+            const id = Number(row.id);
+            if (!seen.has(id)) {
+                seen.add(id);
+                ids.push(id);
+            }
+        }
+        if (ids.length === 0) {
+            break;
+        }
+
+        const placeholders = ids.map(() => "?").join(", ");
+        const now = formatDbDatetime(new Date());
+        await ormService.dbAdapter
+            .prepare(`UPDATE record SET status = ?, failed_code = ?, end_at = ? WHERE id IN (${placeholders})`)
+            .run(SgRecordStatus.FAILED, FailedCode.RECOVERED_ORPHAN, now, ...ids);
+
+        // 活动日志是读改写的 JSON 列，无法单条语句批量写；改为并行（内部 best-effort，单条失败不影响其它）
+        await Promise.all(ids.map(id => requestActivityService.append(
+            id,
+            RequestActivityStage.RESULT,
+            "孤儿记录回收",
+            { status: SgRecordStatus.FAILED, failed_code: FailedCode.RECOVERED_ORPHAN },
+            ActivityLevel.WARN,
+        )));
+
+        recovered += ids.length;
+        if (rows.length < RECOVER_ORPHAN_BATCH) {
+            break;
+        }
     }
-    return rows.length;
+
+    return recovered;
 }
 
 export { RecordUpdateData };

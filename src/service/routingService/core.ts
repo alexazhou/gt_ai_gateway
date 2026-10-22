@@ -148,24 +148,48 @@ async function resolveAvailableCandidates(
         throw new customError.AppError(`No enabled upstream for model ${model.name}`, 503);
     }
 
+    // P2-09 批量化：原来每个上游 1 次 vendor 查询 + 1~2 次 vendor_model 查询，
+    // 一个模型配 5 个上游就是 10+ 次往返（D1 上每次都是一个 HTTP 级 round trip）。
+    // 改成 3 条查询一次性取全，再在内存里按 id / (vendor_id, model_id) 命中。
+    const vendorIds = [...new Set(upstreams.map(upstream => upstream.vendor_id))];
+    const vendorMap = new Map((await vendorManager.getByIds(vendorIds)).map(vendor => [vendor.id, vendor]));
+
+    // 显式绑定的 vendor_model：按 id 批量取
+    const explicitVendorModelIds = [
+        ...new Set(upstreams.map(upstream => upstream.vendor_model_id).filter((id): id is number => typeof id === "number")),
+    ];
+    const explicitVendorModelMap = new Map(
+        (await vendorModelManager.getByIds(explicitVendorModelIds)).map(vendorModel => [vendorModel.id, vendorModel]),
+    );
+
+    // 按模型名隐式绑定（非 LOAD_BALANCE 且上游没指定 vendor_model_id）：按 vendor 批量取同名记录
+    const needsNameBinding = model.routing_mode !== ModelRoutingMode.LOAD_BALANCE;
+    const nameBoundVendorIds = needsNameBinding
+        ? [...new Set(upstreams.filter(upstream => !upstream.vendor_model_id).map(upstream => upstream.vendor_id))]
+        : [];
+    const nameBoundMap = new Map(
+        (await vendorModelManager.listByVendorsAndModel(nameBoundVendorIds, model.name ?? null))
+            .map(vendorModel => [`${vendorModel.vendor_id}:${vendorModel.model_id}`, vendorModel]),
+    );
+
     const candidates: ModelRoutingResult[] = [];
     const skipped: string[] = [];
     for (const upstream of upstreams) {
-        const vendor = await vendorManager.findById(upstream.vendor_id);
+        const vendor = vendorMap.get(upstream.vendor_id);
         if (!vendor) {
             skipped.push(`vendor ${upstream.vendor_id} not found`);
             continue;
         }
 
         let vendorModel = upstream.vendor_model_id
-            ? await vendorModelManager.findById(upstream.vendor_model_id)
+            ? explicitVendorModelMap.get(upstream.vendor_model_id) ?? null
             : null;
         if (upstream.vendor_model_id && !vendorModel) {
             skipped.push(`vendor ${upstream.vendor_id}: vendor model ${upstream.vendor_model_id} not found`);
             continue;
         }
-        if (!upstream.vendor_model_id && model.routing_mode !== ModelRoutingMode.LOAD_BALANCE) {
-            vendorModel = await vendorModelManager.findByVendorAndModel(upstream.vendor_id, model.name);
+        if (!upstream.vendor_model_id && needsNameBinding) {
+            vendorModel = nameBoundMap.get(`${upstream.vendor_id}:${model.name ?? ""}`) ?? null;
         }
         if (vendorModel && vendorModel.vendor_id !== upstream.vendor_id) {
             skipped.push(`vendor ${upstream.vendor_id}: vendor model ${vendorModel.id} belongs to another vendor`);
@@ -174,7 +198,7 @@ async function resolveAvailableCandidates(
 
         // 请求路径只读：vendor_model 的补建已挪到 model 创建/更新时（ensureVendorModels）。
         // 这里查不到就当该候选不可用——正常流程下不应该发生，发生了就是配置漂移，需要去做一次配置保存。
-        if (!vendorModel && !upstream.vendor_model_id && model.routing_mode !== ModelRoutingMode.LOAD_BALANCE) {
+        if (!vendorModel && !upstream.vendor_model_id && needsNameBinding) {
             skipped.push(
                 `vendor ${upstream.vendor_id}: model ${model.name} is not configured on this vendor (re-save the model to auto-provision)`,
             );

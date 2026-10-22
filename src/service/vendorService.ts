@@ -223,7 +223,7 @@ export async function fetchUpstreamModels(vendor: SgVendor): Promise<string[]> {
 
         return models;
     } catch (err) {
-        if (err instanceof customError.AppError) throw err;
+        if (customError.isAppError(err)) throw err;
         // 超时/网络错误统一成可读文案；不把底层错误详情（可能含 URL/代理地址）透给客户端
         if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
             throw new customError.AppError(`Failed to fetch models: upstream timeout (${UPSTREAM_MODELS_TIMEOUT_MS}ms)`, 504);

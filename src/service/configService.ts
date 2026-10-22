@@ -27,6 +27,8 @@ const CONFIG_DEFAULTS: Record<string, string> = {
     [ConfigKey.ORPHAN_RECOVER_THRESHOLD_MS]: "600000",
     // 多租户隔离默认关闭（存量单租户部署迁移后行为与迁移前一致）
     [ConfigKey.MULTI_TENANT_ENABLED]: "false",
+    // LLM 请求体上限（P2-03）：32MB，0 = 不限
+    [ConfigKey.LLM_MAX_BODY_BYTES]: "33554432",
 };
 
 /** 多租户隔离是否开启（false = 逻辑单租户，所有请求固定 main） */

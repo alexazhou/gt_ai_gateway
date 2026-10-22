@@ -1,22 +1,41 @@
 import { Context, MiddlewareHandler } from "hono";
-import { ApiFormat, FailedCode, UserStatus } from "../constants";
+import { ApiFormat, ConfigKey, FailedCode, UserStatus } from "../constants";
 import userService from "../service/userService";
 import llmRequestService from "../service/llmRequestService";
 import recordService from "../service/recordService";
 import ruleService from "../service/ruleService";
 import { SgUser } from "../model/sgUser";
 import customError from "../customError";
+import configService from "../service/configService";
 import { resolveScopeForUser } from "./tenantScopeMiddleware";
 
 
 /**
- * LLM 请求体上限 32MB（P2-03）。
+ * LLM 请求体上限（P2-03），默认 32MB，配置项 `llm_max_body_bytes`（0 = 不限）。
  *
  * 原实现直接 `c.req.text()` 无上限：一个几百 MB 的 body 会把 Worker 内存吃光（128MB 直接 OOM/1102），
- * 或在 node 侧把内存拖崩。这里先看 Content-Length 快速拒绝，读进来后再兜底校验一次
- * （Content-Length 可缺失/可伪造，分块传输时也可能没有）。
+ * 或在 node 侧把内存拖崩。这里先看 Content-Length 快速拒绝（不读 body 就回 413），
+ * 读进来后再按实读长度兜底一次（分块传输不带头，或头与实际不一致）。
  */
-const MAX_LLM_BODY_BYTES = 32 * 1024 * 1024;
+export function resolveBodyLimitViolation(
+    declaredContentLength: string | undefined,
+    actualBodyLength: number,
+    limitBytes: number,
+): "declared_length" | "actual_length" | null {
+    // 0 = 不限
+    if (!limitBytes || limitBytes <= 0) {
+        return null;
+    }
+    // 注意：content-length 缺失时 Number("") 是 0、Number(undefined) 是 NaN，都不该当成超限
+    const declared = Number(declaredContentLength ?? "");
+    if (declaredContentLength !== undefined && Number.isFinite(declared) && declared > limitBytes) {
+        return "declared_length";
+    }
+    if (actualBodyLength > limitBytes) {
+        return "actual_length";
+    }
+    return null;
+}
 
 
 function extractLlmToken(c: Context): string {
@@ -86,14 +105,17 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
         const scope = await resolveScopeForUser(user, c.req.header("X-Tenant-ID"));
         c.set("tenantScope", scope);
 
-        const declaredLength = Number(c.req.header("content-length") ?? "");
-        if (Number.isFinite(declaredLength) && declaredLength > MAX_LLM_BODY_BYTES) {
+        const bodyLimit = await configService.getNumber(ConfigKey.LLM_MAX_BODY_BYTES);
+
+        // 快速路径：头部已超限就不读 body
+        if (resolveBodyLimitViolation(c.req.header("content-length"), 0, bodyLimit)) {
             throw new customError.AppError("Request body too large", 413, "invalid_request_error");
         }
 
         const body = await c.req.text();
-        // 兜底：Content-Length 缺失（chunked）时按实读长度再判一次（字符数 ≤ 字节数，只会漏判不会误判）
-        if (body.length > MAX_LLM_BODY_BYTES) {
+        // 兜底：Content-Length 缺失（chunked）或与实读不一致时按实读长度再判一次
+        // （按字符数比，字符数 ≤ 字节数，只会漏判不会误判）
+        if (resolveBodyLimitViolation(undefined, body.length, bodyLimit)) {
             throw new customError.AppError("Request body too large", 413, "invalid_request_error");
         }
         const modelName = parseLlmRequestBody(body);
@@ -114,7 +136,7 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
         try {
             await ruleService.matchAndCheck(user, modelConfig, scope.tenantId, scope.mainTenantId);
         } catch (e) {
-            if (e instanceof customError.AccessDeniedError) {
+            if (customError.isAppError(e, "AccessDeniedError")) {
                 await recordService.recordFailedRequest(
                     user.id,
                     modelConfig.name,
@@ -126,7 +148,7 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
                     { rule_id: e.ruleId, rule_name: e.ruleName },
                     scope.tenantId,
                 );
-            } else if (e instanceof customError.RateLimitError) {
+            } else if (customError.isAppError(e, "RateLimitError")) {
                 await recordService.recordFailedRequest(
                     user.id,
                     modelConfig.name,

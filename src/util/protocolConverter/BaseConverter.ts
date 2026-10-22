@@ -34,7 +34,7 @@ export abstract class BaseConverter {
         } catch (e) {
             // 转换器自己抛的 AppError（如"不支持的内容块类型"）保留文案与状态码，
             // 但要补上 failed_code，避免终态失败在记录里被糊成 unknown_error。
-            if (e instanceof customError.AppError) {
+            if (customError.isAppError(e)) {
                 if (e.failedCode) throw e;
                 throw new customError.AppError(e.message, e.statusCode, e.code, FailedCode.CONVERSION_ERROR);
             }

@@ -7,6 +7,7 @@ import sender, { type UpstreamRequestSnapshot } from "../service/senderService";
 import userService from "../service/userService";
 import customError from "../customError";
 import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
+import inputSanitizeUtil from "../util/inputSanitizeUtil";
 import objectUtil from "../util/objectUtil";
 import protocolUtils from "../util/protocolUtil/protocolUtil";
 
@@ -55,7 +56,9 @@ function createModelFromRequest(body: unknown): SgModel {
         throw new customError.AppError("routing_mode and routing_config are required");
     }
 
-    return new SgModel(body as Record<string, unknown>);
+    // 剔除 __proto__ / constructor / prototype：它们会被 JSON.parse 解析成自有属性，
+    // 再进 Sutando 的 fill() 会命中原型链上的 casts 值 → TypeError → 500（P2-26）
+    return new SgModel(inputSanitizeUtil.stripUnsafeKeys(body as Record<string, unknown>));
 }
 
 

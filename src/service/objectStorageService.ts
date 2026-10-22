@@ -114,22 +114,36 @@ async function deleteByPrefixFromLocation(
 ): Promise<number> {
     if (location === RecordPayloadStorage.R2) {
         const bucket = getWorkerBucket();
-        let cursor: string | undefined;
-        const deleteBatches: string[][] = [];
         let deleted = 0;
+        let previousFirstKey: string | null = null;
 
-        do {
-            const page = await bucket.list({ cursor, limit: 1000, prefix });
+        // P2-13：原实现先把整批 key 全收进 deleteBatches 再删 —— 前缀下有几十万对象时
+        // 等于把 key 列表全驻留内存（Worker 128MB 很容易被顶爆）。
+        // 改为「每页立即删」：内存只驻留一页（≤1000 key）。
+        //
+        // 注意不要在「边删边用 cursor」的方式下推进：R2 的 list cursor 是基于当前页内容的位置游标，
+        // 删掉已列出的对象后再用旧 cursor 可能跳过或被判失效。这里每轮都从头部重新 list，
+        // 已删的对象不会再返回，天然收敛。
+        for (;;) {
+            const page = await bucket.list({ limit: 1000, prefix });
             const keys = page.objects.map(object => object.key);
-            if (keys.length > 0) {
-                deleteBatches.push(keys);
-                deleted += keys.length;
+            if (keys.length === 0) {
+                break;
             }
-            cursor = page.truncated ? page.cursor : undefined;
-        } while (cursor);
 
-        for (const keys of deleteBatches) {
+            // 防御：上一轮删掉的 key 这轮又回来了（删除没生效 / 一致性延迟），别死循环
+            if (previousFirstKey !== null && keys[0] === previousFirstKey) {
+                console.warn("[objectStorageService] deleteByPrefixFromLocation 未推进，提前结束：", prefix);
+                break;
+            }
+            previousFirstKey = keys[0];
+
             await bucket.delete(keys);
+            deleted += keys.length;
+
+            if (!page.truncated) {
+                break;
+            }
         }
 
         return deleted;

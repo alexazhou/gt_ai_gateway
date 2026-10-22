@@ -119,9 +119,10 @@ class ORMService {
      * 只有「拿到 client、赋值完成」才算成功，不再有静默分支。
      */
     private _updateD1Binding(db: any): void {
-        const instance = (sutando as any).getInstance();
-        // QueryBuilder 是 Proxy，通过 connector 访问 Knex 实例
-        const client = instance?.manager?.["default"]?.connector?.client;
+        // 取 Knex 实例走 sutando.connection().connector（与 getKnex() 同一路径）。
+        // 原实现走 getInstance().manager["default"].connector 这条路径在当前 sutando 版本下取不到 client，
+        // 被 try/catch 吞掉后这段逻辑其实一直是 no-op —— 跨请求 I/O 的保护此前根本没生效。
+        const client = this.getKnex()?.client;
         if (!client) {
             throw new Error(
                 "[ormService] 无法更新 D1 binding：sutando knex client 未就绪（跨请求 I/O 会失败，请检查 sutando 版本/内部结构）",
