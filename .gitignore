@@ -55,3 +55,7 @@ tauri/src-tauri/gen/schemas/windows-schema.json
 # coverage
 coverage/
 coverage-*.json
+
+# 本地测试用词表/密码表（脏数据，不入库）
+cn10k.txt
+fuzz_passwords.txt
