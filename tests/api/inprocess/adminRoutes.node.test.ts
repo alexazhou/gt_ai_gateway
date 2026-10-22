@@ -17,7 +17,10 @@ import { setupAdminUser } from "../../globalSetup";
  * CORS → dbMiddleware → 鉴权中间件 → controller → service，等于把主干链路的代码都纳进统计，
  * 同时还能断言 401/200 的口径。
  *
- * 注意：只做「只读主链路」，写链路（create/update）由各业务用例覆盖，避免这里造数据过多。
+ * 注意：
+ * 1. 只做「只读主链路」，写链路（create/update）由各业务用例覆盖，避免这里造数据过多。
+ * 2. 文件名带 `.node.test.ts`：本文件在测试进程内自行 `ormService.init(NODE, dbPath)` 连 sqlite，
+ *    worker 模式下库在 D1、进程内初始化会拿错库，故按仓库约定只在 node 配置里跑（worker 配置 exclude 该后缀）。
  */
 
 const ADMIN_TOKEN = "admin-token-for-test";
