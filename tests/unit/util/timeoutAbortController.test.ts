@@ -47,9 +47,9 @@ describe("TimeoutAbortController — 客户端断开 / 上游超时口径", () =
     /**
      * 缺陷看门狗（ISSUES.md P2-24）：`abortWith()` 没有"先到先得"守卫，
      * 客户端断开先到之后，后续到点的固定超时仍会把 `tagged` 改写成 UPSTREAM_TIMEOUT，
-     * 失败归因被污染。修好后本用例会转红，届时把 it.fails 改回 it。
+     * 失败归因被污染。（P2-24 已修：`abortWith()` 加先到先得守卫，本用例已从 it.fails 转正式断言。）
      */
-    it.fails("超时与断开竞争时，先到的一方赢（不会双写标记）", async () => {
+    it("超时与断开竞争时，先到的一方赢（不会双写标记）", async () => {
         const clientCtrl = new AbortController();
         const ctrl = new TimeoutAbortController(1000, clientCtrl.signal);
 

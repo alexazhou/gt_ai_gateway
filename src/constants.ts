@@ -143,6 +143,8 @@ export enum ConfigKey {
     UPSTREAM_NON_STREAM_TIMEOUT_MS = "upstream_non_stream_timeout_ms",
     // 流式相邻 chunk 空闲超时（默认 180s）
     UPSTREAM_STREAM_IDLE_TIMEOUT_MS = "upstream_stream_idle_timeout_ms",
+    // 流式响应总时长上限（默认 30 分钟，0 = 不限）：兜底防止记录长期停在 processing
+    STREAM_MAX_DURATION_MS = "stream_max_duration_ms",
     // 孤儿记录回收阈值，距 start_at 超过该值且未结束的记录视为孤儿（默认 10 分钟）
     ORPHAN_RECOVER_THRESHOLD_MS = "orphan_recover_threshold_ms",
     // 多租户隔离开关：false = 逻辑单租户（所有请求固定 main）；true = 完整多租户隔离

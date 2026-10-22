@@ -101,6 +101,43 @@ describe("CORS 中间件", () => {
         });
     });
 
+    describe("A5 Tauri scheme 精确匹配 / EXTRA_ALLOWED_ORIGINS 兜底", () => {
+        // 修复前 `origin.startsWith("tauri://")` 是 scheme 前缀放行，任意 tauri:// 域名都能过
+        it.each([
+            "tauri://evil.com",
+            "tauri://localhost.evil.example.com",
+            "tauri://localhost.evil.com/",
+        ])("%s 判定为不可信", (origin) => {
+            expect(corsMiddleware.isAllowedOrigin(origin)).toBe(false);
+        });
+
+        it("tauri://localhost 仍判定为可信（归一化不误伤）", () => {
+            expect(corsMiddleware.isAllowedOrigin("tauri://localhost")).toBe(true);
+            expect(corsMiddleware.isAllowedOrigin("  TAURI://LocalHost/  ")).toBe(true);
+        });
+
+        it("EXTRA_ALLOWED_ORIGINS 可追加可信源，删除后立即失效", () => {
+            const previous = process.env.EXTRA_ALLOWED_ORIGINS;
+            try {
+                process.env.EXTRA_ALLOWED_ORIGINS = "https://admin.example.com, https://ops.example.com/";
+                expect(corsMiddleware.isAllowedOrigin("https://admin.example.com")).toBe(true);
+                expect(corsMiddleware.isAllowedOrigin("https://ops.example.com")).toBe(true);
+                // 只认精确串，不做前缀/子域放行
+                expect(corsMiddleware.isAllowedOrigin("https://admin.example.com.evil.com")).toBe(false);
+                expect(corsMiddleware.isAllowedOrigin("https://another.example.com")).toBe(false);
+            } finally {
+                if (previous === undefined) {
+                    delete process.env.EXTRA_ALLOWED_ORIGINS;
+                } else {
+                    process.env.EXTRA_ALLOWED_ORIGINS = previous;
+                }
+            }
+
+            // 未设 env 时默认行为不变
+            expect(corsMiddleware.isAllowedOrigin("https://admin.example.com")).toBe(false);
+        });
+    });
+
     describe("A4 无 Origin", () => {
         it("非浏览器客户端（无 Origin）不回 ACAO 头，也不被中间件拒绝", async () => {
             const response = await requestHelper.request(CHAT_ENDPOINT, {
