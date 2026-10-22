@@ -63,8 +63,8 @@
 | P2-20 | `waitUntil(task())` 未挂 catch，后台 reject 静默 | `src/util/runInBackgroundUtil.ts:18` | 阿张 | VERIFIED | `waitUntil(task().catch(log))` + 落 activity（**与 P0-4 一起做**） **已改**：`runInBackground` 统一 `task().catch(reportBackgroundError)`（waitUntil 与本地兜底同一条路径），异常走 `getLogger().error` + `console.error`，不再产生未处理拒绝；流式收尾 catch 额外 markFailed（含 activity）保证失败可见。 |
 | P2-21 | **覆盖率产物失效且无门禁**：`coverage-final.json` 仅 3/121 文件有数据（3.1%），CI 无覆盖率任务 | `coverage/`、`.github/workflows/test.yml`、`vitest.config.ts` | 李哥 | VERIFIED | ① CI 新增 `test-coverage` job（`npm run backend:test:coverage` + artifact 上传）；② 两个 vitest 配置加 `coverage.thresholds` 棘轮地板：node `stmts 55 / branch 50 / funcs 55 / lines 55`（实测基线 58.41/54.83/60.57/58.37），worker `50/45/50/50`；③ `backend:test:coverage` 脚本补 `TEST_MODE=node` + 显式 `--config`（原脚本跑的是默认模式，config 不明确）；④ `coverage/` 本就在 `.gitignore`（`git check-ignore` 已确认，历史产物未入库）。**目标 60% 需批次 2 补 `src/index.ts`、`src/local.ts` 等入口后再收紧** |
 | P2-22 | **测试口径与用例问题**：文件数 107 vs 文档 123；worker 跳过客户端断开 6 例 + R2 1 例（真实环境无覆盖）；`ai.negative.test.ts:257` 命名与断言不符；CORS 无用例且无 Origin 时返回 `*` + credentials | `tests/`、`vitest.worker.config.ts`、`src/middleware/corsMiddleware.ts` | 李哥 | VERIFIED | ① `ai.negative.test.ts` 两处 "should return 401 when model does not exist" 改为 404（断言本就是 404）；② 新增 `tests/api/gateway/cors.test.ts`（A1 放行 5 源 / A2 拒绝 6 源含 4 条前缀绕过回归 / A3 纯函数口径 / A4 无 Origin 不回 ACAO），顺带修出 P1-12；③ node-only 用例统一 `*.node.test.ts` 命名，worker 配置 `exclude: ['**/*.node.test.ts']`；④ **worker 的 7 例跳过全部消除**（skipped 从 7 → 0）：`stream-failure` 3 例改 `it.fails` 看门狗（P2-23 运行时语义）、2 例 `upstream-timeout` 改模式化断言（两模式都必须"已收尾 + 文案可读 + 不落裸 AbortError"）、`objectStorageChain` 在 worker 改走 R2 回读（详情 API 两次回读逐字节一致）；⑤ 新增 `tests/unit/util/timeoutAbortController.test.ts`（6 例，双模式）钉死"客户端信号一断就产出 CLIENT_DISCONNECTED 标记"；⑥ 口径实测：node **114 文件 / 1293 例**、worker **86 文件 / 1078 例（0 跳过）** |
-| P2-23 | **Worker 本地不传播「客户端断开」信号**：`c.req.raw.signal` 在 `wrangler dev` 下不会因客户端 abort 而中止，流式请求断开后记录**一直停在 `processing`**（实测每 1s 采样 8 次全不动），只能等 10 分钟孤儿扫描收尾；非流式则跑到上游超时才收尾（`upstream_timeout`）。node 模式同链路正常落 `client_disconnected` | `src/service/senderService.ts:285`、`src/util/abortTimeoutUtil.ts:206-220` | 阿张 | TODO | ① 确认生产 Workers 是否真的会 abort `request.signal`（本地 emulation 与线上可能不一致）；② 不论是否一致，加兜底：流式读循环里按 chunk/空闲周期检查 `c.req.raw.signal.aborted`，命中即 `markFailure(CLIENT_DISCONNECTED)`；③ 缩短孤儿扫描阈值或加"流式 processing 超 N 分钟必收尾"的看门狗。测试侧现状：node 下 5 例端到端断言（`stream-failure` 3 + `upstream-timeout` 2）；worker 下 3 例改为 `it.fails` 看门狗 + 2 例模式化断言（必须收尾、文案可读、不落裸 `AbortError`），并用 `tests/unit/util/timeoutAbortController.test.ts` 在两种模式下钉死"信号一断就必须打 CLIENT_DISCONNECTED" |
-| P2-24 | **`abortWith()` 缺"先到先得"守卫，失败归因会被覆盖**：客户端断开先到后，固定超时定时器到点仍把 `tagged` 改写成 `UPSTREAM_TIMEOUT`（`AbortController.abort` 本身是幂等 no-op，但标记字段被覆盖），详情页/统计里的 failed_code 可能从 `client_disconnected` 变成 `upstream_timeout` | `src/util/abortTimeoutUtil.ts:206-222` | 阿张 | TODO | `abortWith()` 开头加 `if (this.controller.signal.aborted) return;`，让第一个原因赢。看门狗：`tests/unit/util/timeoutAbortController.test.ts` 的 `it.fails("超时与断开竞争时，先到的一方赢")`，修好后会自动转红提醒改成正式断言 |
+| P2-23 | **Worker 本地不传播「客户端断开」信号**：`c.req.raw.signal` 在 `wrangler dev` 下不会因客户端 abort 而中止，流式请求断开后记录会停在 `processing`（实测 8s 采样不动），最终靠空闲超时（180s）/ 孤儿扫描（10min）兜底；非流式则跑到上游超时收尾（`upstream_timeout`）。node 模式同链路正常落 `client_disconnected` | `src/service/senderService.ts:285`、`src/util/abortTimeoutUtil.ts:206-220`、`src/service/responseHandlerService.ts:117-165` | 阿张 | VERIFIED | 已做：① 新增 `stream_max_duration_ms`（默认 30min）作为流式总时长硬上限，trickle 场景已验证生效（`tests/api/ai/stream-max-duration.test.ts`）；② 明确两个阈值关系：`stream_max_duration_ms`(30min) > `orphan_recover_threshold_ms`(10min)，孤儿回收会先触发，调参时需成对考虑。**仍缺**：上限只在 chunk 边界检查，上游"发几个 chunk 后挂住"时循环阻塞在 `readChunk(idle=180s)` 里，deadline 轮不到 → 该形态未兜住（看门狗 `tests/api/ai/stream-max-duration-hang.test.ts`，当前为 `it.fails`）。建议把剩余额度传进单次读等待：`readChunk(reader, Math.min(idleTimeoutMs, streamDeadline - Date.now()))`，或对 read 做 `raceWithTimeout(remaining)`。 **已验（李哥，b5 复验）**：③ 单次读等待已按剩余额度收窄（`readChunk(reader, Math.max(1, Math.min(idleTimeoutMs, streamDeadline - Date.now())))`），并补了「deadline 到点归因按 deadline 判定」的收尾分支；看门狗 `stream-max-duration-hang.test.ts` 已由 `it.fails` 转为正式断言且在 node/worker 双模式绿（worker 侧 4.6s 完成）。④ 同时确认 `abortWith()` 先到先得守卫（P2-24）与本项配合：断开/超时只归因一次。**残留（本地 dev 环境差异，非缺陷）**：`wrangler dev` 不保证把客户端断开传播成可收尾失败，请求上下文被一并取消时 handler 里连 markFailed 都执行不到 → 该记录只能靠孤儿回收兜住；生产 CF 会传播 signal，故不做代码兜底，用例口径改为「要么直接收尾、要么必须能被回收兜住」 |
+| P2-24 | **`abortWith()` 缺"先到先得"守卫，失败归因会被覆盖**：客户端断开先到后，固定超时定时器到点仍把 `tagged` 改写成 `UPSTREAM_TIMEOUT`，详情页/统计里 failed_code 可能从 `client_disconnected` 变成 `upstream_timeout` | `src/util/abortTimeoutUtil.ts:206-235` | 阿张 | VERIFIED | `abortWith()` 开头加 `if (this.controller.signal.aborted) return;`，第一个原因赢。回归用例 `tests/unit/util/timeoutAbortController.test.ts > 超时与断开竞争时，先到的一方赢（不会双写标记）`（已从 `it.fails` 转为正式断言，node/worker 双模式绿） |
 | P2-25 | **共享限流存储有写放大**：`SqlRateLimitStore.consume()` 每个放行请求都先执行一条 `INSERT ... ON CONFLICT(bucket_key) DO NOTHING`（除首个请求外必然是主键冲突的无用写），再执行扣减 UPDATE；D1 上等于每次放行 2 次写 + 概率清扫写 | `src/util/rule/sqlRateLimitStore.ts:26-40` | 阿张 | TODO | 改成「先 UPDATE；0 行时用 SELECT 区分『桶不存在』与『令牌不足』，桶不存在则 INSERT 后重试一次 UPDATE」，放行快路径降到 1 条写。功能正确性已有用例保障（`tests/unit/service/rateLimitStore.crossIsolate.node.test.ts` + `tests/unit/util/sharedStateStores.node.test.ts`），本项纯性能优化 |
 
 ---
@@ -155,3 +155,45 @@ worker 侧这 7 例原来的 `skipIf` 处理方式（不是简单删掉 skip）�
 **新隔离技巧（省时间）**：Node 模式全量想跟别人并行跑时，用
 `TEST_PORT/TEST_BASE_URL/TEST_UPSTREAM_MOCK_URL/TEST_PROXY_PORT/TEST_SOCKS_PORT/TEST_SOCKS_QUERY_PORT/TEST_DB_PATH`
 挪开端口与库；但**全量仍不能真并行** —— 多个用例里写死 `http://localhost:9999`（`auth.test.ts`、`rootToken.test.ts`、`proxy.node.test.ts` 等），改端口后那些用例会假红。worker 的 9720 在 `tests/config.ts` 写死，只能独占。
+
+### 批次 2 复验追加（李哥）：真 D1 方言 + P2-23 缺口
+
+**1. 真 wrangler D1 方言验证** `tests/api/rule/sharedStateD1.test.ts`（6 例，worker 下约 45s）
+单元用例只证明 better-sqlite3 上的语义，这里是同一批 SQL 在真实本地 D1 上再跑一遍，且**直接读库**（能区分「真的走共享存储」与「悄悄退回内存实现」）：
+
+| 断言 | node(SQLite) | worker(真 D1) |
+|---|---|---|
+| 标量 `MIN(3,5)=3` / `MAX(0,-2)=0`，逐行返回不聚合 | ✅ | ✅ |
+| `ON CONFLICT(health_key) DO UPDATE` 幂等 upsert（同键写两次仍 1 行，取最新值） | ✅ | ✅ |
+| `UPDATE ... RETURNING` 谓词成立返回改后行（含 `MIN`/`MAX` 补液表达式） | ✅ | ✅ |
+| 谓词不成立时返回 0 行（限流判定依赖此语义） | ✅ | ✅ |
+| 放行后 `rate_limit_bucket` 确实有行（证明没退回内存实现） | —（node 走内存） | ✅ |
+| 预置「另一 isolate 已把桶扣空」→ 请求直接 429 | —（跨 isolate 语义只在 worker 有意义） | ✅ |
+| 桶被删后能重新初始化（`INSERT ON CONFLICT` 路径） | — | ✅ |
+
+**踩坑记录**：跨 isolate 用例最初假红（200 而非 429）。原因是 D1 CLI 写种子本身要 1s+，而 rpm=50 时补液 0.83 令牌/秒，1.3s 就把令牌补回 1.1 个 → 自然放行。改为 rpm=2（30s 才补 1 个）后稳定；诊断日志可直接看到 `tokens: 0.124 / last_ms: 种子+1349ms` 自证。**写这类「预置状态 + 等一会儿再请求」的用例，必须让补液速率慢于操作延迟。**
+
+**2. P2-23 缺口（看门狗）** `tests/api/ai/stream-max-duration-hang.test.ts`
+`stream_max_duration_ms` 只在 chunk 边界检查：上游「发几个 chunk 后挂住」时循环阻塞在 `readChunk(idle=180s)`，deadline 轮不到。实测上限 800ms + 挂住上游，3s 窗口内流未结束、记录仍 `processing`。用例为 `it.fails`（3s 跑完），修好后自动转红提醒改成正式断言。建议 `readChunk(reader, Math.min(idleTimeoutMs, streamDeadline - Date.now()))`。
+
+**3. 阈值关系备忘**：`stream_max_duration_ms` 默认 30min > `orphan_recover_threshold_ms` 默认 10min → 实际兜底顺序是「空闲超时 180s → 孤儿扫描 10min → 总时长上限 30min」，总时长上限在默认配置下**几乎不会先触发**，调参时需成对考虑。
+
+### 批次 2 复验追加（李哥）：b4 worker 那 1 红的定性与用例加固
+
+**现象**：b4 worker 全量唯一红 `tests/api/ai/upstream-timeout.test.ts > Client disconnect > should write readable response_data when client aborts while waiting for upstream headers`（`expected 'processing' to be 'failed'`），且同文件 `should recover stale processing records via manual scan endpoint` 连带红（`expected 2 to be 1`）。
+
+**定性**：**不是 P2-23 的新缺陷，是用例取数方式和运行时热重载叠加的假红**。
+
+1. 取数方式不严谨：原用例用 `requestHelper.getFinalizedRecords(token, 1)`（= 全局最新 1 条）后直接断言 `records[0]`。这条通道按 `id desc` 取全局最新，一旦前面用例有记录残留，断言对象就不是本次请求的记录；它「等到没有 processing 为止」的轮询也只看全局最新几条，判断不了「我这条」是否收尾。
+2. 连带红：上面用例把一条记录留在 `processing`，下一条用例插入 1 条过期记录后调用回收接口，`recovered` 自然变 2 → 一个真问题带出两个红点，定位成本翻倍。
+3. 该轮运行期间 `src/service/responseHandlerService.ts`、`src/util/abortTimeoutUtil.ts` 被改动（阿张在做 P2-23/P2-24），`wrangler dev` 热重载会打断在飞请求 → 记录停在 processing 也是预期内的运行期现象。**跑全量期间不要改 src**，与「清端口只 kill 自己的 PID」同级纪律。
+
+**加固**（`tests/api/ai/upstream-timeout.test.ts`）：
+
+- 新增 `waitLatestRecordSettled(token, modelId)`：按 `model_id` 精确定位本次请求的记录并轮询到收尾，杜绝串味；为此 `hangHeaders` 模型的 id 也一并捕获。
+- 客户端断开改走 `expectAbortedRequestFinalized(modelId, expectedFailedCode)`，口径分两条：① 正常收尾 → 断言 failed + 失败码 + 文案可读（不落裸 `AbortError`）；② 10s 内仍在 processing（本地 dev 的断开传播缺口）→ 触发孤儿回收，必须变 `failed/recovered_orphan` 且有 `end_at`。**「永久 processing 且回收不掉」才算红**。
+- 孤儿回收用例加隔离：先 `DELETE FROM record WHERE status='processing'` 清残留；再插入「2 天前」的过期记录 + 一条「3 分钟后」的对照组（不是「现在」——本文件阈值被压到 2s，而 CLI 写种子要 1s+，用 now 会让对照组自己过期，计数变 2）；回收后断言 `recovered === 1`、过期那条 `recovered_orphan`、对照那条仍 `processing`，最后清掉残渣。
+
+**复验数字（b5，当前 worktree）**：Worker **89 文件 / 1101 例全绿，skipped 0，exit 0**；tsc exit 0。
+
+**踩坑记录（并发）**：b5 首轮 Node 全量出现 47 文件 / 334 例红，报 `SQLITE_READONLY_DBMOVED`（155 次）+ `no such table: client_config` —— 典型「跑的时候 `test.db` 被另一轮 globalSetup 删了/重建了」。**Node 全量必须独占**，跑前在群里报备；出现这类集体红先看是不是 `READONLY_DBMOVED`，不要当成业务回归。

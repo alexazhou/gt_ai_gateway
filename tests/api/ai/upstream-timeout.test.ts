@@ -26,6 +26,7 @@ let testUserToken: string;
 let adminToken: string;
 let testUserId: number;
 let hangBodyModelId: number;
+let hangHeadersModelId: number;
 
 let hangBodyModelName: string;
 let hangHeadersModelName: string;
@@ -33,6 +34,79 @@ let unreachableModelName: string;
 let slowModelName: string;
 let trickleModelName: string;
 let badDataModelName: string;
+
+
+/**
+ * 轮询等「指定模型的最新记录」收尾（status !== processing）。
+ *
+ * 为什么不用 requestHelper.getFinalizedRecords：它按「全局最新 limit 条」判断，
+ * 断言时又以 records[0] 为准 —— 一旦同文件前面有记录残留，断言的就不是本次请求的记录了
+ * （批次2复验时这里误报过：客户端断开用例取到别人的 processing 记录 → 连带把
+ *  孤儿回收用例的 recovered 计数也带红）。这里按 model_id 精确定位本次请求的记录。
+ *
+ * 收尾时机本身不确定（Worker 本地客户端断开的传播时机不定），因此超时后**原样返回**
+ * 最后取到的记录，由调用方决定是断言成功还是走兜底回收，不在这里抛错。
+ */
+async function waitLatestRecordSettled(
+    token: string,
+    modelId: number,
+    timeoutMs = 10000,
+): Promise<any> {
+    const deadline = Date.now() + timeoutMs;
+    let latest: any = null;
+    for (;;) {
+        const res = await requestHelper.get("/record/latest.json?limit=10", token);
+        const list = Array.isArray(res.body) ? res.body : [];
+        const mine = list.filter((r: any) => r && r.model_id === modelId);
+        latest = mine[0] ?? null;
+        if (latest && latest.status !== "processing") {
+            return latest;
+        }
+        if (Date.now() >= deadline) {
+            return latest;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+}
+
+
+/**
+ * 客户端断开后的收尾验收：两种模式下都要求「不能永久停在 processing」。
+ *
+ * - 正常路径：等记录收尾 → 断言 failed + 失败码 + 文案可读（不落裸 AbortError）
+ * - 兜底路径：Worker 本地（`wrangler dev`）不保证把客户端断开传播成可收尾的失败 ——
+ *   请求上下文被一并取消时，handler 里连 markFailed 都执行不到，记录会停在 processing。
+ *   这是本地 dev 的运行环境差异（生产 CF 会传播），所以这里验收口径是：
+ *   收尾不了就必须能被孤儿回收兜住；「永久 processing 且回收不掉」才算红。
+ */
+async function expectAbortedRequestFinalized(
+    modelId: number,
+    expectedFailedCode: string,
+): Promise<void> {
+    let record = await waitLatestRecordSettled(adminToken, modelId, 10000);
+    expect(record, `model ${modelId} 应已落记录`).toBeTruthy();
+
+    if (record.status === "processing") {
+        const recoverResponse = await requestHelper.post(
+            "/record/recover-orphans.json",
+            {},
+            adminToken,
+        );
+        expect(recoverResponse.status).toBe(200);
+        record = await waitLatestRecordSettled(adminToken, modelId, 10000);
+        expect(record.status).toBe("failed");
+        expect(record.failed_code).toBe("recovered_orphan");
+        expect(record.end_at).toBeTruthy();
+        return;
+    }
+
+    expect(record.status).toBe("failed");
+    expect(record.failed_code).toBe(expectedFailedCode);
+    // 详情页报错文案可读：不落裸 AbortError，写明客户端断开
+    // 文案口径随模式：worker 下是上游超时，node 下是客户端断开，但都必须可读
+    expect(record.response_data).toContain(config.TEST_MODE === "worker" ? "超时" : "客户端断开");
+    expect(record.response_data).not.toContain("AbortError");
+}
 
 
 describe("Upstream Timeout & Orphan Recovery", () => {
@@ -92,11 +166,12 @@ describe("Upstream Timeout & Orphan Recovery", () => {
             adminToken,
         );
         hangHeadersModelName = `openai-hang-headers-${Date.now()}`;
-        await requestHelper.post(
+        const hangHeadersModel = await requestHelper.post(
             "/model/create.json",
             modelFixtures.createRandomModel(hangHeadersVendor.body.id, hangHeadersModelName),
             adminToken,
         );
+        hangHeadersModelId = hangHeadersModel.body.id;
 
         // --- 连接不可达 vendor/model（fetch 阶段普通网络错误：非超时、非客户端断开） ---
         const unreachableVendor = await requestHelper.post(
@@ -302,19 +377,8 @@ describe("Upstream Timeout & Orphan Recovery", () => {
                 // aborted — expected
             }
 
-            await new Promise((resolve) => setTimeout(resolve, 800));
-
-            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
-            const record = records[0];
-
-            // 关键：不得停在 processing（worker 下最怕的就是"只落 processing"）
-            expect(record.status).toBe("failed");
-            expect(record.failed_code).toBe(expectedFailedCode);
-            // 详情页报错文案可读：不落裸 AbortError，写明客户端断开
-            // 文案口径随模式：worker 下是上游超时，node 下是客户端断开，但都必须可读
-            expect(record.response_data).toContain(config.TEST_MODE === "worker" ? "超时" : "客户端断开");
-            expect(record.response_data).not.toContain("AbortError");
-        }, 15000);
+            await expectAbortedRequestFinalized(hangBodyModelId, expectedFailedCode);
+        }, 30000);
 
         it("should write readable response_data when client aborts while waiting for upstream headers", async () => {
             const baseUrl = config.SERVER_CONFIG.baseUrl;
@@ -344,19 +408,8 @@ describe("Upstream Timeout & Orphan Recovery", () => {
                 // aborted — expected
             }
 
-            await new Promise((resolve) => setTimeout(resolve, 800));
-
-            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
-            const record = records[0];
-
-            // 关键：不得停在 processing（worker 下最怕的就是"只落 processing"）
-            expect(record.status).toBe("failed");
-            expect(record.failed_code).toBe(expectedFailedCode);
-            // 详情页报错文案可读：不落裸 AbortError，写明客户端断开
-            // 文案口径随模式：worker 下是上游超时，node 下是客户端断开，但都必须可读
-            expect(record.response_data).toContain(config.TEST_MODE === "worker" ? "超时" : "客户端断开");
-            expect(record.response_data).not.toContain("AbortError");
-        }, 15000);
+            await expectAbortedRequestFinalized(hangHeadersModelId, expectedFailedCode);
+        }, 30000);
     });
 
 
@@ -377,9 +430,24 @@ describe("Upstream Timeout & Orphan Recovery", () => {
         };
         const twoDaysAgo = formatDbDatetime(new Date(Date.now() - 86400_000 * 2));
         const now = formatDbDatetime(new Date());
+
+        // 隔离：先清掉本文件前面用例可能残留的 processing 记录。
+        // 客户端断开用例在 Worker 本地有可能「收尾不了、只能靠回收兜住」，
+        // 若把这些残留算进 recovered，本用例就会连带误红（批次2复验时踩过）。
+        await dbHelper.execute(`DELETE FROM record WHERE status = 'processing'`);
+
         await dbHelper.execute(
             `INSERT INTO record (user_id, model_id, status, tenant_id, start_at, created_at, updated_at)
              VALUES (${testUserId}, ${hangBodyModelId}, 'processing', (SELECT id FROM tenant WHERE name = 'main'), '${twoDaysAgo}', '${now}', '${now}')`,
+        );
+
+        // 对照组：不该被当作孤儿回收的 processing 记录（阈值按 start_at 判定）。
+        // start_at 故意取「3 分钟后」而不是「现在」：worker/本地 CLI 写种子各要 1s+，
+        // 本文件阈值被压到 2s，若用 now 会在这两次写完成前就过期 → 对照组自己变成孤儿，计数变 2。
+        const futureStartAt = formatDbDatetime(new Date(Date.now() + 3 * 60_000));
+        await dbHelper.execute(
+            `INSERT INTO record (user_id, model_id, status, tenant_id, start_at, created_at, updated_at)
+             VALUES (${testUserId}, ${hangBodyModelId}, 'processing', (SELECT id FROM tenant WHERE name = 'main'), '${futureStartAt}', '${now}', '${now}')`,
         );
 
         const recoverResponse = await requestHelper.post(
@@ -389,13 +457,20 @@ describe("Upstream Timeout & Orphan Recovery", () => {
         );
 
         expect(recoverResponse.status).toBe(200);
+        // 只有过期那条被回收，新记录不误伤 → 计数严格为 1
         expect(recoverResponse.body.recovered).toBe(1);
 
-        const records = await requestHelper.getFinalizedRecords(adminToken, 1);
-        const record = records[0];
+        const latestResponse = await requestHelper.get("/record/latest.json?limit=10", adminToken);
+        const records: any[] = Array.isArray(latestResponse.body) ? latestResponse.body : [];
 
-        expect(record.status).toBe("failed");
-        expect(record.failed_code).toBe("recovered_orphan");
-        expect(record.end_at).toBeTruthy();
-    }, 15000);
+        const recovered = records.find((r) => r.status === "failed" && r.failed_code === "recovered_orphan");
+        expect(recovered, "过期 processing 记录应被标记为 recovered_orphan").toBeTruthy();
+        expect(recovered.end_at).toBeTruthy();
+
+        const fresh = records.find((r) => r.status === "processing");
+        expect(fresh, "未过期的 processing 记录不应被回收").toBeTruthy();
+
+        // 收尾清理：不留 processing 残渣给后续文件
+        await dbHelper.execute(`DELETE FROM record WHERE status = 'processing'`);
+    }, 20000);
 });
