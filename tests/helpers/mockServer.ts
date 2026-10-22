@@ -303,6 +303,10 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleOpenAIStreamNoTerminator(req, res);
     } else if (url.includes("/chat/completions/split-multibyte")) {
         handleOpenAIStreamSplitMultibyte(req, res);
+    } else if (url.includes("/chat/completions/status-201")) {
+        handleOpenAIStatusResponse(req, res, 201);
+    } else if (url.includes("/chat/completions/status-204")) {
+        handleOpenAIStatusResponse(req, res, 204);
     } else if (url.includes("/chat/completions/bad-data")) {
         handleOpenAIStreamBadData(req, res);
     } else if (url.includes("/chat/completions/heartbeat")) {
@@ -344,6 +348,20 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleAnthropicMessagesError(req, res);
     } else if (url.includes("/messages")) {
         handleAnthropicMessages(req, res);
+    } else if (req.method === "GET" && url.includes("/models-fail/models")) {
+        // P2-15：上游拉模型列表返回 5xx，且 body 里故意塞内部线索（网关不得回传给客户端）
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+            error: {
+                message: "INTERNAL_SECRET_upstream_db_password=letmein",
+                type: "internal_error",
+            },
+        }));
+    } else if (req.method === "GET" && url.includes("/models-hang/models")) {
+        // P2-15：上游拉模型列表永不响应（网关必须 10s 超时而不是挂死）
+        res.writeHead(200, { "Content-Type": "application/json" });
+        // 不 end：模拟上游卡死
+        setTimeout(() => { try { res.end(JSON.stringify({ data: [] })); } catch { /* closed */ } }, 30_000);
     } else if (req.method === "GET" && url.includes("/models")) {
         handleModelsList(req, res);
     } else {
@@ -1803,6 +1821,47 @@ function handleOpenAIStreamSplitMultibyte(req: IncomingMessage, res: ServerRespo
             i++;
         }, 15);
         res.on("close", () => clearInterval(interval));
+    });
+}
+
+
+/**
+ * P2-02：上游返回「非 200 的 2xx」（201 / 204）。
+ *
+ * 修复前判定用的是 `status === 200`，于是 201/202/204 被当成失败：
+ * 记录落 FAILED、不计费（漏计费），而客户端其实拿到了正常响应。
+ * 201 带完整 body + usage（能同时验证计费），204 没有 body（验证空体也能算成功）。
+ */
+function handleOpenAIStatusResponse(
+    req: IncomingMessage,
+    res: ServerResponse,
+    status: 201 | 204,
+): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+        captureRequest(req, body, data);
+
+        if (status === 204) {
+            res.writeHead(204);
+            res.end();
+            return;
+        }
+
+        res.writeHead(status, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+            id: "chatcmpl-status-201",
+            object: "chat.completion",
+            created: Math.floor(Date.now() / 1000),
+            model: data.model || "gpt-3.5-turbo",
+            choices: [{
+                index: 0,
+                message: { role: "assistant", content: "created" },
+                finish_reason: "stop",
+            }],
+            usage: { prompt_tokens: 10, completion_tokens: 15, total_tokens: 25 },
+        }));
     });
 }
 
