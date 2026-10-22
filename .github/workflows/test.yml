@@ -56,6 +56,53 @@ jobs:
       - name: Run tests (Node mode)
         run: npm run backend:test:node
 
+  test-coverage:
+    name: Test (Coverage Gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          token: ${{ github.token }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Cache node modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            node_modules
+            frontend/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'frontend/package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      - name: Build frontend
+        run: npm run frontend:build
+
+      # 覆盖率门禁（P2-21）：阈值写在 vitest.config.ts 的 coverage.thresholds，
+      # 低于阈值时本 job 直接失败（棘轮地板，防回退）。coverage/ 已在 .gitignore。
+      - name: Run tests with coverage
+        run: npm run backend:test:coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
   test-node-mysql:
     name: Test (Node Mode, MySQL)
     runs-on: ubuntu-latest
