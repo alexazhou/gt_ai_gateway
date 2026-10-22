@@ -7,6 +7,7 @@ import vendorTestService from "../service/vendorTestService";
 import modelManager from "../manager/modelManager";
 import customError from "../customError";
 import maskUtil from "../util/maskUtil";
+import inputSanitizeUtil from "../util/inputSanitizeUtil";
 import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
 
 
@@ -109,7 +110,8 @@ async function getVendorsByIds(c: Context) {
 async function createVendor(c: Context) {
     const scope = c.get("tenantScope")!;
     const body = await c.req.json();
-    const vendor = new SgVendor(body);
+    // 同 P2-26：畸形键会在 fill() 里炸成 500，先剔掉
+    const vendor = new SgVendor(inputSanitizeUtil.stripUnsafeKeys(body as Record<string, unknown>));
 
     // Validation - 不验证 urls，允许为空
     if (!vendor.type || !vendor.name || !vendor.token) {

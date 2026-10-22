@@ -601,7 +601,8 @@ export async function handleStreamResponse(
         });
         console.log(`[responseHandlerService] Stream ended, completed: ${state.accumulator.isCompleted()}, failedCode: ${state.failedCode}`);
         finalizeStreamResult(c, record, model, user, state);
-        logStream?.end();
+        // 等日志真正 flush：不 await 的话尾部内容可能丢（P2-12）
+        await streamLogService.finishStreamLog(logStream);
     });
 }
 

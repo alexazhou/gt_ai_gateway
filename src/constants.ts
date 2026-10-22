@@ -151,4 +151,6 @@ export enum ConfigKey {
     ORPHAN_RECOVER_THRESHOLD_MS = "orphan_recover_threshold_ms",
     // 多租户隔离开关：false = 逻辑单租户（所有请求固定 main）；true = 完整多租户隔离
     MULTI_TENANT_ENABLED = "multi_tenant_enabled",
+    // LLM 请求体上限（默认 32MB，0 = 不限）：防止超大 body 打满 isolate/进程内存
+    LLM_MAX_BODY_BYTES = "llm_max_body_bytes",
 }

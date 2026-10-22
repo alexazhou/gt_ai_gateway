@@ -406,7 +406,7 @@ async function sendRequest(
         } catch (e) {
             // 路由阶段异常（如配置错误无启用上游）：同样是一次失败请求，不留 init 孤儿记录
             // 候选全部不可用（配置漂移）也走这里，失败码与原「无可用上游」分支保持一致
-            const isNoUpstream = e instanceof customError.AppError
+            const isNoUpstream = customError.isAppError(e)
                 && String(e.message).startsWith("No available upstream");
             await recordService.update(recordId, {
                 status: SgRecordStatus.FAILED,
@@ -471,7 +471,7 @@ async function sendRequest(
                     mainTenantId ?? tenantId ?? -1,
                 );
             } catch (e) {
-                if (e instanceof customError.AccessDeniedError) {
+                if (customError.isAppError(e, "AccessDeniedError")) {
                     // 403：策略性拒绝与供应商无关，不 failover；标记 record FAILED 后抛出，交给 onError 渲染
                     await recordService.markFailed(recordId, FailedCode.ACCESS_DENIED, {
                         message: "命中规则被拦截",
@@ -483,7 +483,7 @@ async function sendRequest(
                     });
                     throw e;
                 }
-                if (e instanceof customError.RateLimitError) {
+                if (customError.isAppError(e, "RateLimitError")) {
                     // 429：视为「该上游繁忙」——failover 开启时把 429 存入 lastFailure 继续尝试下一上游
                     //（selectUpstream 已 markTried，自动跳过）；关闭时直接返回 429（返回前标记 record FAILED）
                     if (failoverEnabled) {
@@ -530,7 +530,7 @@ async function sendRequest(
                 throw e;
             }
 
-            if (e instanceof customError.AppError) {
+            if (customError.isAppError(e)) {
                 // AppError 是终态失败：进入上游前被拒绝（路由 / 插件 / 协议转换）或响应转换失败，
                 // 不会再尝试其他上游。必须在这里收尾，否则记录会停留在 init / processing。
                 // 失败归因优先用错误自带的 failedCode（如协议转换失败 → conversion_error），
