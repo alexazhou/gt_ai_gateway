@@ -307,6 +307,10 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleOpenAIStatusResponse(req, res, 201);
     } else if (url.includes("/chat/completions/status-204")) {
         handleOpenAIStatusResponse(req, res, 204);
+    } else if (url.includes("/chat/completions/status-205")) {
+        handleOpenAIStatusResponse(req, res, 205);
+    } else if (url.includes("/chat/completions/status-304")) {
+        handleOpenAIStatusResponse(req, res, 304);
     } else if (url.includes("/chat/completions/bad-data")) {
         handleOpenAIStreamBadData(req, res);
     } else if (url.includes("/chat/completions/heartbeat")) {
@@ -1835,7 +1839,7 @@ function handleOpenAIStreamSplitMultibyte(req: IncomingMessage, res: ServerRespo
 function handleOpenAIStatusResponse(
     req: IncomingMessage,
     res: ServerResponse,
-    status: 201 | 204,
+    status: 201 | 204 | 205 | 304,
 ): void {
     let body = "";
     req.on("data", (chunk) => { body += chunk.toString(); });
@@ -1843,8 +1847,9 @@ function handleOpenAIStatusResponse(
         const data = body ? JSON.parse(body) : {};
         captureRequest(req, body, data);
 
-        if (status === 204) {
-            res.writeHead(204);
+        // 204/205/304 按 HTTP 语义不允许带 body（带体客户端会等 body 或直接报错）
+        if (status === 204 || status === 205 || status === 304) {
+            res.writeHead(status);
             res.end();
             return;
         }
