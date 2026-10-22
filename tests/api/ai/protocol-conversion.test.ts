@@ -788,6 +788,217 @@ describe("AI Protocol Conversion API", () => {
     }, 30000);
 
 
+    it("should reject input_file in a Responses function_call_output when converting to Anthropic", async () => {
+        const marker = `infile-tool-anthropic-${Date.now()}`;
+
+        const response = await requestHelper.post(
+            "/llm/v1/responses",
+            {
+                model: openAIClientModelName,
+                input: [{
+                    type: "function_call_output",
+                    call_id: marker,
+                    output: [{ type: "input_file", file_data: "AAAA", filename: "report.pdf" }],
+                }],
+                stream: false,
+            },
+            testUserToken,
+        );
+
+        expect(response.status).toBe(400);
+        expect(response.body.error.message).toContain("input_file");
+
+        // 转换在发往上游前失败，不能把不完整数据发出去
+        const captured = (await upstreamCaptureHelper.list())
+            .filter((request) => JSON.stringify(request.json).includes(marker));
+        expect(captured).toHaveLength(0);
+    }, 30000);
+
+
+    it("should reject input_file in a Responses function_call_output when converting to OpenAI", async () => {
+        const marker = `infile-tool-openai-${Date.now()}`;
+
+        const response = await requestHelper.post(
+            "/llm/v1/responses",
+            {
+                model: responsesClientOpenAIUpstreamModelName,
+                input: [{
+                    type: "function_call_output",
+                    call_id: marker,
+                    output: [{ type: "input_file", file_data: "AAAA", filename: "report.pdf" }],
+                }],
+                stream: false,
+            },
+            testUserToken,
+        );
+
+        expect(response.status).toBe(400);
+        expect(response.body.error.message).toContain("input_file");
+
+        const captured = (await upstreamCaptureHelper.list())
+            .filter((request) => JSON.stringify(request.json).includes(marker));
+        expect(captured).toHaveLength(0);
+    }, 30000);
+
+
+    it("should reject an invalid image source inside an Anthropic tool_result when converting to OpenAI", async () => {
+        const marker = `tool-result-source-${Date.now()}`;
+
+        const response = await requestHelper.postWithAnthropicStyleApiKey(
+            "/llm/v1/messages",
+            {
+                model: anthropicClientModelName,
+                max_tokens: 1024,
+                messages: [
+                    {
+                        role: "assistant",
+                        content: [{ type: "tool_use", id: marker, name: "read_image", input: {} }],
+                    },
+                    {
+                        role: "user",
+                        content: [{
+                            type: "tool_result",
+                            tool_use_id: marker,
+                            content: [{
+                                type: "image",
+                                source: { type: "base64", media_type: "image/png" },
+                            }],
+                        }],
+                    },
+                ],
+                stream: false,
+            },
+            testUserToken,
+        );
+
+        expect(response.status).toBe(400);
+        expect(response.body.error.message).toContain("source");
+
+        const captured = (await upstreamCaptureHelper.list())
+            .filter((request) => JSON.stringify(request.json).includes(marker));
+        expect(captured).toHaveLength(0);
+    }, 30000);
+
+
+    it("should merge a user message following an OpenAI tool result into one Anthropic user turn", async () => {
+        const marker = `merged-tool-user-${Date.now()}`;
+
+        const response = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({
+                model: openAIClientModelName,
+                stream: false,
+                messages: [
+                    {
+                        role: "assistant",
+                        content: null,
+                        tool_calls: [{
+                            id: marker,
+                            type: "function",
+                            function: { name: "get_weather", arguments: "{}" },
+                        }],
+                    },
+                    { role: "tool", tool_call_id: marker, content: "42" },
+                    { role: "user", content: marker },
+                ],
+            }),
+            testUserToken,
+        );
+
+        expect(response.status).toBe(200);
+
+        const captured = (await upstreamCaptureHelper.list())
+            .filter((request) => JSON.stringify(request.json).includes(marker));
+        expect(captured).toHaveLength(1);
+        expect(captured[0].json.messages).toEqual([
+            {
+                role: "assistant",
+                content: [{ type: "tool_use", id: marker, name: "get_weather", input: {} }],
+            },
+            {
+                role: "user",
+                content: [
+                    { type: "tool_result", tool_use_id: marker, content: "42" },
+                    { type: "text", text: marker },
+                ],
+            },
+        ]);
+    }, 30000);
+
+
+    it("should preserve text/image/text order when converting Responses input to OpenAI", async () => {
+        const markerA = `order-openai-a-${Date.now()}`;
+        const markerB = `order-openai-b-${Date.now()}`;
+
+        const response = await requestHelper.post(
+            "/llm/v1/responses",
+            {
+                model: responsesClientOpenAIUpstreamModelName,
+                input: [{
+                    type: "message",
+                    role: "user",
+                    content: [
+                        { type: "input_text", text: markerA },
+                        { type: "input_image", image_url: "data:image/png;base64,AAAA" },
+                        { type: "input_text", text: markerB },
+                    ],
+                }],
+                stream: false,
+            },
+            testUserToken,
+        );
+
+        expect(response.status).toBe(200);
+
+        const captured = (await upstreamCaptureHelper.list())
+            .filter((request) => JSON.stringify(request.json).includes(markerA));
+        expect(captured).toHaveLength(1);
+        expect(captured[0].json.messages[0].content).toEqual([
+            { type: "text", text: markerA },
+            { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+            { type: "text", text: markerB },
+        ]);
+    }, 30000);
+
+
+    it("should preserve text/image/text order when converting Responses input to Anthropic", async () => {
+        const markerA = `order-anthropic-a-${Date.now()}`;
+        const markerB = `order-anthropic-b-${Date.now()}`;
+
+        const response = await requestHelper.post(
+            "/llm/v1/responses",
+            {
+                model: openAIClientModelName,
+                input: [{
+                    type: "message",
+                    role: "user",
+                    content: [
+                        { type: "input_text", text: markerA },
+                        { type: "input_image", image_url: "data:image/png;base64,AAAA" },
+                        { type: "input_text", text: markerB },
+                    ],
+                }],
+                stream: false,
+            },
+            testUserToken,
+        );
+
+        expect(response.status).toBe(200);
+
+        const captured = (await upstreamCaptureHelper.list())
+            .filter((request) => JSON.stringify(request.json).includes(markerA));
+        expect(captured).toHaveLength(1);
+        expect(captured[0].json.messages[0].content).toEqual([
+            { type: "text", text: markerA },
+            {
+                type: "image",
+                source: { type: "base64", media_type: "image/png", data: "AAAA" },
+            },
+            { type: "text", text: markerB },
+        ]);
+    }, 30000);
+
+
     it("routes a Responses client directly to the responses upstream derived from a base openai URL", async () => {
         // vendor 配了 openai（base URL，getUrlByFormat 会自动补全 /chat/completions 后缀 → 可派生 responses）
         // + anthropic；getSupportedFormats 与 getUrlByFormat 口径统一后，responses 应直接路由到 responses 上游，
