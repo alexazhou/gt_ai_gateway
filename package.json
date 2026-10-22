@@ -13,7 +13,7 @@
     "backend:test:real": "TEST_MODE=node TEST_REAL_API=true vitest --run --config vitest.config.ts",
     "backend:test:watch": "vitest --watch",
     "backend:test:type": "tsc --noEmit",
-    "backend:test:coverage": "vitest --run --coverage",
+    "backend:test:coverage": "TEST_MODE=node vitest --run --coverage --config vitest.config.ts",
     "backend:test:api": "vitest --run tests/api",
     "backend:test:integration": "vitest --run tests/integration",
     "backend:test:ai": "vitest --run tests/api/ai",
