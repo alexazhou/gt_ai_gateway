@@ -287,11 +287,11 @@ async function settleStreamResult(
                 : null,
             responseData: JSON.stringify(fullResponse),
             chargeUserId,
-        });
-
-        await requestActivityService.append(record.id, RequestActivityStage.RESULT, "请求成功", {
-            status: SgRecordStatus.SUCCESS,
-            cost,
+            activity: {
+                stage: RequestActivityStage.RESULT,
+                message: "请求成功",
+                details: { status: SgRecordStatus.SUCCESS, cost },
+            },
         });
         return;
     }
@@ -496,17 +496,17 @@ export async function handleNonStreamResponse(
         firstTokenLatency: endedAt - record.created_at.getTime(),
         responseData: clientResponseText,
         chargeUserId,
-    });
-
-    await requestActivityService.append(record.id, RequestActivityStage.RESULT,
-        recordStatus === SgRecordStatus.SUCCESS ? "请求成功" : "请求失败",
-        {
-            status: recordStatus,
-            upstream_status: statusCode,
-            ...(recordStatus === SgRecordStatus.SUCCESS ? { cost } : {}),
+        activity: {
+            stage: RequestActivityStage.RESULT,
+            message: recordStatus === SgRecordStatus.SUCCESS ? "请求成功" : "请求失败",
+            details: {
+                status: recordStatus,
+                upstream_status: statusCode,
+                ...(recordStatus === SgRecordStatus.SUCCESS ? { cost } : {}),
+            },
+            level: recordStatus === SgRecordStatus.SUCCESS ? ActivityLevel.INFO : ActivityLevel.ERROR,
         },
-        recordStatus === SgRecordStatus.SUCCESS ? ActivityLevel.INFO : ActivityLevel.ERROR,
-    );
+    });
 
     c.status(statusCode);
     c.header("Content-Type", "application/json");
