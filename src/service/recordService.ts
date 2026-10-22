@@ -210,7 +210,7 @@ async function recordFailedRequest(
     detail?: Record<string, unknown>,
     tenantId?: number,
 ) {
-    try {
+    const write = async () => {
         const record = await create(
             userId,
             modelId,
@@ -222,9 +222,43 @@ async function recordFailedRequest(
             message: message ?? failedCode,
             ...(detail ? { detail } : {}),
         });
-    } catch (e) {
-        console.error("Failed to write failed record:", e);
+    };
+
+    try {
+        await write();
+    } catch (firstError) {
+        // P2-11：失败记录写不进去 = 用户被拒/失败却查不到痕迹，属于「静默丢账」。
+        // 写库失败多为瞬时（D1 抖动 / SQLITE_BUSY / 并发写锁），先重试一次。
+        try {
+            await write();
+        } catch (retryError) {
+            // 仍失败：落一条带固定标记的结构化日志，便于日志检索/告警兜底（不静默吞掉）。
+            console.error(
+                "[RECORD_WRITE_FAILED]",
+                JSON.stringify({
+                    userId,
+                    modelId,
+                    tenantId: tenantId ?? null,
+                    clientFormat,
+                    failedCode,
+                    message: message ?? failedCode,
+                    bodyBytes: typeof body === "string" ? body.length : null,
+                    detail: detail ?? null,
+                    firstError: describeError(firstError),
+                    retryError: describeError(retryError),
+                }),
+            );
+        }
     }
+}
+
+
+// 错误摘要：只取类型与 message，避免把整个对象（可能含请求体/凭据）打进日志
+function describeError(error: unknown): string {
+    if (error instanceof Error) {
+        return `${error.name}: ${error.message}`;
+    }
+    return String(error);
 }
 
 export default {
