@@ -20,6 +20,8 @@ const CONFIG_DEFAULTS: Record<string, string> = {
     [ConfigKey.UPSTREAM_HEADERS_TIMEOUT_MS]: "900000",
     [ConfigKey.UPSTREAM_NON_STREAM_TIMEOUT_MS]: "180000",
     [ConfigKey.UPSTREAM_STREAM_IDLE_TIMEOUT_MS]: "180000",
+    // 流式响应总时长上限（P2-23 兜底）：0 = 不限
+    [ConfigKey.STREAM_MAX_DURATION_MS]: "1800000",
     [ConfigKey.ORPHAN_RECOVER_THRESHOLD_MS]: "600000",
     // 多租户隔离默认关闭（存量单租户部署迁移后行为与迁移前一致）
     [ConfigKey.MULTI_TENANT_ENABLED]: "false",

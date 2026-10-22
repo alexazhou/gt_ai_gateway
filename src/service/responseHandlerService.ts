@@ -114,6 +114,13 @@ async function runSSELoop(
     // 相邻 chunk 空闲超时：超时置 UPSTREAM_TIMEOUT 并取消上游 body
     const idleTimeoutMs = await configService.getNumber(ConfigKey.UPSTREAM_STREAM_IDLE_TIMEOUT_MS);
 
+    // 流式总时长上限（P2-23 兜底）：空闲超时只看「相邻 chunk 间隔」，上游一直有数据在流时它不会触发；
+    // 而客户端断开在本地 wrangler dev 不会传播到 c.req.raw.signal（生产 CF 会），循环就只能一直读下去，
+    // 记录长期停在 processing 等人工孤儿回收。给一个总时长硬上限，到点必定 break → 收尾落库。
+    // 0 = 不限（长文本生成的正常场景由空闲超时兜底即可）。
+    const maxDurationMs = await configService.getNumber(ConfigKey.STREAM_MAX_DURATION_MS);
+    const streamDeadline = maxDurationMs > 0 ? Date.now() + maxDurationMs : 0;
+
     // 失败打标（先到先得）：循环内所有失败写入方都经此收口，守卫只写这一处——
     // 各写入方只管报告失败，不各自判断"是否已有失败"；abort 类失败的可读文案在此一并确定
     const markFailure = (code: FailedCode, message: string | null): void => {
@@ -149,7 +156,21 @@ async function runSSELoop(
 
     try {
         while (true) {
-            const result = await abortTimeoutUtil.readChunk(upstreamReader, idleTimeoutMs);
+            if (streamDeadline > 0 && Date.now() >= streamDeadline) {
+                markFailure(
+                    FailedCode.UPSTREAM_TIMEOUT,
+                    `流式响应超过总时长上限 ${maxDurationMs}ms，网关已中止上游请求`,
+                );
+                upstreamReader.cancel().catch(() => {});
+                break;
+            }
+
+            // 单次读的等待上限要按「总时长剩余额度」收窄，否则上游发几个 chunk 后挂住时，
+            // 循环会整个阻塞在 readChunk 里等满空闲超时（默认 180s），deadline 检查根本没机会执行
+            const readTimeoutMs = streamDeadline > 0
+                ? Math.max(1, Math.min(idleTimeoutMs, streamDeadline - Date.now()))
+                : idleTimeoutMs;
+            const result = await abortTimeoutUtil.readChunk(upstreamReader, readTimeoutMs);
             if (result.done) {
                 // 上游干净结束（EOF，不是超时/断开）：部分 OpenAI 兼容上游会给全内容、finish_reason
                 // 与 usage，却省略冗余的 [DONE] 直接关连接。此时数据是完整的，交给协议侧各自收尾 ——
@@ -196,7 +217,14 @@ async function runSSELoop(
         // 其余 = 循环体异常（写客户端 / 转换 / 日志写入）：写客户端失败 → 客户端断开，
         // 其他与上下游连接无关（内部错误），不冒充上游断开
         console.error(`${SSE_LOOP_LOG_PREFIX} Stream error:`, e);
-        if (abortTimeoutUtil.isTaggedError(e)) {
+        if (streamDeadline > 0 && Date.now() >= streamDeadline) {
+            // 收窄过读等待后，超时到底是「空闲」还是「总时长」到这里已经分不清了：
+            // 以 deadline 是否到点为准归因，文案才和真实原因一致（两者失败码相同）
+            markFailure(
+                FailedCode.UPSTREAM_TIMEOUT,
+                `流式响应超过总时长上限 ${maxDurationMs}ms，网关已中止上游请求`,
+            );
+        } else if (abortTimeoutUtil.isTaggedError(e)) {
             markFailure(e.failedCode, e.message);
         } else {
             markFailure(

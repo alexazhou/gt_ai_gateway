@@ -219,8 +219,17 @@ class TimeoutAbortController {
             this.abortWith(FailedCode.CLIENT_DISCONNECTED, "客户端断开连接，网关已中止上游请求"));
     }
 
-    /** 以打标错误中止：abort 的时刻信息最全，失败码与文案都挂在错误上带出去 */
+    /**
+     * 以打标错误中止：abort 的时刻信息最全，失败码与文案都挂在错误上带出去。
+     *
+     * P2-24：**先到先得**。超时定时器与客户端断开是两个独立触发源，可能先后脚到；
+     * 一旦已经 abort，后来者不能再改写 `tagged`，否则失败归因会被污染
+     * （客户端断开先到、定时器后到时，归因会从 CLIENT_DISCONNECTED 变成 UPSTREAM_TIMEOUT）。
+     */
     private abortWith(failedCode: FailedCode, message: string): void {
+        if (this.controller.signal.aborted) {
+            return;
+        }
         this.tagged = new TaggedError(failedCode, message);
         this.controller.abort(this.tagged);
     }
