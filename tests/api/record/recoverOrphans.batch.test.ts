@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import requestHelper from "../../helpers/requestHelper";
@@ -44,6 +44,14 @@ function readAppLog(): string {
     } catch {
         return "";
     }
+}
+
+/** 反向守卫用例会把表删掉，还原前后都要能判断它到底在不在 */
+async function activityTableExists(): Promise<boolean> {
+    const rows = await dbHelper.query<any>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'request_activity'",
+    );
+    return rows.length > 0;
 }
 
 let adminToken: string;
@@ -175,44 +183,63 @@ describe("record 孤儿回收批量化（P2-10）", () => {
     // 「为了绕开 subrequest 配额把日志写丢」是本项最大的副作用风险，所以不仅要验「正常时写进去」，
     // 还要验「真写不进去时会怎样」：记录必须照样被回收，且必须留下可发现的 warn 日志。
     // 注入方式用「删表」这种自然失败，不依赖 mock（进程内既不能 mock 服务端，也不该为测试加后门）。
+    // 注意清理：删表必须放在 try/finally 里 —— 这条断言恰恰是最容易被「best-effort 语义回归」
+    // 打红的一条，一旦红了就跳过还原，同一次 run 里后续所有碰 request_activity 的文件会成片假红。
+    // 一次失败被放大成几十个红，我们这轮已经付过三次代价。
     it("活动批量写失败时：记录仍被回收，并留下 warn 日志（best-effort 语义）", async () => {
         const FAILURE_COUNT = 5;
 
         await dbHelper.execute("DROP TABLE request_activity");
-        await insertProcessingRecords(FAILURE_COUNT, "-3 hours");
+        try {
+            await insertProcessingRecords(FAILURE_COUNT, "-3 hours");
 
-        const response = await requestHelper.post("/record/recover-orphans.json", {}, adminToken);
-        expect(response.status, "活动写失败不能让回收接口 500").toBe(200);
-        expect(response.body.recovered, "记录回收不能因为活动写失败而放弃")
-            .toBeGreaterThanOrEqual(FAILURE_COUNT);
+            const response = await requestHelper.post("/record/recover-orphans.json", {}, adminToken);
+            expect(response.status, "活动写失败不能让回收接口 500").toBe(200);
+            expect(response.body.recovered, "记录回收不能因为活动写失败而放弃")
+                .toBeGreaterThanOrEqual(FAILURE_COUNT);
 
-        // 记录确实收尾了（表已被删，所以这里只查 record）
-        const summary = await dbHelper.query<any>(
-            `SELECT
-                (SELECT COUNT(*) FROM record
-                  WHERE status = 'failed' AND failed_code = 'recovered_orphan' AND end_at IS NOT NULL) AS recovered,
-                (SELECT COUNT(*) FROM record
-                  WHERE status IN ('init','processing') AND end_at IS NULL
-                    AND start_at < datetime('now','localtime','-10 minutes')) AS still_orphan`,
-        );
-        const row = summary[0] ?? {};
-        expect(Number(row.recovered)).toBeGreaterThanOrEqual(baseline.recovered + FAILURE_COUNT);
-        expect(Number(row.still_orphan), "活动写失败不影响回收，不能留孤儿").toBe(0);
+            // 记录确实收尾了（表已被删，所以这里只查 record）
+            const summary = await dbHelper.query<any>(
+                `SELECT
+                    (SELECT COUNT(*) FROM record
+                      WHERE status = 'failed' AND failed_code = 'recovered_orphan' AND end_at IS NOT NULL) AS recovered,
+                    (SELECT COUNT(*) FROM record
+                      WHERE status IN ('init','processing') AND end_at IS NULL
+                        AND start_at < datetime('now','localtime','-10 minutes')) AS still_orphan`,
+            );
+            const row = summary[0] ?? {};
+            expect(Number(row.recovered)).toBeGreaterThanOrEqual(baseline.recovered + FAILURE_COUNT);
+            expect(Number(row.still_orphan), "活动写失败不影响回收，不能留孤儿").toBe(0);
 
-        // warn 必须留痕（不能是静默 catch）：读 app.log 等一小会儿让 stdout 刷盘
-        let hitLog = false;
-        for (let i = 0; i < 20 && !hitLog; i += 1) {
-            hitLog = readAppLog().includes("孤儿回收活动日志写入失败");
-            if (!hitLog) {
-                await new Promise((r) => setTimeout(r, 100));
+            // warn 必须留痕（不能是静默 catch）：读 app.log 等一小会儿让 stdout 刷盘
+            let hitLog = false;
+            for (let i = 0; i < 20 && !hitLog; i += 1) {
+                hitLog = readAppLog().includes("孤儿回收活动日志写入失败");
+                if (!hitLog) {
+                    await new Promise((r) => setTimeout(r, 100));
+                }
+            }
+            expect(hitLog, "活动写入失败必须留下结构化 warn 日志（[recordManager] 孤儿回收活动日志写入失败）")
+                .toBe(true);
+        } finally {
+            // 断言失败也必须还原，否则污染后续用例（describe 级 afterAll 再兜一层）
+            if (!(await activityTableExists())) {
+                await dbHelper.execute(activityTableDdl);
             }
         }
-        expect(hitLog, "活动写入失败必须留下结构化 warn 日志（[recordManager] 孤儿回收活动日志写入失败）")
-            .toBe(true);
 
-        // 还原表，避免污染后续用例
-        await dbHelper.execute(activityTableDdl);
+        // 还原自检：不是「COUNT(*) >= 0」这种永真断言——要证的是表真的回来了且可查
+        expect(await activityTableExists(), "request_activity 必须被还原（失败路径由 finally / afterAll 兜底）")
+            .toBe(true);
         const restored = await dbHelper.query<any>("SELECT COUNT(*) AS c FROM request_activity");
-        expect(Number(restored[0].c)).toBeGreaterThanOrEqual(0);
+        expect(Number(restored[0].c), "还原后的表必须能正常查询").toBe(0);
     }, 120000);
+
+    // 兜底：任何路径把表漏掉了，跑完这个文件也要还原，绝不能把「表被删」的状态交给下一个文件
+    afterAll(async () => {
+        if (!(await activityTableExists())) {
+            console.warn("[recoverOrphans.batch.test] afterAll 兜底：request_activity 缺失，正在重建");
+            await dbHelper.execute(activityTableDdl);
+        }
+    }, 60000);
 });
