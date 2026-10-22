@@ -270,7 +270,12 @@ describe("Upstream Timeout & Orphan Recovery", () => {
     }, 15000);
 
 
-    describe.skipIf(config.TEST_MODE === "worker")("Client disconnect", () => {
+    describe("Client disconnect", () => {
+        // Worker 本地（`wrangler dev`）不把客户端断开传播到 `c.req.raw.signal`，
+        // 请求会一直跑到上游超时才收尾。这里允许两种模式下失败码不同，
+        // 但两种模式都必须「已收尾 + 文案可读」：不允许停在 processing，也不允许落裸 AbortError。
+        const expectedFailedCode = config.TEST_MODE === "worker" ? "upstream_timeout" : "client_disconnected";
+
         it("should set failed_code=client_disconnected when client aborts a non-stream request", async () => {
             const baseUrl = config.SERVER_CONFIG.baseUrl;
             const ac = new AbortController();
@@ -302,10 +307,12 @@ describe("Upstream Timeout & Orphan Recovery", () => {
             const records = await requestHelper.getFinalizedRecords(adminToken, 1);
             const record = records[0];
 
+            // 关键：不得停在 processing（worker 下最怕的就是"只落 processing"）
             expect(record.status).toBe("failed");
-            expect(record.failed_code).toBe("client_disconnected");
+            expect(record.failed_code).toBe(expectedFailedCode);
             // 详情页报错文案可读：不落裸 AbortError，写明客户端断开
-            expect(record.response_data).toContain("客户端断开");
+            // 文案口径随模式：worker 下是上游超时，node 下是客户端断开，但都必须可读
+            expect(record.response_data).toContain(config.TEST_MODE === "worker" ? "超时" : "客户端断开");
             expect(record.response_data).not.toContain("AbortError");
         }, 15000);
 
@@ -342,10 +349,12 @@ describe("Upstream Timeout & Orphan Recovery", () => {
             const records = await requestHelper.getFinalizedRecords(adminToken, 1);
             const record = records[0];
 
+            // 关键：不得停在 processing（worker 下最怕的就是"只落 processing"）
             expect(record.status).toBe("failed");
-            expect(record.failed_code).toBe("client_disconnected");
+            expect(record.failed_code).toBe(expectedFailedCode);
             // 详情页报错文案可读：不落裸 AbortError，写明客户端断开
-            expect(record.response_data).toContain("客户端断开");
+            // 文案口径随模式：worker 下是上游超时，node 下是客户端断开，但都必须可读
+            expect(record.response_data).toContain(config.TEST_MODE === "worker" ? "超时" : "客户端断开");
             expect(record.response_data).not.toContain("AbortError");
         }, 15000);
     });

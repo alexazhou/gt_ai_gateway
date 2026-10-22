@@ -1,7 +1,7 @@
 # GT AI Gateway v1.9.0-beta1 问题台账（ISSUES）
 
 > 汇总来源：`reviews/ai-gateway-code-review-阿张.md`（代码与安全）、`reviews/ai-gateway-test-review-李哥.md`（测试与质量）、`reviews/regression-cases-p0-李哥.md`（回归用例）
-> 去重后合计 **38 项：P0 × 4、P1 × 12、P2 × 22**（P1-12 为验收阶段新发现）
+> 去重后合计 **40 项：P0 × 4、P1 × 12、P2 × 24**（P1-12、P2-23、P2-24 为验收阶段新发现）
 > 状态口径：`TODO` / `IN_PROGRESS` / `FIXED(待验)` / `VERIFIED` / `WONTFIX`
 > 更新规则：修完由执行人改为 `FIXED(待验)`，验收通过后改为 `VERIFIED`。
 
@@ -12,8 +12,8 @@
 | 编号 | 问题 | 位置 | 负责人 | 状态 | 修复方案 |
 |---|---|---|---|---|---|
 | P0-1 | **命令注入**：SQL 仅转义 `"` 后拼进 `--command="..."` 交给 shell，`$()`、反引号、`;` 可执行任意命令（`dbName`、`configPath` 同样未校验） | `src/util/db/wranglerDBAdapter.ts:23,38,44` | 阿张 | VERIFIED | 改 `execFileSync("npx", [...])` 参数数组绕开 shell；超长 SQL 走临时文件 `--file`；`dbName`/`configPath` 加 `/^[\w.\-/]+$/` 白名单；顺带修"`\n`→空格"会改坏 SQL 字面量的问题 **已改（分支 `fix/p0-security-billing`）**：`execSync`→`execFileSync("npx", argv[])`（不进 shell）；>32KB SQL 走临时文件 `--file`；新增 `src/util/db/cliArgUtil.ts` 复用白名单（拒绝 `..`/非法字符），`dbMigrationService` 的合并迁移分支与 DROP 表循环一并收口（原 `execSync(cmd)` 同类注入点）；取消 `\n`→空格替换。守卫用例 `tests/unit/security/no-shell-string-exec.test.ts` 已转绿。 |
-| P0-2 | **限流在 Worker 下失效**：令牌桶是 isolate 内 Map，实际 rpm ≈ 配置 × isolate 数，规则可成倍绕过 | `src/service/rateLimitService.ts:12,55`；`src/util/rule/memoryRateLimitStore.ts` | 阿张 | TODO | Worker 模式改用 Durable Object 原子令牌桶，或 D1 条件原子 UPDATE；`setStore()` 已预留注入点 |
-| P0-3 | **上游故障冷却失效**：30s 冷却同样是 isolate 内状态，故障上游被持续打；`cacheService` 裸 Map 无 TTL/淘汰，Node 常驻模式只增不减 | `src/service/upstreamHealthService.ts:40,65`；`src/service/cacheService.ts:1` | 阿张 | TODO | 与 P0-2 同一套共享存储（DO 或 KV，KV 接受最终一致）；`cacheService` 加 `maxSize` + LRU/TTL 清扫 |
+| P0-2 | **限流在 Worker 下失效**：令牌桶是 isolate 内 Map，实际 rpm ≈ 配置 × isolate 数，规则可成倍绕过 | `src/service/rateLimitService.ts:12,55`；`src/util/rule/memoryRateLimitStore.ts` | 阿张 | FIXED(待验) | 采用 **D1 条件原子 UPDATE**（不引 DO，免费计划零新依赖）**已改（分支 `fix/p0-worker-isolate-state`）**：新增 `resource/migrate/migrate_0033`（`rate_limit_bucket(bucket_key PK, tokens REAL, last_ms)` + `last_ms` 索引）；`src/util/rule/sqlRateLimitStore.ts` 用「INSERT … ON CONFLICT DO NOTHING 初始化 → 单条 `UPDATE … SET tokens = MIN(cap, tokens + 补液) - 1 … WHERE 余量 >= 1 RETURNING tokens` 原子扣减」，未扣到再 SELECT 读回算 Retry-After；`rateLimitService.resolveStore()` 改为 Node→内存、Worker→SQL 存储，`consume` 异步化（类型 `ConsumeResult \| Promise<ConsumeResult>`）；`dbAdapterUtil` 的 `StatementAdapter` 补参数绑定（`.bind()` / 透传 / MySQL `execute`），新增 `SqlExecutor` + `OrmSqlExecutor`（每次调用取 `ormService.dbAdapter`，D1 binding 是 per-request）。MySQL 路径不落这张表（单进程内存天然正确），DO 仅作为可选后端预留。 |
+| P0-3 | **上游故障冷却失效**：30s 冷却同样是 isolate 内状态，故障上游被持续打；`cacheService` 裸 Map 无 TTL/淘汰，Node 常驻模式只增不减 | `src/service/upstreamHealthService.ts:40,65`；`src/service/cacheService.ts:1` | 阿张 | FIXED(待验) | 与 P0-2 同一套共享存储 **已改（分支 `fix/p0-worker-isolate-state`）**：新增 `resource/migrate/migrate_0033` 的 `upstream_health(health_key PK, failed_at)` 表；`src/util/health/sqlHealthStore.ts`（接口 + SQL 实现 upsert/list/prune/clear）；`upstreamHealthService` 改为「**本地 Map 短 TTL 缓存（同步读，供路由 `isDown`）+ 落库共享**」：`markFailure` 先本地后落库（写库失败仅 warn，不阻断 failover），`syncFromStore()` 每请求进入路由前调用、TTL 4s 内不重复读并按 DB 整表替换（N 个 isolate 也只用 1 次 D1 读/4s，压住读放大）。`cacheService` 重写为 TTL + LRU（`maxSize` 默认 1000，Map 插入序做 LRU，新增 `size()/configure()/pruneExpired()`），不再承担跨实例一致性职责。 |
 | P0-4 | **计费与记录非原子**：先 `recordService.update` 写 usage+cost，再 `deductBalance`，两步独立提交；中途失败即钱账不一致且无补偿 | `src/service/responseHandlerService.ts:222/238`（流式）、`:395/414`（非流式） | 阿张 | VERIFIED | 加 `ormService.transaction()` 抽象（SQLite `execTransaction` / D1 `batch` / MySQL `beginTransaction`），记录+扣费+活动日志三步同事务；`isModuleBillingEnabled()` 在事务外取；失败 catch 后落可见日志 **已改（分支 `fix/p0-security-billing`）**：新增 `ormService.runAtomically()`（D1 `batch` / better-sqlite3 `db.transaction` / MySQL 显式事务）+ `src/service/billingSettlementService.ts`；「记录 + 扣费 + 活动日志」同批提交（活动为事务外算好 JSON、事务内幂等 upsert）；扣费语句带 `record.status <> 'success'` 守卫防重复扣费；`isModuleBillingEnabled()` 事务外取；收尾失败 catch 兜底 markFailed + 可见日志。 |
 
 ---
@@ -62,7 +62,9 @@
 | P2-19 | `APP_ERROR_SYMBOL` 定义未使用，跨 realm 判定意图未落地 | `src/customError.ts` | 阿张 | TODO | 统一 `isAppError(e)` 替换 `instanceof` |
 | P2-20 | `waitUntil(task())` 未挂 catch，后台 reject 静默 | `src/util/runInBackgroundUtil.ts:18` | 阿张 | VERIFIED | `waitUntil(task().catch(log))` + 落 activity（**与 P0-4 一起做**） **已改**：`runInBackground` 统一 `task().catch(reportBackgroundError)`（waitUntil 与本地兜底同一条路径），异常走 `getLogger().error` + `console.error`，不再产生未处理拒绝；流式收尾 catch 额外 markFailed（含 activity）保证失败可见。 |
 | P2-21 | **覆盖率产物失效且无门禁**：`coverage-final.json` 仅 3/121 文件有数据（3.1%），CI 无覆盖率任务 | `coverage/`、`.github/workflows/test.yml`、`vitest.config.ts` | 李哥 | VERIFIED | ① CI 新增 `test-coverage` job（`npm run backend:test:coverage` + artifact 上传）；② 两个 vitest 配置加 `coverage.thresholds` 棘轮地板：node `stmts 55 / branch 50 / funcs 55 / lines 55`（实测基线 58.41/54.83/60.57/58.37），worker `50/45/50/50`；③ `backend:test:coverage` 脚本补 `TEST_MODE=node` + 显式 `--config`（原脚本跑的是默认模式，config 不明确）；④ `coverage/` 本就在 `.gitignore`（`git check-ignore` 已确认，历史产物未入库）。**目标 60% 需批次 2 补 `src/index.ts`、`src/local.ts` 等入口后再收紧** |
-| P2-22 | **测试口径与用例问题**：文件数 107 vs 文档 123；worker 跳过客户端断开 6 例 + R2 1 例（真实环境无覆盖）；`ai.negative.test.ts:257` 命名与断言不符；CORS 无用例且无 Origin 时返回 `*` + credentials | `tests/`、`vitest.worker.config.ts`、`src/middleware/corsMiddleware.ts` | 李哥 | IN_PROGRESS | 已完成：① `ai.negative.test.ts` 两处 "should return 401 when model does not exist" 改为 404（断言本就是 404）；② 新增 `tests/api/gateway/cors.test.ts`（A1 放行 5 源 / A2 拒绝 6 源含 4 条前缀绕过回归 / A3 纯函数口径 / A4 无 Origin 不回 ACAO），顺带修出 P1-12；③ 依赖 `node:child_process` 的用例统一用 `*.node.test.ts` 命名，worker 配置 `exclude: ['**/*.node.test.ts']`（原先在 worker 下 9/16 红）；④ 实测口径：node **112 文件 / 1274 例**、worker **85 文件 / 1063 例（7 跳过）**，需回写文档。待办：worker 侧仍跳过的 7 例（客户端断开 6 + R2 1）需补等价用例或打开 |
+| P2-22 | **测试口径与用例问题**：文件数 107 vs 文档 123；worker 跳过客户端断开 6 例 + R2 1 例（真实环境无覆盖）；`ai.negative.test.ts:257` 命名与断言不符；CORS 无用例且无 Origin 时返回 `*` + credentials | `tests/`、`vitest.worker.config.ts`、`src/middleware/corsMiddleware.ts` | 李哥 | VERIFIED | ① `ai.negative.test.ts` 两处 "should return 401 when model does not exist" 改为 404（断言本就是 404）；② 新增 `tests/api/gateway/cors.test.ts`（A1 放行 5 源 / A2 拒绝 6 源含 4 条前缀绕过回归 / A3 纯函数口径 / A4 无 Origin 不回 ACAO），顺带修出 P1-12；③ node-only 用例统一 `*.node.test.ts` 命名，worker 配置 `exclude: ['**/*.node.test.ts']`；④ **worker 的 7 例跳过全部消除**（skipped 从 7 → 0）：`stream-failure` 3 例改 `it.fails` 看门狗（P2-23 运行时语义）、2 例 `upstream-timeout` 改模式化断言（两模式都必须"已收尾 + 文案可读 + 不落裸 AbortError"）、`objectStorageChain` 在 worker 改走 R2 回读（详情 API 两次回读逐字节一致）；⑤ 新增 `tests/unit/util/timeoutAbortController.test.ts`（6 例，双模式）钉死"客户端信号一断就产出 CLIENT_DISCONNECTED 标记"；⑥ 口径实测：node **114 文件 / 1293 例**、worker **86 文件 / 1078 例（0 跳过）** |
+| P2-23 | **Worker 本地不传播「客户端断开」信号**：`c.req.raw.signal` 在 `wrangler dev` 下不会因客户端 abort 而中止，流式请求断开后记录**一直停在 `processing`**（实测每 1s 采样 8 次全不动），只能等 10 分钟孤儿扫描收尾；非流式则跑到上游超时才收尾（`upstream_timeout`）。node 模式同链路正常落 `client_disconnected` | `src/service/senderService.ts:285`、`src/util/abortTimeoutUtil.ts:206-220` | 阿张 | TODO | ① 确认生产 Workers 是否真的会 abort `request.signal`（本地 emulation 与线上可能不一致）；② 不论是否一致，加兜底：流式读循环里按 chunk/空闲周期检查 `c.req.raw.signal.aborted`，命中即 `markFailure(CLIENT_DISCONNECTED)`；③ 缩短孤儿扫描阈值或加"流式 processing 超 N 分钟必收尾"的看门狗。测试侧现状：node 下 5 例端到端断言（`stream-failure` 3 + `upstream-timeout` 2）；worker 下 3 例改为 `it.fails` 看门狗 + 2 例模式化断言（必须收尾、文案可读、不落裸 `AbortError`），并用 `tests/unit/util/timeoutAbortController.test.ts` 在两种模式下钉死"信号一断就必须打 CLIENT_DISCONNECTED" |
+| P2-24 | **`abortWith()` 缺"先到先得"守卫，失败归因会被覆盖**：客户端断开先到后，固定超时定时器到点仍把 `tagged` 改写成 `UPSTREAM_TIMEOUT`（`AbortController.abort` 本身是幂等 no-op，但标记字段被覆盖），详情页/统计里的 failed_code 可能从 `client_disconnected` 变成 `upstream_timeout` | `src/util/abortTimeoutUtil.ts:206-222` | 阿张 | TODO | `abortWith()` 开头加 `if (this.controller.signal.aborted) return;`，让第一个原因赢。看门狗：`tests/unit/util/timeoutAbortController.test.ts` 的 `it.fails("超时与断开竞争时，先到的一方赢")`，修好后会自动转红提醒改成正式断言 |
 
 ---
 
@@ -116,3 +118,18 @@
 2. 端口固定（mock 9999 / gateway 9720 / socks 9996 + 查询端点 10096 / proxy 9997），同机并发跑会互相踩；且 `globalSetup` 的 teardown 会删 `test.db`，导致对方刷 `SQLITE_READONLY_DBMOVED`。跑全量前先 `lsof -nP -iTCP:9999,9720 -sTCP:LISTEN` 确认空闲并在群里报备；清端口只 kill 自己起的 PID，**不要 `pkill -f vitest`**（会杀掉对方正在跑的套件，产出假失败）。
 3. Node 模式可用 `TEST_PORT` / `TEST_BASE_URL` / `TEST_UPSTREAM_MOCK_URL` / `TEST_PROXY_PORT` / `TEST_SOCKS_PORT` / `TEST_SOCKS_QUERY_PORT` / `TEST_DB_PATH` 做隔离；但**多个用例写死 `http://localhost:9999`**（`auth.test.ts`、`rootToken.test.ts`、`proxy.node.test.ts` 等），所以全量仍必须独占端口；worker 的 9720 在 `tests/config.ts` 里写死，无法隔离。
 4. 依赖 `node:child_process` 的用例必须用 `*.node.test.ts` 命名（worker 配置已 exclude），否则 worker 下必红。
+
+### 批 B 补充：Worker 模式缺口收口（李哥）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| Node 全量 | `TEST_MODE=node npx vitest --run --config vitest.config.ts` | 114 文件 / 1293 例：**1274 绿 / 19 红**；19 红全部落在阿张在写的 P0-2/P0-3 三个文件（`upstreamHealthService` / `rateLimitService` / `dbMigrationService` 的 `DROPPABLE_TABLES`），与本次改动无关 |
+| Worker 全量 | `TEST_MODE=worker npx vitest --run --config vitest.worker.config.ts` | 86 文件 / 1078 例：**1059 绿 / 19 红（同上）**，**skipped 0**（原 7 例全部跑起来） |
+| 类型检查 | `npx tsc --noEmit` | exit 0 |
+
+worker 侧这 7 例原来的 `skipIf` 处理方式（不是简单删掉 skip）：
+
+1. `stream-failure.test.ts` 客户端断开 3 例（OpenAI / Anthropic / Responses 流式）：worker 本地不传播断开信号，记录会停在 `processing`（实测 8s 采样不动）→ 改 `it.fails` 当缺陷看门狗，指向 P2-23；
+2. `upstream-timeout.test.ts` 非流式断开 2 例：改成模式化断言 —— node 期望 `client_disconnected`、worker 期望 `upstream_timeout`，但**两种模式都断言"必须已收尾 + 文案可读 + 不落裸 `AbortError`"**，把"只落 processing"这个最危险的形态卡住；
+3. `objectStorageChain.test.ts` R2 链路 1 例：worker 侧不能查 `storage_record` 表（对象在 R2 binding 里），改为通过详情 API 两次回读逐字节一致来证明 R2 读写链路，node 侧保留直接查表的强断言；
+4. 新增 `tests/unit/util/timeoutAbortController.test.ts`（6 例，双模式）把"客户端信号一断 → `CLIENT_DISCONNECTED` 标记 + 可读文案"钉死在单元层，弥补端到端在 worker 下观测不到的空缺。
