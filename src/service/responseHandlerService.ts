@@ -47,6 +47,31 @@ const SSE_LOOP_LOG_PREFIX = "[responseHandlerService]";
 
 
 /**
+ * 按 HTTP 语义不允许携带 body 的状态码（RFC 9110）：
+ * 1xx（信息性）/ 204 No Content / 205 Reset Content / 304 Not Modified。
+ *
+ * 这类状态码一旦用 `new Response("", { status })`（即 `c.body("")`）构造响应，
+ * 运行时直接抛 `TypeError: Invalid response status code 204` → 网关返回 500，
+ * 客户端拿不到上游真实状态码（P2-02：上游 204 无 body → 500 就出在这里）。
+ * 注意 204/205 是合法 2xx，必须记 success + cost=0，不能当 upstream_error 绕过去。
+ */
+function isBodyForbiddenStatus(status: number): boolean {
+    return status === 204 || status === 205 || status === 304 || (status >= 100 && status < 200);
+}
+
+
+/**
+ * 构造「无 body」的透传响应：不设 body，并摘掉 Content-Type
+ * （声明有体却无体是自相矛盾的，部分客户端会据此等待 body 直到超时）。
+ */
+function buildEmptyResponse(c: Context, status: StatusCode): Response {
+    const response = c.body(null, status) as Response;
+    response.headers.delete("Content-Type");
+    return response;
+}
+
+
+/**
  * 安全解析上游 JSON 响应体：解析失败或不是对象时返回 null。
  * 用于把「上游 200 + 非 JSON 体」识别为上游故障（而不是 success + cost=0）。
  */
@@ -374,6 +399,41 @@ async function settleStreamResult(
 }
 
 
+/**
+ * 收尾「上游返回无 body 状态码」的请求（204/205/304/1xx）：
+ * - 2xx（204/205）：合法成功响应，记 success + cost=0。没有 body 就没有 usage，
+ *   既不算 usage 也不扣费，更不能像修复前那样记成 upstream_error（会污染失败率与告警）。
+ * - 非 2xx（304/1xx）：状态码本身不是成功，记失败，但不写 response_data（无处可取）。
+ */
+async function settleBodylessResponse(record: SgRecord, statusCode: StatusCode): Promise<void> {
+    const endedAt = Date.now();
+
+    if (statusCode >= 200 && statusCode < 300) {
+        await billingSettlementService.settleRecord({
+            recordId: Number(record.id),
+            status: SgRecordStatus.SUCCESS,
+            usage: null,
+            cost: 0,
+            endAt: new Date(endedAt),
+            firstTokenLatency: endedAt - record.created_at.getTime(),
+            chargeUserId: null,
+            activity: {
+                stage: RequestActivityStage.RESULT,
+                message: "请求成功（上游返回无 body 状态码）",
+                details: { status: SgRecordStatus.SUCCESS, upstream_status: statusCode, cost: 0 },
+            },
+        });
+        return;
+    }
+
+    await recordService.markFailed(record.id, FailedCode.UPSTREAM_ERROR, {
+        message: "上游返回无 body 的非成功响应",
+        level: ActivityLevel.ERROR,
+        detail: { upstream_status: statusCode, reason: "bodyless_status" },
+    });
+}
+
+
 // ====================================================================
 // 公开入口
 // ====================================================================
@@ -410,6 +470,14 @@ export async function handleNonStreamResponse(
     }
 
     const statusCode = upstreamRes.status as StatusCode;
+
+    // P2-02：无 body 状态码必须先收口，不能落到下面任何一个「带 body 返回」的分支。
+    // 之前 204 会走到「非 JSON body → upstream_error」那条，最后用空串构造 204 响应 → TypeError → 500；
+    // 304 更早一步落在 `!upstreamRes.ok` 分支，同一个 TypeError 换个入口复现。这里统一前置。
+    if (isBodyForbiddenStatus(statusCode)) {
+        await settleBodylessResponse(record, statusCode);
+        return buildEmptyResponse(c, statusCode);
+    }
 
     if (!upstreamRes.ok) {
         console.error("[responseHandlerService] Upstream non-stream error response:", {

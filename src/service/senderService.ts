@@ -327,8 +327,11 @@ async function sendRequestToUpstream(
     }
     console.log("upstream response status:", upstreamRes.status);
 
+    // body 为 null 说明是无 body 状态码（204/205/304，P2-02），再按 SSE 读会在 getReader() 上抛 ——
+    // 交给非流式分支统一按「无 body 状态码」收口
     const isStream =
         upstreamRes.ok &&
+        upstreamRes.body !== null &&
         upstreamRes.headers.get("content-type")?.startsWith("text/event-stream");
 
     // 8. 按响应类型分发处理（三种协议统一走 responseHandlerService，按 clientFormat 选累加器/解析口径）
