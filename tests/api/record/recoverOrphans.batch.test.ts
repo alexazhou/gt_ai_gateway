@@ -1,6 +1,9 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import requestHelper from "../../helpers/requestHelper";
 import dbHelper from "../../helpers/dbHelper";
+import config from "../../config";
 import { setupAdminUser } from "../../globalSetup";
 
 /**
@@ -15,6 +18,10 @@ import { setupAdminUser } from "../../globalSetup";
  * 2. 未超过阈值的 processing 记录**不能**被误伤；
  * 3. 幂等：再调一次 recovered=0（已收尾的不会被重复计数/重复写活动）；
  * 4. 回收后 end_at 必须落值（否则又变成「没有结束时间」的脏数据）。
+ *
+ * P2-27 补的两类守卫：
+ * 5. 活动日志随批量化一起落库（不能「为了绕开 subrequest 配额把日志写丢」）；
+ * 6. 反向守卫：活动批量写**失败**时，记录仍被回收且留下 warn 日志（best-effort 语义）。
  */
 
 const ORPHAN_COUNT = 250; // > RECOVER_ORPHAN_BATCH(200)，用来验证分页循环
@@ -22,6 +29,22 @@ const FRESH_COUNT = 3;
 
 /** 第一条用例结束时的库内快照，供幂等用例比对（避免在 HTTP 请求前后各起一次 CLI） */
 let baseline = { recovered: 0, activities: 0 };
+
+/** request_activity 的原始 DDL：反向守卫用例会先删表注入写入失败，断言完再建回来 */
+let activityTableDdl = "";
+
+/**
+ * 读取服务端日志（globalSetup 会把 server stdout/stderr 落盘到 app.log）。
+ * 只用于「warn 是否留痕」这类无法从接口观测的断言。
+ */
+function readAppLog(): string {
+    const path = join(config.LOG_CONFIG.dir, config.LOG_CONFIG.appLogFile);
+    try {
+        return readFileSync(path, "utf8");
+    } catch {
+        return "";
+    }
+}
 
 let adminToken: string;
 let adminUserId: number;
@@ -39,6 +62,16 @@ describe("record 孤儿回收批量化（P2-10）", () => {
         const admins = await dbHelper.query<any>("SELECT id, tenant_id FROM user ORDER BY id ASC LIMIT 1");
         adminUserId = admins[0].id;
         tenantId = admins[0].tenant_id ?? 1;
+
+        // 提前抓 request_activity 的建表语句（供反向守卫用例删表后还原）。
+        // 放在 beforeAll、在任何 HTTP 请求之前做，避免「CLI 查询紧跟 HTTP」触发
+        // wrangler dev 的连接重连竞态（见文件末尾注释）。
+        const ddlRows = await dbHelper.query<any>(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'request_activity'",
+        );
+        expect(ddlRows.length, "request_activity 表应存在").toBeGreaterThan(0);
+        activityTableDdl = String(ddlRows[0].sql ?? "");
+        expect(activityTableDdl.toLowerCase()).toContain("create table");
     }, 60000);
 
     /**
@@ -137,4 +170,49 @@ describe("record 孤儿回收批量化（P2-10）", () => {
         expect(Number(row.recovered), "记录不能被二次改写").toBe(baseline.recovered);
         expect(Number(row.activities), "重复调用不得重复追加回收活动").toBe(baseline.activities);
     }, 60000);
+
+    // P2-27 反向守卫：活动写入是 best-effort（失败不回滚已回收记录）。
+    // 「为了绕开 subrequest 配额把日志写丢」是本项最大的副作用风险，所以不仅要验「正常时写进去」，
+    // 还要验「真写不进去时会怎样」：记录必须照样被回收，且必须留下可发现的 warn 日志。
+    // 注入方式用「删表」这种自然失败，不依赖 mock（进程内既不能 mock 服务端，也不该为测试加后门）。
+    it("活动批量写失败时：记录仍被回收，并留下 warn 日志（best-effort 语义）", async () => {
+        const FAILURE_COUNT = 5;
+
+        await dbHelper.execute("DROP TABLE request_activity");
+        await insertProcessingRecords(FAILURE_COUNT, "-3 hours");
+
+        const response = await requestHelper.post("/record/recover-orphans.json", {}, adminToken);
+        expect(response.status, "活动写失败不能让回收接口 500").toBe(200);
+        expect(response.body.recovered, "记录回收不能因为活动写失败而放弃")
+            .toBeGreaterThanOrEqual(FAILURE_COUNT);
+
+        // 记录确实收尾了（表已被删，所以这里只查 record）
+        const summary = await dbHelper.query<any>(
+            `SELECT
+                (SELECT COUNT(*) FROM record
+                  WHERE status = 'failed' AND failed_code = 'recovered_orphan' AND end_at IS NOT NULL) AS recovered,
+                (SELECT COUNT(*) FROM record
+                  WHERE status IN ('init','processing') AND end_at IS NULL
+                    AND start_at < datetime('now','localtime','-10 minutes')) AS still_orphan`,
+        );
+        const row = summary[0] ?? {};
+        expect(Number(row.recovered)).toBeGreaterThanOrEqual(baseline.recovered + FAILURE_COUNT);
+        expect(Number(row.still_orphan), "活动写失败不影响回收，不能留孤儿").toBe(0);
+
+        // warn 必须留痕（不能是静默 catch）：读 app.log 等一小会儿让 stdout 刷盘
+        let hitLog = false;
+        for (let i = 0; i < 20 && !hitLog; i += 1) {
+            hitLog = readAppLog().includes("孤儿回收活动日志写入失败");
+            if (!hitLog) {
+                await new Promise((r) => setTimeout(r, 100));
+            }
+        }
+        expect(hitLog, "活动写入失败必须留下结构化 warn 日志（[recordManager] 孤儿回收活动日志写入失败）")
+            .toBe(true);
+
+        // 还原表，避免污染后续用例
+        await dbHelper.execute(activityTableDdl);
+        const restored = await dbHelper.query<any>("SELECT COUNT(*) AS c FROM request_activity");
+        expect(Number(restored[0].c)).toBeGreaterThanOrEqual(0);
+    }, 120000);
 });
