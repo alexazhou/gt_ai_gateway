@@ -68,6 +68,8 @@
 | 教训 | **「静默 catch」会把 no-op 伪装成已修复**：P2-14 的 `_updateD1Binding` 整段 `try/catch` 吞异常，导致「每请求更新 D1 binding」这段保护**整整一个版本都是空转**，而代码注释还写着它生效——故障转移到查询期以 `Cannot perform I/O on behalf of a different request` 出现，根因不可见。结论：**兜底 catch 只能用于「失败可降级且必须留痕」的场景**，能明确判定为致命的路径应直接抛；所有 catch 至少打一条带上下文的日志 |
 | 口径 | **覆盖率低的真实原因是「API 用例跑在子进程」**：`tests/globalSetup.ts` 用 `spawn("npx tsx src/local.ts")` 起独立服务，V8 只统计测试进程内的代码，因此 `routes.ts` / `controllers` / `responseHandlerService` / `senderService` 的进程内计数长期为 **0%**（不是「入口文件缺覆盖」）。新增的进程内 `app.request()` 用例（`tests/api/inprocess/adminRoutes.test.ts`、`tests/unit/entry/spaFallback.test.ts`）把 routes → middleware → controller → service 主链路纳入统计；**60% 地板不作为本版硬门槛**，实测达标后再抬阈值，禁止硬盖入口文件凑数 |
 | 新增 | **测试锁脚本** `scripts/with-test-lock.sh`（`npm run test:locked` 等别名）：原子抢锁、`trap` 释放、区分「真在跑」与「残留锁」，杜绝并行跑全量踩库造成的假红 |
+| 教训 | **「worker 小样本绿」和「只在生产规模才炸」是两个不同假设，都得验**：P2-27 第一版验证时 250 条孤儿的回收在 worker 下必 `ECONNRESET`，一度以为方案不可行；实际是**测试播种方式**造成的假象 —— worker 下反复 `wrangler d1 execute` 会打断 dev server 的 SQLite 连接。把播种改成单条多值 INSERT 后同一条路径就正常了。**假绿和假红都会误导判断**：同一个实验里要把「实现有问题」与「测量方式有问题」分开验，否则会在错误的前提上下结论 |
+| 教训 | **分片只解第一堵墙，规模问题往往是叠加的**：P2-27 表面是单条 SQL 绑定变量超限（`WHERE id IN (200 个 ?)` = 203 > D1 上限 100），修完分片后 250 条孤儿仍失败 —— 第二堵墙是活动日志逐条 `append()`（每条 3 次往返 → 250 条 750 次 D1 往返），直接打爆 Worker 的 subrequest 配额，而且**表现不是报错而是 `ECONNRESET`**。最终修法是活动写入批量化（分片批量读 → 内存拼 JSON → 50 条一批 UPSERT，随 P2-27 一并合入）。结论：**只看「小样本能跑通」就宣布修复，等于把 1 条记录的问题挪到 250 条记录上重新暴露** |
 | 新增 | **干净门流程**：验收数字必须在独立 worktree 跑（不要把他人未提交改动混进结果）；worktree 需 `node_modules` / `frontend/dist` 软链 + 先 `npx tsx script/db.ts migrate --env worker-local`（否则 worker 门会出「空库 370 红」假红） |
 
 ---
