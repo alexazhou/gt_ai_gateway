@@ -67,7 +67,7 @@
 | P2-24 | **`abortWith()` 缺"先到先得"守卫，失败归因会被覆盖**：客户端断开先到后，固定超时定时器到点仍把 `tagged` 改写成 `UPSTREAM_TIMEOUT`，详情页/统计里 failed_code 可能从 `client_disconnected` 变成 `upstream_timeout` | `src/util/abortTimeoutUtil.ts:206-235` | 阿张 | VERIFIED | `abortWith()` 开头加 `if (this.controller.signal.aborted) return;`，第一个原因赢。回归用例 `tests/unit/util/timeoutAbortController.test.ts > 超时与断开竞争时，先到的一方赢（不会双写标记）`（已从 `it.fails` 转为正式断言，node/worker 双模式绿） |
 | P2-25 | **共享限流存储有写放大**：`SqlRateLimitStore.consume()` 每个放行请求都先执行一条 `INSERT ... ON CONFLICT(bucket_key) DO NOTHING`（除首个请求外必然是主键冲突的无用写），再执行扣减 UPDATE；D1 上等于每次放行 2 次写 + 概率清扫写 | `src/util/rule/sqlRateLimitStore.ts:26-40` | 阿张 | VERIFIED | 改成「先 UPDATE；0 行时用 SELECT 区分『桶不存在』与『令牌不足』，桶不存在则 INSERT 后重试一次 UPDATE」，放行快路径降到 1 条写。功能正确性已有用例保障（`tests/unit/service/rateLimitStore.crossIsolate.node.test.ts` + `tests/unit/util/sharedStateStores.node.test.ts`），本项纯性能优化 **已验（李哥）**：`tests/unit/util/rule/sqlRateLimitStore.writeCount.node.test.ts`（5 例，真 better-sqlite3 + 语句分类计数包装器）——桶已存在时放行**只 1 条写且 `run()` 0 次**、连放 5 次= 5 条写、缺桶仍 INSERT 1 次并落库、令牌不足不多写、桶被删后能重初始化。 |
 | P2-26 | **原型污染导致 500**：`__proto__` / `constructor` / `prototype` 经 `JSON.parse` 成为自有属性 → Sutando `fill()` 的 casts 命中原型链 → `TypeError: …toLocaleLowerCase is not a function` → 500 | `src/controller/modelController.ts:61`、`src/controller/vendorController.ts:114` | 阿张 | VERIFIED | 新增 `stripUnsafeKeys()`（`src/util/inputSanitizeUtil.ts`），在 `new SgModel(...)` / `new SgVendor(...)` 之前剔除三类危险键，非对象原样返回。取舍：**静默忽略而非报错** —— 客户端多传一个 `constructor` 不该让创建/更新整体失败。 **已验（李哥·批次4/5）**：`tests/api/gateway/p2-cleanup.test.ts` —— PUT `/model/:id` 带 `__proto__` 不再 500，响应体不含 `TypeError`/`castType`/`toLocaleLowerCase`；`updateModel` 走 `pickUpdatableFields` 白名单、`updateVendor` 用解构只取已知字段，原型键两条路径都进不去。**发现（李哥·批次4 复核，原台账漏登）** |
-| P2-27 | **孤儿回收批量 UPDATE 在 D1 上超绑定变量上限**：`recoverOrphans` 按 200/批拼 `UPDATE record SET ... WHERE id IN (?,?,...)`，200 个 id + 3 个赋值参数 = 203 个绑定变量，D1 单语句绑定变量有限 → `D1_ERROR: too many SQL variables` → 回收接口 500（worker 环境回收完全失效，node 正常） | `src/manager/recordManager.ts:196-241` | 阿张 | VERIFIED | 建议分片 + 常量注释  **已修（阿张·`704be9b`，独立 commit）**：① 记录更新按 `RECOVER_ORPHAN_ID_CHUNK = 87` 分片（`RECOVER_ORPHAN_BIND_BUDGET = 90`，注释写明「D1 上限 100、留 10 余量，所以不是 200」，再减 3 个固定赋值参数 status/failed_code/end_at）；分页 200 保留（分页 ≠ 一条 SQL 带几个 id）。② **第二堵墙**：活动日志原来逐条 `append()`（每条 3 次往返，250 条 = 750 次 D1 往返）会打爆 Worker 的 subrequest 配额，且**表现不是报错而是 `ECONNRESET`** → 新增 `requestActivityService.buildAppendedStatements()`（分片批量读 → 内存拼 JSON → `ON CONFLICT(record_id)` UPSERT）与 `requestActivityManager.findByRecordIds()`，按 50 条语句一批走 `runAtomically`（D1 batch = 1 次往返）；活动写入保持 best-effort，失败 `console.warn` 结构化日志（不静默）。 **已验（李哥·#16 复验）**：`tests/api/record/recoverOrphans.batch.test.ts` 的 `it.fails`/`it.skipIf` 已全部转正式断言，worker 与 node 跑同一份断言 —— 250 条孤儿（跨 2 页）worker 下全量回收：接口 200、`recovered >= 250`、`processing` 残留 0、`failed/recovered_orphan` 且 `end_at` 全部落值、**活动日志 ≥ 250 条且抽样每条记录恰好 1 条**（防「为绕配额把日志写丢」）、未超阈值的 3 条新请求不被误杀；重复调用 `recovered=0` 且记录与活动均不翻倍。 worker 门 skip 从 1 → **0**（107 文件 / 1218 例全绿）。详见文末「P2-27 复验收尾」。 |
+| P2-27 | **孤儿回收批量 UPDATE 在 D1 上超绑定变量上限**：`recoverOrphans` 按 200/批拼 `UPDATE record SET ... WHERE id IN (?,?,...)`，200 个 id + 3 个赋值参数 = 203 个绑定变量，D1 单语句绑定变量有限 → `D1_ERROR: too many SQL variables` → 回收接口 500（worker 环境回收完全失效，node 正常） | `src/manager/recordManager.ts:196-241` | 阿张 | VERIFIED | 建议分片 + 常量注释  **已修（阿张：分支上原始 commit `704be9b`，rebase 到 `2d2c3ab` 后为 `a219309`，即入 `1.9_dev` 的那版）**：① 记录更新分片：`RECOVER_ORPHAN_BIND_BUDGET = 90`（注释写明「D1 上限 100、留 10 余量，所以不是按 node 的 999 或分页 200」），片大小由 **`resolveRecoverOrphanIdChunk(setParams.length)` 运行时算**（当前 3 个赋值参数 → 87 个 id；SET 参数超预算直接抛），SET 子句与占位符同源生成 —— 以后给 SET 加字段片大小自动收窄，不会二次超限；分页 200 保留（分页 ≠ 一条 SQL 能带几个 id）。② **第二堵墙**：活动日志原来逐条 `append()`（每条 3 次往返，250 条 = 750 次 D1 往返）会打爆 Worker 的 subrequest 配额，且**表现不是报错而是 `ECONNRESET`** → 新增 `requestActivityService.buildAppendedStatements()`（分片批量读 → 内存拼 JSON → `ON CONFLICT(record_id)` UPSERT）与 `requestActivityManager.findByRecordIds()`，按 50 条语句一批走 `runAtomically`（D1 batch = 1 次往返）；活动写入保持 best-effort，失败 `console.warn` 结构化日志（不静默）。 **已验（李哥·#16 复验）**：`tests/api/record/recoverOrphans.batch.test.ts` 的 `it.fails`/`it.skipIf` 已全部转正式断言，worker 与 node 跑同一份断言 —— 250 条孤儿（跨 2 页）worker 下全量回收：接口 200、`recovered >= 250`、`processing` 残留 0、`failed/recovered_orphan` 且 `end_at` 全部落值、**活动日志 ≥ 250 条且抽样每条记录恰好 1 条**（防「为绕配额把日志写丢」）、未超阈值的 3 条新请求不被误杀；重复调用 `recovered=0` 且记录与活动均不翻倍；**反向守卫**：删掉 `request_activity` 表注入活动写入失败 → 回收接口仍 200、记录照样回收、`app.log` 里留下 `孤儿回收活动日志写入失败` 的 warn（best-effort 语义成立，且不是静默 catch）。 worker 门 skip 从 1 → **0**（107 文件 / 1219 例全绿）。详见文末「P2-27 复验收尾」。 |
 
 ---
 
@@ -316,20 +316,27 @@ worker 侧这 7 例原来的 `skipIf` 处理方式（不是简单删掉 skip）�
 | 门 | 结果 |
 |---|---|
 | `tsc --noEmit` | exit 0 |
-| Node 全量 | **140 文件 / 1458 passed + 3 skipped (1461)**，exit 0 |
-| Worker 全量 | **107 文件 / 1218 passed，skipped 0**，exit 0（原先被 P2-27 挡住的幂等用例已打开） |
-| 覆盖率 | exit 0；stmts **64.83** / branch **57.13** / funcs **67.65** / lines **65.04**（地板 60/52/60/60） |
+| Node 全量 | **140 文件 / 1459 passed + 3 skipped (1462)**，exit 0 |
+| Worker 全量 | **107 文件 / 1219 passed，skipped 0**，exit 0（原先被 P2-27 挡住的幂等用例已打开，新增反向守卫 1 例） |
+| 覆盖率 | exit 0；stmts **64.71** / branch **57.08** / funcs **67.51** / lines **64.93**（地板 60/52/60/60） |
 
 **实现核验（读码）**
 
-1. 分片常量可推导、不是魔法数：`BIND_BUDGET 90 − FIXED_PARAMS 3 = ID_CHUNK 87`，注释写明「D1 上限 100，不要按 node 的 999 或分页 200 来定」。
+1. 分片常量可推导、不是魔法数：预算 90 − SET 参数 3 = 片大小 87，且**片大小是运行时算的**（`resolveRecoverOrphanIdChunk(setParams.length)`）：我第一版 review 提的「以后给 SET 加字段常量会不同步」被真正消掉了，SET 参数本身超预算时直接抛（编码错误早失败，好过线上 500）。
 2. 分页与分片职责分离：`RECOVER_ORPHAN_BATCH(200)` 只决定一次查多少行，`chunkIds()` 决定一条 SQL 带几个 id。**这是本次最容易改错的地方** —— 直接把分页调小也能"变绿"，但批量语义和 node 侧性能会一起退化。
 3. 幂等：`UPDATE … WHERE id IN (...)` + `ON CONFLICT(record_id) DO UPDATE`，重复执行只写同样的值；活动 JSON 是「批外读 → 内存拼 → 批内 UPSERT」，与 `billingSettlementService` 的结算 UPSERT 同口径。
-4. 活动写失败只 warn 不回滚记录（回收优先），但**不是静默 catch** —— 带 `[recordManager]` 前缀 + count/firstRecordId/错误摘要，符合 P2-11 的教训。
+4. 活动写失败只 warn 不回滚记录（回收优先），但**不是静默 catch** —— 带 `[recordManager]` 前缀 + count/firstRecordId/错误摘要，符合 P2-11 的教训；这条现在有**反向守卫**用例覆盖（不是靠读码相信）。
 
 **我补强的断言（实现者没覆盖的风险面）**
 
-批量写活动最大的副作用风险是「为了绕开 subrequest 配额把日志写丢」，所以用例不看 `recovered` 数字就收工，而是：① 按 `record_id` 关联统计活动条数 ≥ 250；② 抽样 5 条记录断言每条**恰好 1 条**「孤儿记录回收」活动；③ 幂等用例除 `recovered=0` 外，再比对记录数与活动总数与基线完全一致。
+批量写活动最大的副作用风险是「为了绕开 subrequest 配额把日志写丢」，所以用例不看 `recovered` 数字就收工，而是：
+
+① 按 `record_id` 关联统计活动条数 ≥ 250；
+② 抽样 5 条记录断言每条**恰好 1 条**「孤儿记录回收」活动；
+③ 幂等用例除 `recovered=0` 外，再比对记录数与活动总数与基线完全一致；
+④ **反向守卫（最关键的一条）**：`DROP TABLE request_activity` 注入活动写入失败 → 断言回收接口仍 200、记录照样回收（`end_at` 落值、无残留孤儿）、`app.log` 里出现 `孤儿回收活动日志写入失败` 的 warn，最后用 `sqlite_master` 里的原始 DDL 把表建回来。
+
+④ 是「best-effort 语义」唯一能证的路径 —— 只验正常路径等于假设它永远不会失败。注入用「删表」这种自然失败，不给产品代码加测试后门，也不依赖 mock（服务端跑在子进程，mock 不到）。
 
 **一次「假红」的完整定性（值得记档）**
 
