@@ -127,7 +127,10 @@ describe("批次 4 P2 清理项", () => {
     });
 
     describe("P2-03 请求体上限", () => {
-        it("Content-Length 超过 32MB 时直接 413，不读 body", async () => {
+        // worker 模式跳过：wrangler dev 的 HTTP 前置层会按伪造的 content-length 等满 32MB 才交给 worker，
+        // 用例只能等到 60s 超时（这不是实现缺陷，是 node 原生 http 才允许「先声明后少发」的差异）。
+        // worker 侧「按实读长度兜底 413」由 `MAX_LLM_BODY_BYTES` 上限分支覆盖。
+        it.skipIf(config.TEST_MODE === "worker")("Content-Length 超过 32MB 时直接 413，不读 body", async () => {
             // 用原生 http 伪造 content-length：网关只读 header 就该拒绝，不会真的收 32MB
             const response = await new Promise<{ status: number; body: string }>((resolve, reject) => {
                 const req = http.request(
