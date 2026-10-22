@@ -1,9 +1,9 @@
 # GT AI Gateway v1.9.0-beta1 发布说明（初稿）
 
 > 状态：**定稿（李哥复验，批次 1~5）**
-> 范围：`1.9_dev` 上 `b957356..3f95eea`（批次 1~5 + P2-02 无 body 状态码收口；P2-27 合入后末位顺延），台账：`reviews/ISSUES.md`
+> 范围：`1.9_dev` 上 `b957356..a50c884`（批次 1~5 + P2-02 无 body 状态码收口 + P2-27 孤儿回收收敛），台账：`reviews/ISSUES.md`
 > 基线：v1.8.8-beta5（`master` 未动，`1.9_dev` 独立推进）
-> 汇总：**43 项（P0 × 4 / P1 × 12 / P2 × 27）**。其中 **41 项已修并 VERIFIED**、**1 项经复核为误报（P2-16，WONTFIX）**、**1 项（P2-27）修复进行中**（P2-26 原型污染、P2-27 D1 绑定变量上限均为验收期新增）
+> 汇总：**43 项（P0 × 4 / P1 × 12 / P2 × 27）**，全部处置完毕：**42 项已修并 VERIFIED**、**1 项经复核为误报（P2-16，WONTFIX）**（P2-26 原型污染、P2-27 D1 绑定变量上限均为验收期新增）
 
 ---
 
@@ -52,6 +52,7 @@
 | P2-09 | **选路 N+1**：每个上游串行 `findById`（5 上游 ≈ 10+ 次往返）。改为 3 条批量查询 + 内存命中 |
 | P2-10 | **孤儿记录回收串行**：逐行 update + 逐行写活动日志。改为分页（200/批）+ 批内单条批量 UPDATE + 活动并行写。**注意**：单条 `UPDATE … WHERE id IN (?,…)` 的绑定变量数受 D1 上限（100）约束，200 个 id + 3 个赋值参数 = 203 会直接 `D1_ERROR: too many SQL variables`（P2-27）；已按 87 个 id 一片分片执行（90 预算 − 3 固定参数），批量语义与幂等性不变 |
 | P2-13 | **R2 前缀删除全量收 key**：原先把所有 key 收进数组再删，几十万对象会顶爆内存。改为逐页删（内存只驻留一页） |
+| P2-27 | **孤儿回收在 Worker 下整体失效**：一页 200 个 id 拼成 `WHERE id IN (?,…)` = 203 个绑定变量，超 D1 单语句上限（100）→ `too many SQL variables` → 回收接口 500。分片修完后还有**第二堵墙**：活动日志逐条 `append()`，250 条 = 750 次 D1 往返，打爆 Worker 的 subrequest 配额，且**表现不是报错而是 `ECONNRESET`**。修法：记录更新按 87 个 id 分片（`BIND_BUDGET 90 − 固定参数 3`），活动写入改为「分片批量读 → 内存拼 JSON → `ON CONFLICT(record_id)` UPSERT，50 条语句一批」 |
 | P2-12 | **流日志每 chunk 打日志**：高 QPS 下日志洪水 + 热路径开销（还带两次 `includes` 扫描）。改为采样（首个 + 每 200 个），并 `finishStreamLog()` 等落盘（原来不 await 会丢尾部） |
 
 ## 四、工程化与可观测性（Engineering）
@@ -69,7 +70,7 @@
 | 口径 | **覆盖率低的真实原因是「API 用例跑在子进程」**：`tests/globalSetup.ts` 用 `spawn("npx tsx src/local.ts")` 起独立服务，V8 只统计测试进程内的代码，因此 `routes.ts` / `controllers` / `responseHandlerService` / `senderService` 的进程内计数长期为 **0%**（不是「入口文件缺覆盖」）。新增的进程内 `app.request()` 用例（`tests/api/inprocess/adminRoutes.test.ts`、`tests/unit/entry/spaFallback.test.ts`）把 routes → middleware → controller → service 主链路纳入统计；**60% 地板不作为本版硬门槛**，实测达标后再抬阈值，禁止硬盖入口文件凑数 |
 | 新增 | **测试锁脚本** `scripts/with-test-lock.sh`（`npm run test:locked` 等别名）：原子抢锁、`trap` 释放、区分「真在跑」与「残留锁」，杜绝并行跑全量踩库造成的假红 |
 | 教训 | **「worker 小样本绿」和「只在生产规模才炸」是两个不同假设，都得验**：P2-27 第一版验证时 250 条孤儿的回收在 worker 下必 `ECONNRESET`，一度以为方案不可行；实际是**测试播种方式**造成的假象 —— worker 下反复 `wrangler d1 execute` 会打断 dev server 的 SQLite 连接。把播种改成单条多值 INSERT 后同一条路径就正常了。**假绿和假红都会误导判断**：同一个实验里要把「实现有问题」与「测量方式有问题」分开验，否则会在错误的前提上下结论 |
-| 教训 | **分片只解第一堵墙，规模问题往往是叠加的**：P2-27 表面是单条 SQL 绑定变量超限（`WHERE id IN (200 个 ?)` = 203 > D1 上限 100），修完分片后 250 条孤儿仍失败 —— 第二堵墙是活动日志逐条 `append()`（每条 3 次往返 → 250 条 750 次 D1 往返），直接打爆 Worker 的 subrequest 配额，而且**表现不是报错而是 `ECONNRESET`**。最终修法是活动写入批量化（分片批量读 → 内存拼 JSON → 50 条一批 UPSERT，随 P2-27 一并合入）。结论：**只看「小样本能跑通」就宣布修复，等于把 1 条记录的问题挪到 250 条记录上重新暴露** |
+| 教训 | **分片只解第一堵墙，规模问题往往是叠加的**：P2-27 表面是单条 SQL 绑定变量超限（`WHERE id IN (200 个 ?)` = 203 > D1 上限 100），修完分片后 250 条孤儿仍失败 —— 第二堵墙是活动日志逐条 `append()`（每条 3 次往返 → 250 条 750 次 D1 往返），直接打爆 Worker 的 subrequest 配额，而且**表现不是报错而是 `ECONNRESET`**。最终修法是活动写入批量化（分片批量读 → 内存拼 JSON → 50 条一批 UPSERT，已随本版合入）。结论：**只看「小样本能跑通」就宣布修复，等于把 1 条记录的问题挪到 250 条记录上重新暴露** |
 | 新增 | **干净门流程**：验收数字必须在独立 worktree 跑（不要把他人未提交改动混进结果）；worktree 需 `node_modules` / `frontend/dist` 软链 + 先 `npx tsx script/db.ts migrate --env worker-local`（否则 worker 门会出「空库 370 红」假红） |
 
 ---
@@ -101,14 +102,14 @@
 
 ## 六、验证
 
-### 四道门（@ `verify/p2-02` = 批次5 用例 + P2-02 无 body 状态码修复合入后）
+### 四道门（@ `verify/p2-27` = 批次 1~5 + P2-02 + P2-27 全部合入后，独立 worktree `git status` 干净）
 
 | 门 | 命令 | 结果 |
 |---|---|---|
 | 类型检查 | `npx tsc --noEmit` | exit 0 |
 | Node 全量 | `npm run test:locked` | **140 文件 / 1458 passed + 3 skipped (1461)**，exit 0（批次5 新增 10 个用例文件 / 65 例；再 +2 条 205/304 无 body 用例） |
-| Worker 全量 | `npm run test:locked:worker` | **107 文件 / 1217 passed + 1 skipped (1218)**，exit 0（唯一 skipped 仍是 P2-27 的幂等用例，等该缺陷修复后打开） |
-| 覆盖率 | `npm run test:locked:coverage` | stmts **65.20** / branch **57.33** / funcs **68.06** / lines **65.41**，地板 **60/52/60/60**，exit 0 |
+| Worker 全量 | `npm run test:locked:worker` | **107 文件 / 1218 passed，skipped 0**，exit 0（P2-27 修好后最后一个 skip 也打开了） |
+| 覆盖率 | `npm run test:locked:coverage` | stmts **64.83** / branch **57.13** / funcs **67.65** / lines **65.04**，地板 **60/52/60/60**，exit 0（较上轮低约 0.4pp：P2-27 新增 185 行批量化代码，分支未全覆盖，属预期） |
 
 > 覆盖率提升不是靠补入口文件：新增的两个**进程内**用例（`tests/api/inprocess/adminRoutes.test.ts` 打 14 条只读管理端链路、`tests/unit/entry/spaFallback.test.ts` 驱动 index.ts 的 fallback）让 routes/controllers/middleware 的进程内计数从 0% 起来，lines 57.84% → 65.53%。
 
@@ -125,6 +126,7 @@
 - vendor 掩码：掩码回传后直查库确认 token 未变、代理凭据掩码与回存还原
 - 模型白名单：`created_at`/`updated_at` 传了也不生效
 - 选路读路径无写：删掉 vendor_model 模拟漂移 → 503 + 可读文案 + 行数仍 0
+- 孤儿回收：250 条孤儿（跨 2 页）+ worker 下全量回收 + 活动逐条落库 + 重复调用幂等（P2-27，修前 worker 500 / ECONNRESET）
 - 无 body 状态码：上游 204/205 → 客户端原样 204/205 + 记录 success + cost=0；上游 304 → 客户端 304 + 记录 `upstream_error` + cost=0（修前三条全 500）
 
 ---
@@ -133,9 +135,9 @@
 
 - **P2-16 → WONTFIX（误报）**：`/v1/` 前缀是历史别名，有测试断言其返回 JSON 404，保留。
 - **已知抖动（非缺陷）**：worker 全量首跑偶发过 `ECONNRESET`（`tests/api/vendor/vendorMask.test.ts` 的 `createVendor`，workerd 本地 dev server 连接被重置）。同一文件单跑 8/8 绿、全量二跑 96 文件全绿，判定为 wrangler dev 前置层的偶发抖动，不影响产品行为；CI 上遇到该文件单独报 `fetch failed` 时重跑即可。
-- 覆盖率地板已抬到 60/52/60/60（`vitest.config.ts`），本版实测 65.20 / 57.33 / 68.06 / 65.41。**注意分母口径**：API 用例跑在子进程里，进程内计数为 0%（见「工程化」末条），所以 57~58 主要是单元层的真实水位；把地板抬到 60 的路线是补进程内 `app.request()` 主干用例，而不是给 `src/index.ts` / `local.ts` 硬盖测试。
+- 覆盖率地板已抬到 60/52/60/60（`vitest.config.ts`），本版实测 64.83 / 57.13 / 67.65 / 65.04。**注意分母口径**：API 用例跑在子进程里，进程内计数为 0%（见「工程化」末条），所以 57~58 主要是单元层的真实水位；把地板抬到 60 的路线是补进程内 `app.request()` 主干用例，而不是给 `src/index.ts` / `local.ts` 硬盖测试。
 - `modelController` 的「测试模型」接口仍会把上游错误 message 回给管理员（inspect 用途，需管理权限），属预期。
-- **P2-27（修复中，验收期由批次5 用例发现）**：`recordManager.recoverOrphans` 按 200/批拼 `UPDATE ... WHERE id IN (?,?,...)`，3 个赋值参数 + 200 个 id = **203 个绑定变量**，超 D1 单语句上限 → `D1_ERROR: too many SQL variables` → `POST /record/recover-orphans.json` **在 worker 环境返回 500，孤儿回收整体失效**（node/sqlite 上限 999，故此前一直未暴露）。修法：抽 `RECOVER_ORPHAN_BIND_BUDGET = 90`（上限 100 留 10 余量）+ 3 个固定参数 → 每片 87 个 id，分片执行同一批 UPDATE；分页 200 与「一条 SQL 带几个 id」是两件事，分页保留。看门狗：`tests/api/record/recoverOrphans.batch.test.ts` 首条 worker 下为 `it.fails`、幂等条 `it.skipIf`，修复合入后改回正式断言。**在 P2-27 合入前，Worker 环境的孤儿回收不可用**，请以孤儿扫描之外的兜底（空闲超时、总时长上限）为主。
+- **P2-27 已闭环（验收期由批次5 用例发现）**：`recordManager.recoverOrphans` 按 200/批拼 `UPDATE ... WHERE id IN (?,?,...)`，3 个赋值参数 + 200 个 id = **203 个绑定变量**，超 D1 单语句上限 → `D1_ERROR: too many SQL variables` → `POST /record/recover-orphans.json` **在 worker 环境返回 500，孤儿回收整体失效**（node/sqlite 上限 999，故此前一直未暴露）。修法：抽 `RECOVER_ORPHAN_BIND_BUDGET = 90`（上限 100 留 10 余量）+ 3 个固定参数 → 每片 87 个 id，分片执行同一批 UPDATE；分页 200 与「一条 SQL 带几个 id」是两件事，分页保留。**已修（`704be9b`）并复验**：`recoverOrphans.batch.test.ts` 的 `it.fails`/`it.skipIf` 已全部转正式断言，worker 下 250 条孤儿（跨 2 页）接口 200、`recovered ≥ 250`、`processing` 残留 0、`end_at` 全落、活动日志逐条落库且不重复；worker 门 skipped 归零。
 - **P2-02 已闭环（原「204 → 500」不再存在）**：`isBodyForbiddenStatus()`（204/205/304/1xx）在 `!ok` 与「非 JSON body」两个分支之前统一收口，204/205 记 `success` + `cost=0`，304/1xx 记 `upstream_error`，一律不设 body 并摘掉 `Content-Type`；`senderService.isStream` 增加 `upstreamRes.body !== null` 防「204 + `text/event-stream`」在 `getReader()` 上二次抛错。回归用例：204/205/304 三条（`p2-cleanup.test.ts`），mock 上游新增 `status-205` / `status-304`。
 
 ---
