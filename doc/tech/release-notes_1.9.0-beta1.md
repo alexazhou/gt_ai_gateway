@@ -104,14 +104,14 @@
 
 ## 六、验证
 
-### 四道门（干净 worktree @ `8063a3f`，不含未提交改动）
+### 四道门（@ `verify/p2-02` = 批次5 用例 + P2-02 无 body 状态码修复合入后）
 
 | 门 | 命令 | 结果 |
 |---|---|---|
 | 类型检查 | `npx tsc --noEmit` | exit 0 |
-| Node 全量 | `npm run test:locked` | **140 文件 / 1456 passed + 3 skipped (1459)**，exit 0（批次5 新增 10 个用例文件 / 65 例后） |
-| Worker 全量 | `npm run test:locked:worker` | **107 文件 / 1215 passed + 1 skipped (1216)**，exit 0（批次5 新增用例后；唯一 skipped 是 P2-27 的幂等用例，等修复后打开） |
-| 覆盖率 | `npm run test:locked:coverage` | stmts **65.31** / branch **57.45** / funcs **68.28** / lines **65.53**，地板已抬到 **60/52/60/60**，exit 0 |
+| Node 全量 | `npm run test:locked` | **140 文件 / 1458 passed + 3 skipped (1461)**，exit 0（批次5 新增 10 个用例文件 / 65 例；再 +2 条 205/304 无 body 用例） |
+| Worker 全量 | `npm run test:locked:worker` | **107 文件 / 1217 passed + 1 skipped (1218)**，exit 0（唯一 skipped 仍是 P2-27 的幂等用例，等该缺陷修复后打开） |
+| 覆盖率 | `npm run test:locked:coverage` | stmts **65.20** / branch **57.33** / funcs **68.06** / lines **65.41**，地板 **60/52/60/60**，exit 0 |
 
 > 覆盖率提升不是靠补入口文件：新增的两个**进程内**用例（`tests/api/inprocess/adminRoutes.test.ts` 打 14 条只读管理端链路、`tests/unit/entry/spaFallback.test.ts` 驱动 index.ts 的 fallback）让 routes/controllers/middleware 的进程内计数从 0% 起来，lines 57.84% → 65.53%。
 
@@ -128,6 +128,7 @@
 - vendor 掩码：掩码回传后直查库确认 token 未变、代理凭据掩码与回存还原
 - 模型白名单：`created_at`/`updated_at` 传了也不生效
 - 选路读路径无写：删掉 vendor_model 模拟漂移 → 503 + 可读文案 + 行数仍 0
+- 无 body 状态码：上游 204/205 → 客户端原样 204/205 + 记录 success + cost=0；上游 304 → 客户端 304 + 记录 `upstream_error` + cost=0（修前三条全 500）
 
 ---
 
@@ -135,10 +136,10 @@
 
 - **P2-16 → WONTFIX（误报）**：`/v1/` 前缀是历史别名，有测试断言其返回 JSON 404，保留。
 - **已知抖动（非缺陷）**：worker 全量首跑偶发过 `ECONNRESET`（`tests/api/vendor/vendorMask.test.ts` 的 `createVendor`，workerd 本地 dev server 连接被重置）。同一文件单跑 8/8 绿、全量二跑 96 文件全绿，判定为 wrangler dev 前置层的偶发抖动，不影响产品行为；CI 上遇到该文件单独报 `fetch failed` 时重跑即可。
-- 覆盖率地板为 55/50/55/55，本版实测 57.88 / 53.45 / 60.45 / 57.84。**注意分母口径**：API 用例跑在子进程里，进程内计数为 0%（见「工程化」末条），所以 57~58 主要是单元层的真实水位；把地板抬到 60 的路线是补进程内 `app.request()` 主干用例，而不是给 `src/index.ts` / `local.ts` 硬盖测试。
+- 覆盖率地板已抬到 60/52/60/60（`vitest.config.ts`），本版实测 65.20 / 57.33 / 68.06 / 65.41。**注意分母口径**：API 用例跑在子进程里，进程内计数为 0%（见「工程化」末条），所以 57~58 主要是单元层的真实水位；把地板抬到 60 的路线是补进程内 `app.request()` 主干用例，而不是给 `src/index.ts` / `local.ts` 硬盖测试。
 - `modelController` 的「测试模型」接口仍会把上游错误 message 回给管理员（inspect 用途，需管理权限），属预期。
 - **P2-27（待修，验收期发现）**：`recordManager.recoverOrphans` 按 200/批拼 `UPDATE ... WHERE id IN (?,?,...)`，3 个赋值参数 + 200 个 id = **203 个绑定变量**，D1 单语句绑定变量有上限 → `D1_ERROR: too many SQL variables` → `POST /record/recover-orphans.json` **在 worker 环境返回 500，孤儿回收整体失效**（node/sqlite 正常，故此前未暴露）。修法：批大小降到 D1 安全值（如 90）或按 90 分片执行。看门狗：`tests/api/record/recoverOrphans.batch.test.ts` 首条在 worker 下为 `it.fails`。
-- **P2-02 剩余（待修，任务 #15）**：上游返回 204（无 body）时，实现把「空 body」判为 `upstream_error`，随后用 `c.body("")` 构造 204 响应 → `TypeError: Invalid response status code 204` → 客户端 500。204/205（以及失败路径上的 304）应按「无 body」语义直接 `c.status(code)` 返回并记 success + cost=0。看门狗：`tests/api/gateway/p2-cleanup.test.ts` 的 204 用例（`it.fails`）。
+- **P2-02 已闭环（原「204 → 500」不再存在）**：`isBodyForbiddenStatus()`（204/205/304/1xx）在 `!ok` 与「非 JSON body」两个分支之前统一收口，204/205 记 `success` + `cost=0`，304/1xx 记 `upstream_error`，一律不设 body 并摘掉 `Content-Type`；`senderService.isStream` 增加 `upstreamRes.body !== null` 防「204 + `text/event-stream`」在 `getReader()` 上二次抛错。回归用例：204/205/304 三条（`p2-cleanup.test.ts`），mock 上游新增 `status-205` / `status-304`。
 
 ---
 
