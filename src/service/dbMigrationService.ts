@@ -1,6 +1,6 @@
 import { join } from "path";
 import { mkdirSync, readFileSync, writeFileSync, rmSync } from "fs";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { createInterface } from "readline";
 import {
     DBAdapter,
@@ -16,6 +16,7 @@ import {
 import { SQLiteDBAdapter } from "../util/db/sqliteDBAdapter";
 import { MySQLDBAdapter, MySQLConnOptions } from "../util/db/mysqlDBAdapter";
 import { WranglerDBAdapter } from "../util/db/wranglerDBAdapter";
+import { assertSafeCliArg } from "../util/db/cliArgUtil";
 
 const LOCAL_DB_PATH = process.env.DB_PATH || join(process.cwd(), "local.db");
 const TMP_DIR = join(process.cwd(), ".tmp");
@@ -147,13 +148,24 @@ export async function migrate(
             }
 
             writeFileSync(tmpFile, combinedSql, "utf-8");
-            let cmd = `npx wrangler d1 execute ${options.dbName || "gt_ai_gateway"} ${env === "worker-cloud" ? "--remote" : "--local"}`;
+            // 与 WranglerDBAdapter 同一套安全口径：DB 名/配置路径先过白名单，
+            // 再用 execFileSync + argv 数组调用，SQL 文件以独立参数传入，全程不进 shell。
+            const dbName = options.dbName || "gt_ai_gateway";
+            assertSafeCliArg(dbName, "dbName");
+            const wranglerArgs = [
+                "wrangler",
+                "d1",
+                "execute",
+                dbName,
+                env === "worker-cloud" ? "--remote" : "--local",
+            ];
             if (options.configPath) {
-                cmd += ` --config ${options.configPath}`;
+                assertSafeCliArg(options.configPath, "configPath");
+                wranglerArgs.push("--config", options.configPath);
             }
-            cmd += ` --file="${tmpFile}"`;
+            wranglerArgs.push("--file", tmpFile);
             console.log(`\n🚀 Executing combined migration file...`);
-            execSync(cmd, { stdio: "inherit" });
+            execFileSync("npx", wranglerArgs, { stdio: "inherit" });
             console.log(`✅ Successfully applied ${pending.length} migrations in one batch`);
         } else {
             // Node mode: 用事务逐个执行
@@ -292,7 +304,10 @@ export async function clear(adapter: DBAdapter, env: string) {
     for (const name of tables) {
         try {
             console.log(`Dropping table: ${name}...`);
-            await adapter.exec(`DROP TABLE IF EXISTS ${name}`);
+            // 表名来自 DROPPABLE_TABLES 白名单，这里再校验一次标识符形态（标识符无法参数化）
+            assertSafeCliArg(name, "table name");
+            const dropSql = `DROP TABLE IF EXISTS ${name}`;
+            await adapter.exec(dropSql);
         } catch (e) {
             console.error(`Failed to drop table ${name}:`, e);
         }

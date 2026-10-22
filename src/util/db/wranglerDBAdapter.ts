@@ -3,10 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { DBAdapter } from "./dbAdapter";
+import { assertSafeCliArg } from "./cliArgUtil";
 
-// 参数白名单：dbName / configPath 只允许标识符、路径分隔、点、横线与下划线。
-// 这里的目标不是"转义"，而是让非法值永远进不了 argv（见 README 安全约定）。
-const SAFE_ARG_PATTERN = /^[\w./-]+$/;
 // 超过该长度的 SQL 走临时文件（argv 长度上限因平台而异，Windows 约 32KB）
 const INLINE_SQL_LIMIT = 32 * 1024;
 
@@ -19,29 +17,15 @@ export class WranglerDBAdapter implements DBAdapter {
         this.target = target;
         this.configPath = configPath;
         this.dbName = dbName;
-        this.assertSafeArg(dbName, "dbName");
-        this.assertSafeArg(configPath, "configPath");
-    }
-
-    /**
-     * 校验会进入子进程 argv 的路径/标识符参数。
-     * 空串表示"未配置"，放行；含 `..`（路径穿越）、存在非法字符一律抛错，
-     * 保证调用方拿到明确错误而不是拼出一条意外的命令行。
-     */
-    private assertSafeArg(value: string, label: string): void {
-        if (!value) {
-            return;
-        }
-        if (!SAFE_ARG_PATTERN.test(value) || value.split("/").some((seg) => seg === "..")) {
-            throw new Error(`Invalid ${label} for wrangler d1 execute: ${value}`);
-        }
+        assertSafeCliArg(dbName, "dbName");
+        assertSafeCliArg(configPath, "configPath");
     }
 
     private buildArgs(extra: string[]): string[] {
-        this.assertSafeArg(this.dbName, "dbName");
+        assertSafeCliArg(this.dbName, "dbName");
         const args = ["wrangler", "d1", "execute", this.dbName, this.target];
         if (this.configPath) {
-            this.assertSafeArg(this.configPath, "configPath");
+            assertSafeCliArg(this.configPath, "configPath");
             args.push("--config", this.configPath);
         }
         args.push(...extra);
