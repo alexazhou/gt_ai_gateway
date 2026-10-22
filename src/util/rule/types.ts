@@ -47,12 +47,16 @@ export interface ConsumeResult {
     remaining: number;
 }
 
-/** 限流计数器存储接口：本期仅内存实现（令牌桶），接口预留以便后续切 DB / Durable Object */
+/**
+ * 限流计数器存储接口。
+ * - Node / 桌面：内存令牌桶（单进程内天然正确）
+ * - Worker：D1 SQL 令牌桶（跨 isolate 共享；Durable Object 后端可后续按同一接口接入）
+ */
 export interface RateLimitStore {
     /**
      * 令牌桶消费：按 refillPerMs 补液（封顶 capacity），再尝试扣 1 个令牌。
      * @param capacity 桶容量（瞬时突发上限，即 rpm）
      * @param refillPerMs 补液速率（令牌/毫秒 = rpm / 60s）
      */
-    consume(key: string, now: number, capacity: number, refillPerMs: number): ConsumeResult;
+    consume(key: string, now: number, capacity: number, refillPerMs: number): ConsumeResult | Promise<ConsumeResult>;
 }

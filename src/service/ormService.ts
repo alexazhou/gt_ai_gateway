@@ -190,6 +190,15 @@ class ORMService {
         return this.mode === RunMode.WORKER;
     }
 
+    /**
+     * 适配器是否已就绪。
+     * `mode` 默认就是 WORKER，未 init 时 `isWorker` 已为 true 但 `dbAdapter` 会抛错，
+     * 需要判断「能否真的读写库」的地方（如共享限流/冷却存储的解析）要用这个。
+     */
+    get isReady(): boolean {
+        return this._dbAdapter !== null;
+    }
+
     get dbAdapter(): DatabaseAdapter {
         if (!this._dbAdapter) {
             throw new customError.AppError("ORMService not initialized", 500);

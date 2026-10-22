@@ -19,8 +19,9 @@ export interface DatabaseAdapter {
 }
 
 export interface StatementAdapter {
-    all(): Promise<any> | any;
-    first(): Promise<any> | any;
+    // 可选参数用于绑定占位符（D1 / better-sqlite3 / mysql2 均支持）；不传时保持旧行为
+    all(...args: any[]): Promise<any> | any;
+    first(...args: any[]): Promise<any> | any;
     run(...args: any[]): Promise<any> | any;
 }
 
@@ -51,12 +52,12 @@ export class SQLiteAdapter implements DatabaseAdapter {
 class SQLiteStatementAdapter implements StatementAdapter {
     constructor(private stmt: any) {}
 
-    all(): any[] {
-        return this.stmt.all();
+    all(...args: any[]): any[] {
+        return this.stmt.all(...args);
     }
 
-    first(): any {
-        return this.stmt.get();
+    first(...args: any[]): any {
+        return this.stmt.get(...args);
     }
 
     run(...args: any[]): any {
@@ -100,12 +101,14 @@ export class D1Adapter implements DatabaseAdapter {
 class D1StatementAdapter implements StatementAdapter {
     constructor(private stmt: any) {}
 
-    async all(): Promise<{ results: any }> {
-        return await this.stmt.all();
+    async all(...args: any[]): Promise<{ results: any }> {
+        const stmt = args.length > 0 ? this.stmt.bind(...args) : this.stmt;
+        return await stmt.all();
     }
 
-    async first(): Promise<any> {
-        return await this.stmt.first();
+    async first(...args: any[]): Promise<any> {
+        const stmt = args.length > 0 ? this.stmt.bind(...args) : this.stmt;
+        return await stmt.first();
     }
 
     async run(...args: any[]): Promise<any> {
@@ -167,14 +170,18 @@ export class MySQLAdapter implements DatabaseAdapter {
 class MySQLStatementAdapter implements StatementAdapter {
     constructor(private pool: any, private sql: string) {}
 
-    async all(): Promise<any[]> {
-        const [rows] = await this.pool.query(this.sql);
+    async all(...args: any[]): Promise<any[]> {
+        if (args.length === 0) {
+            const [rows] = await this.pool.query(this.sql);
+            return rows as any[];
+        }
+        const [rows] = await this.pool.execute(this.sql, args);
         return rows as any[];
     }
 
-    async first(): Promise<any> {
-        const [rows] = await this.pool.query(this.sql);
-        return (rows as any[])[0];
+    async first(...args: any[]): Promise<any> {
+        const rows = await this.all(...args);
+        return rows[0];
     }
 
     async run(...args: any[]): Promise<any> {
