@@ -15,14 +15,18 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       include: ['src/**/*.ts'],
       exclude: ['node_modules', '**/*.test.ts', '**/*.spec.ts', 'tests/**'],
-      // 覆盖率门禁（P2-21）：先按"略低于当前实测值"的棘轮地板卡住回退，
-      // 实测基线 58.37% lines / 58.41% stmts / 54.83% branch / 60.57% funcs，
-      // 目标是把 lines 逐步抬到 60%+（入口文件 src/index.ts、src/local.ts 目前为 0%）。
+      // 覆盖率门禁（P2-21）：地板已按「实测到 60% 再抬」的口径抬到 60。
+      // 关键前提：API 用例跑在 spawn 出来的子进程里，V8 统计不到，所以真正的抓手是
+      // 进程内 app.request() 用例（tests/api/inprocess/adminRoutes.test.ts、
+      // tests/unit/entry/spaFallback.test.ts）——它们把 routes→middleware→controller→service
+      // 主链路纳入统计后，实测从 57.9/53.5/60.5/57.8 提升到
+      // 65.31 stmts / 57.45 branch / 68.28 funcs / 65.53 lines。
+      // 地板取整到 60/52/60/60，留出余量，禁止为凑数字去硬盖入口文件。
       thresholds: {
-        statements: 55,
-        branches: 50,
-        functions: 55,
-        lines: 55,
+        statements: 60,
+        branches: 52,
+        functions: 60,
+        lines: 60,
       },
     },
     hookTimeout: 60000,
