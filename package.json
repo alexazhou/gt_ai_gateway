@@ -2,6 +2,7 @@
   "name": "gt-ai-gateway",
   "version": "1.9.0-beta1",
   "scripts": {
+    "prepare": "bash script/install-githooks.sh",
     "frontend:build": "cd frontend && npm run build",
     "frontend:build:dev": "cd frontend && npm run build -- --mode development",
     "frontend:dev": "cd frontend && npm run dev",

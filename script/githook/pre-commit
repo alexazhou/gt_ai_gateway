@@ -1,14 +1,19 @@
 #!/bin/bash
 
-# Pre-commit hook: check version consistency and commit message
-set -e
-
-ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-
-# ---- 1. Version consistency check ----
+# Pre-commit hook: 版本号一致性校验。
+#
 # 口径唯一来源：script/verify_versions.sh（CI 的 docker.yml / tauri.yml 也调它）。
 # 这里不要再内联一份判定逻辑 —— 之前内联的版本漏了 tauri/src-tauri/Cargo.lock，
 # 结果「本地钩子 + CI 都绿，但锁文件里还是旧版本」。
+#
+# 提交信息里的 AI 署名拦截已移到 script/githook/commit-msg（git 通过 $1 传信息
+# 文件路径，唯一可靠的获取方式；原先在本文件读 .git/COMMIT_MSG 恒不存在，
+# 那段检查实际从未执行过）。
+
+set -uo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+
 echo "[pre-commit] Checking version consistency..."
 if ! bash "$ROOT_DIR/script/verify_versions.sh"; then
     echo ""
@@ -16,13 +21,4 @@ if ! bash "$ROOT_DIR/script/verify_versions.sh"; then
     exit 1
 fi
 
-# ---- 2. Commit message check (claude) ----
-COMMIT_MSG_FILE="$ROOT_DIR/.git/COMMIT_MSG"
-if [ -f "$COMMIT_MSG_FILE" ]; then
-    if grep -qi "claude" "$COMMIT_MSG_FILE"; then
-        echo "❌ Commit message contains 'claude'. Please remove AI tool references from the commit message."
-        exit 1
-    fi
-fi
-
-echo "✅ Commit message check passed."
+exit 0
