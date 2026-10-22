@@ -104,9 +104,9 @@ describe("批次 4 P2 清理项", () => {
             expect(promptTokens + completionTokens, `usage 解析异常: ${JSON.stringify(usage)}`).toBeGreaterThan(0);
         });
 
-        // 已知缺陷（P2-02 未修完）：204 无 body → 实现把空 body 当 upstream_error，
-        // 再用 c.body("") 构造 204 响应抛 TypeError → 500。修好后本用例会变红，届时把 it.fails 改回 it。
-        it.fails("上游返回 204（无 body）：记录 success，cost 为 0 但不记失败", async () => {
+        // P2-02 已修（65f9b05）：无 body 状态码（204/205/304/1xx）在「非 JSON body」与「!ok」
+        // 两个分支之前统一前置收口，不再用空串构造 204 响应。原 it.fails 看门狗已转正式断言。
+        it("上游返回 204（无 body）：记录 success，cost 为 0 但不记失败", async () => {
             const { modelName, modelId } = await createOpenAiVendorAndModel("status-204");
 
             const response = await fetch(`${config.SERVER_CONFIG.baseUrl}/llm/v1/chat/completions`, {
@@ -121,6 +121,43 @@ describe("批次 4 P2 清理项", () => {
             expect(record.status, "204 是成功响应，不能记 FAILED").toBe("success");
             expect(record.failed_code).toBeNull();
             expect(Number(record.cost ?? 0), "没有 usage 时 cost 记 0").toBe(0);
+        });
+
+        // 205 与 204 同属「2xx 但不允许带体」，走同一个前置收口分支
+        it("上游返回 205（无 body）：同样是 success 且 cost 为 0", async () => {
+            const { modelName, modelId } = await createOpenAiVendorAndModel("status-205");
+
+            const response = await requestHelper.post(
+                "/llm/v1/chat/completions",
+                { model: modelName, messages: [{ role: "user", content: "hi" }] },
+                userToken,
+            );
+            expect(response.status, "205 必须原样透传，不能变成 500").toBe(205);
+
+            const record = await latestRecordByModel(modelId);
+            expect(record, "记录应已落库").toBeTruthy();
+            expect(record.status, "205 是成功响应").toBe("success");
+            expect(record.failed_code).toBeNull();
+            expect(Number(record.cost ?? 0)).toBe(0);
+        });
+
+        // 304 属于非成功但同样不允许带体：修复前它落在 `!upstreamRes.ok` 分支，
+        // 同一个 TypeError（用空串构造 304 响应）换个入口复现 → 500。
+        it("上游返回 304（无 body）：客户端拿到 304，记录 failed(upstream_error) 且不 500", async () => {
+            const { modelName, modelId } = await createOpenAiVendorAndModel("status-304");
+
+            const response = await requestHelper.post(
+                "/llm/v1/chat/completions",
+                { model: modelName, messages: [{ role: "user", content: "hi" }] },
+                userToken,
+            );
+            expect(response.status, "304 必须原样透传，不能变成 500").toBe(304);
+
+            const record = await latestRecordByModel(modelId);
+            expect(record, "记录应已落库").toBeTruthy();
+            expect(record.status, "304 不是成功响应").toBe("failed");
+            expect(record.failed_code).toBe("upstream_error");
+            expect(Number(record.cost ?? 0)).toBe(0);
         });
     });
 
