@@ -14,21 +14,26 @@ const CLEANUP_PROBABILITY = 0.01;
  * 方言：使用 SQLite 标量 `MIN(a,b)` / `MAX(a,b)` 与 `RETURNING`（D1 与 better-sqlite3 都支持）。
  * MySQL 的 MIN/MAX 是聚合函数且不支持 RETURNING，因此本实现只用于 worker/D1；
  * Node + MySQL 模式仍走内存实现（单进程内天然正确）。
+ *
+ * 写次数（P2-25）：**放行快路径只有 1 条写**。原来每次放行都先跑一条
+ * `INSERT ... ON CONFLICT DO NOTHING`（几乎必然是主键冲突的无用写）再 UPDATE，D1 上写放大翻倍；
+ * 现在改成「先 UPDATE → 0 行时再读一次区分『桶不存在』与『令牌不足』→ 只有缺桶才 INSERT 后重试」，
+ * 桶存在时（稳态）不会产生任何多余写。
  */
 export class SqlRateLimitStore implements RateLimitStore {
     constructor(private executor: SqlExecutor) {}
 
-    async consume(key: string, now: number, capacity: number, refillPerMs: number): Promise<ConsumeResult> {
-        // ① 首次见到该键：以满桶初始化（并发下由主键冲突忽略，幂等）
-        await this.executor.run(
-            "INSERT INTO rate_limit_bucket (bucket_key, tokens, last_ms) VALUES (?, ?, ?) ON CONFLICT(bucket_key) DO NOTHING",
-            [key, capacity, now],
-        );
-
-        // ② 单语句完成「补液 + 扣 1」：WHERE 里的余量判断与 SET 里的扣减在同一行锁内完成，
-        //    并发请求只有一个能扣到，其余影响 0 行 → 判定限流。
-        //    参数顺序与 SQL 中的问号出现顺序一致（capacity, now, refill, now, key, now, refill）。
-        const updated = await this.executor.all<{ tokens: number }>(
+    /** 补液 + 扣 1 的单条原子 UPDATE；返回改后的行（余量不足/桶不存在时返回空数组） */
+    private async decrement(
+        key: string,
+        now: number,
+        capacity: number,
+        refillPerMs: number,
+    ): Promise<Array<{ tokens: number }>> {
+        // WHERE 里的余量判断与 SET 里的扣减在同一行锁内完成，
+        // 并发请求只有一个能扣到，其余影响 0 行 → 判定限流。
+        // 参数顺序与 SQL 中问号出现顺序一致（capacity, now, refill, now, key, now, refill）。
+        return await this.executor.all<{ tokens: number }>(
             `UPDATE rate_limit_bucket
                 SET tokens = MIN(?, tokens + MAX(0, ? - last_ms) * ?) - 1,
                     last_ms = ?
@@ -37,28 +42,58 @@ export class SqlRateLimitStore implements RateLimitStore {
               RETURNING tokens`,
             [capacity, now, refillPerMs, now, key, now, refillPerMs],
         );
+    }
 
+    private async readBucket(key: string): Promise<{ tokens: number; last_ms: number } | null> {
+        const rows = await this.executor.all<{ tokens: number; last_ms: number }>(
+            "SELECT tokens, last_ms FROM rate_limit_bucket WHERE bucket_key = ?",
+            [key],
+        );
+        return rows.length > 0 ? rows[0] : null;
+    }
+
+    /** 按「补液后封顶容量」算剩余量（供 Retry-After 精确计算） */
+    private remainingOf(
+        row: { tokens: number; last_ms: number },
+        now: number,
+        capacity: number,
+        refillPerMs: number,
+    ): number {
+        const tokens = Number(row.tokens);
+        const lastMs = Number(row.last_ms);
+        return Math.min(capacity, tokens + Math.max(0, now - lastMs) * refillPerMs);
+    }
+
+    async consume(key: string, now: number, capacity: number, refillPerMs: number): Promise<ConsumeResult> {
+        // ① 快路径：桶已存在时一条 UPDATE 完成补液 + 扣减（放行只需 1 次写）
+        const updated = await this.decrement(key, now, capacity, refillPerMs);
         if (updated.length > 0) {
             this.maybeCleanup(now);
             return { allowed: true, remaining: Number(updated[0].tokens) };
         }
 
-        // ③ 未扣到：读回当前桶算剩余量（供 Retry-After 精确计算）
-        const rows = await this.executor.all<{ tokens: number; last_ms: number }>(
-            "SELECT tokens, last_ms FROM rate_limit_bucket WHERE bucket_key = ?",
-            [key],
-        );
-        this.maybeCleanup(now);
-
-        if (rows.length === 0) {
-            // 行在 ② 之前被清扫/删除：按空桶处理（保守拒绝，下一个请求会重新初始化）
-            return { allowed: false, remaining: 0 };
+        // ② 0 行：桶不存在，或令牌不足 —— 读一次区分（读不产生写放大）
+        const existing = await this.readBucket(key);
+        if (!existing) {
+            // ③ 首次见到该键（或桶刚被惰性清扫）：以满桶初始化后重试一次。
+            //    并发下多个请求可能同时走到这里，由主键冲突忽略（幂等），
+            //    重试的 UPDATE 仍只有一条能扣到。
+            await this.executor.run(
+                "INSERT INTO rate_limit_bucket (bucket_key, tokens, last_ms) VALUES (?, ?, ?) ON CONFLICT(bucket_key) DO NOTHING",
+                [key, capacity, now],
+            );
+            const retried = await this.decrement(key, now, capacity, refillPerMs);
+            this.maybeCleanup(now);
+            if (retried.length > 0) {
+                return { allowed: true, remaining: Number(retried[0].tokens) };
+            }
+            const after = await this.readBucket(key);
+            return { allowed: false, remaining: after ? this.remainingOf(after, now, capacity, refillPerMs) : 0 };
         }
 
-        const tokens = Number(rows[0].tokens);
-        const lastMs = Number(rows[0].last_ms);
-        const remaining = Math.min(capacity, tokens + Math.max(0, now - lastMs) * refillPerMs);
-        return { allowed: false, remaining };
+        // ④ 桶存在但余量不足：直接拒绝（不写库，被拒请求不扣减）
+        this.maybeCleanup(now);
+        return { allowed: false, remaining: this.remainingOf(existing, now, capacity, refillPerMs) };
     }
 
     /**

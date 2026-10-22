@@ -121,6 +121,10 @@ async function runSSELoop(
     const maxDurationMs = await configService.getNumber(ConfigKey.STREAM_MAX_DURATION_MS);
     const streamDeadline = maxDurationMs > 0 ? Date.now() + maxDurationMs : 0;
 
+    // P1-05：读缓冲上限。上游若一直不吐空行（坏流/超大单帧），buffer 会无上限增长把 isolate 内存吃爆；
+    // 超过阈值即按 sse_parse_error 收尾并取消上游读（0 = 不限）。
+    const maxBufferBytes = await configService.getNumber(ConfigKey.SSE_MAX_BUFFER_BYTES);
+
     // 失败打标（先到先得）：循环内所有失败写入方都经此收口，守卫只写这一处——
     // 各写入方只管报告失败，不各自判断"是否已有失败"；abort 类失败的可读文案在此一并确定
     const markFailure = (code: FailedCode, message: string | null): void => {
@@ -154,6 +158,43 @@ async function runSSELoop(
         }
     }
 
+    /**
+     * 把一段解码后的文本喂进解析链路：记流日志 → 追加缓冲 → 拆帧 → 协议转换 → 转发/累加。
+     * 主循环与 EOF flush 共用（P1-04 之前 EOF 时 decoder 里残留的多字节字符没人取）。
+     */
+    async function consumeUpstreamText(text: string): Promise<void> {
+        if (!text) return;
+
+        streamLogService.appendStreamLog(logStream, text);
+        buffer += text;
+
+        const splitResult = sseEventUtil.splitEvents(buffer);
+        buffer = splitResult.remainingBuffer;
+
+        for (const upstreamEvent of splitResult.events) {
+            // 心跳等注释事件：无 data、不做协议转换与累加，原样透传保持下游 SSE 连接活跃
+            if (upstreamEvent.comment) {
+                await writeEventToClient(stream, upstreamEvent);
+                continue;
+            }
+
+            const clientEvents = opts.converter
+                ? opts.converter.convertStreamEvent(upstreamEvent.data, upstreamEvent.event, upstreamEvent.id)
+                : [upstreamEvent];
+
+            await deliverClientEvents(clientEvents);
+        }
+
+        // P1-05：缓冲超限 → 不再继续读，按解析失败收尾（避免 isolate 内存被坏流吃爆）
+        if (maxBufferBytes > 0 && buffer.length > maxBufferBytes) {
+            markFailure(
+                FailedCode.SSE_PARSE_ERROR,
+                `上游 SSE 数据超过缓冲上限（${maxBufferBytes} 字节未切出完整事件），网关已中止读取`,
+            );
+            upstreamReader.cancel().catch(() => {});
+        }
+    }
+
     try {
         while (true) {
             if (streamDeadline > 0 && Date.now() >= streamDeadline) {
@@ -172,6 +213,10 @@ async function runSSELoop(
                 : idleTimeoutMs;
             const result = await abortTimeoutUtil.readChunk(upstreamReader, readTimeoutMs);
             if (result.done) {
+                // P1-04：TextDecoder({stream:true}) 会把跨 chunk 的多字节字符留在内部，
+                // EOF 时不 flush 就丢掉最后 1~3 字节（中文常见），表现为尾部内容/usage 缺失。
+                await consumeUpstreamText(decoder.decode());
+
                 // 上游干净结束（EOF，不是超时/断开）：部分 OpenAI 兼容上游会给全内容、finish_reason
                 // 与 usage，却省略冗余的 [DONE] 直接关连接。此时数据是完整的，交给协议侧各自收尾 ——
                 // 转换器补齐客户端还缺的终止事件，累加器据已到齐的数据补记完成，否则会漏记 usage、
@@ -182,26 +227,7 @@ async function runSSELoop(
                 break;
             }
 
-            const chunk = decoder.decode(result.value, { stream: true });
-            streamLogService.appendStreamLog(logStream, chunk);
-            buffer += chunk;
-
-            const splitResult = sseEventUtil.splitEvents(buffer);
-            buffer = splitResult.remainingBuffer;
-
-            for (const upstreamEvent of splitResult.events) {
-                // 心跳等注释事件：无 data、不做协议转换与累加，原样透传保持下游 SSE 连接活跃
-                if (upstreamEvent.comment) {
-                    await writeEventToClient(stream, upstreamEvent);
-                    continue;
-                }
-
-                const clientEvents = opts.converter
-                    ? opts.converter.convertStreamEvent(upstreamEvent.data, upstreamEvent.event, upstreamEvent.id)
-                    : [upstreamEvent];
-
-                await deliverClientEvents(clientEvents);
-            }
+            await consumeUpstreamText(decoder.decode(result.value, { stream: true }));
 
             // 逻辑上已经结束——正常收尾（收到终止标记）或已出错——就不必再等上游关连接了，
             // 立即收尾。否则上游发完终止标记后挂着不断开时，客户端要等空闲超时（默认 180s）
