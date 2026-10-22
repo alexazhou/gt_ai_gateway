@@ -9,23 +9,10 @@ export class SQLiteDBAdapter implements DBAdapter {
     }
 
     exec(sql: string): void {
-        const statements = sql
-            .split(";")
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0);
-
-        // 对于 sqlite3，多条语句可能导致问题，因此尝试分拆或者使用 .exec() 完整执行
-        // better-sqlite3 推荐使用 .exec 执行包含多条语句的完整字符串
-        try {
-            this.db.exec(sql);
-        } catch (e) {
-            // 回退分拆单条执行
-            for (const statement of statements) {
-                if (statement) {
-                    this.db.exec(statement + ";");
-                }
-            }
-        }
+        // 直接交给 better-sqlite3 的 exec：它原生支持多语句（内部用 sqlite3_exec）。
+        // 原实现先按 `;` 手工 split 再逐条执行，作为「失败回退」——但 `;` 也会出现在字符串字面量、
+        // 触发器 BEGIN...END 体内，split 出来的片段本身就不是合法语句，回退路径只会二次报错并且掩盖真实错误。
+        this.db.exec(sql);
     }
 
 

@@ -528,7 +528,9 @@ export async function handleNonStreamResponse(
         ? usageUtils.calculateCost(model, normalizedUsage.promptTokens, normalizedUsage.outputTokens, normalizedUsage.cacheReadTokens)
         : 0;
 
-    const recordStatus = statusCode === 200 ? SgRecordStatus.SUCCESS : SgRecordStatus.FAILED;
+    // 2xx 全算成功：只看 === 200 会把 201/202/204 等合法 2xx 上游记成 FAILED（失败率虚高、误触发告警）
+    const isSuccessStatus = statusCode >= 200 && statusCode < 300;
+    const recordStatus = isSuccessStatus ? SgRecordStatus.SUCCESS : SgRecordStatus.FAILED;
     // 非流式：首 token 时间 = 整体响应耗时
     const endedAt = Date.now();
 

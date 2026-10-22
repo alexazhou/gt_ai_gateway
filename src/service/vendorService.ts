@@ -2,7 +2,58 @@ import { SgVendor } from "../model/sgVendor";
 import { ApiFormat } from "../constants";
 import customError from "../customError";
 import vendorManager from "../manager/vendorManager";
+import maskUtil from "../util/maskUtil";
 import objectUtil from "../util/objectUtil";
+
+
+/**
+ * 编辑接口的 token 语义：留空（undefined / "" / 纯空白）= 不修改。
+ *
+ * 前端拿到的是掩码值，用户不动它就把掩码原样回传，这种情况同样视为「不修改」，
+ * 否则一次「只改名字」的保存会把真 token 覆盖成一串 `****`。
+ */
+function resolveUpdatedToken(input: string | undefined, current: string): string {
+    if (input === undefined || input === null) {
+        return current;
+    }
+    if (typeof input !== "string") {
+        return current;
+    }
+    if (input.trim() === "") {
+        return current;
+    }
+    if (maskUtil.isMaskedValue(input) && input === maskUtil.maskToken(current)) {
+        return current;
+    }
+    return input;
+}
+
+
+/**
+ * 回传的配置里代理 URL 是掩码形态时，还原成库里的原值，避免「看一眼再保存」把密码抹掉。
+ */
+function restoreMaskedProxyUrl(config: Record<string, unknown>, current: SgVendor["config"] | null | undefined): Record<string, unknown> {
+    if (!objectUtil.isRecord(config)) {
+        return config;
+    }
+    const proxy = config.proxy;
+    if (!objectUtil.isRecord(proxy) || typeof proxy.url !== "string") {
+        return config;
+    }
+    const currentProxy = (current as { proxy?: { url?: string } } | null | undefined)?.proxy;
+    const currentUrl = typeof currentProxy?.url === "string" ? currentProxy.url : "";
+    if (!currentUrl) {
+        return config;
+    }
+    if (proxy.url === currentUrl || proxy.url === maskUtil.maskUrlCredentials(currentUrl)) {
+        return { ...config, proxy: { ...proxy, url: currentUrl } };
+    }
+    return config;
+}
+
+
+/** 拉取上游模型列表的超时（P2-15） */
+const UPSTREAM_MODELS_TIMEOUT_MS = 10000;
 
 
 /**
@@ -60,7 +111,7 @@ async function updateVendor(
     } = {
         type: data.type ?? vendor.type,
         name: data.name ?? vendor.name,
-        token: data.token ?? vendor.token,
+        token: resolveUpdatedToken(data.token, vendor.token),
     };
 
     // query().update() 是裸 SQL 拼接，不走 casts，对象类型字段需手动序列化
@@ -69,7 +120,7 @@ async function updateVendor(
     }
 
     if (data.config !== undefined) {
-        updateData.config = JSON.stringify(data.config);
+        updateData.config = JSON.stringify(restoreMaskedProxyUrl(data.config, vendor.config));
     }
 
     return await vendorManager.update(vendorId, updateData, tenantId);
@@ -143,18 +194,20 @@ export async function fetchUpstreamModels(vendor: SgVendor): Promise<string[]> {
     const authHeader = token.startsWith("Bearer ") ? token : `Bearer ${token}`;
 
     try {
+        // 必须有超时：上游不响应时这个请求会一直挂着，前端「拉取模型」按钮转圈到天荒地老（P2-15）
         const response = await fetch(modelsUrl, {
             method: "GET",
             headers: {
                 Authorization: authHeader,
                 "Content-Type": "application/json",
             },
+            signal: AbortSignal.timeout(UPSTREAM_MODELS_TIMEOUT_MS),
         });
 
         if (!response.ok) {
-            const text = await response.text();
+            // 不回传上游 body：里面可能带上游的内部标识/凭据线索，只给状态码
             throw new customError.AppError(
-                `Upstream returned ${response.status}: ${text}`,
+                `Upstream returned ${response.status}`,
                 502,
             );
         }
@@ -171,10 +224,11 @@ export async function fetchUpstreamModels(vendor: SgVendor): Promise<string[]> {
         return models;
     } catch (err) {
         if (err instanceof customError.AppError) throw err;
-        throw new customError.AppError(
-            `Failed to fetch models: ${err instanceof Error ? err.message : String(err)}`,
-            502,
-        );
+        // 超时/网络错误统一成可读文案；不把底层错误详情（可能含 URL/代理地址）透给客户端
+        if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+            throw new customError.AppError(`Failed to fetch models: upstream timeout (${UPSTREAM_MODELS_TIMEOUT_MS}ms)`, 504);
+        }
+        throw new customError.AppError("Failed to fetch models: upstream unreachable", 502);
     }
 }
 

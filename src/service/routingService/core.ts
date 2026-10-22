@@ -19,6 +19,46 @@ const strategies: Record<ModelRoutingMode, BaseRoutingStrategy> = {
 };
 
 
+/**
+ * 配置写入时补建 vendor_model（原实现放在选路读路径里，见 P1-10）。
+ *
+ * 语义：非负载均衡模式下，上游没指定 vendor_model_id 时按「模型名」绑定到该 vendor，
+ * 缺失就建一条。补建属于「配置变更」而不是「请求副作用」——所以挪到 model 创建/更新时做，
+ * 请求路径变成纯读，不会在用户请求里写库（D1 上是每次请求 1 次写，且并发下会撞主键）。
+ *
+ * 返回补建的 vendor_model 数量，方便调用方/日志观察。
+ */
+async function ensureVendorModels(model: SgModel, tenantId?: number): Promise<number> {
+    if (model.routing_mode === ModelRoutingMode.LOAD_BALANCE) {
+        return 0;
+    }
+    const modelName = model.name;
+    if (!modelName) {
+        return 0;
+    }
+
+    let created = 0;
+    for (const upstream of model.getRoutingConfig().upstreams) {
+        if (!upstream.enabled || upstream.vendor_model_id) {
+            continue;
+        }
+        if (tenantId !== undefined) {
+            const vendor = await vendorManager.findById(upstream.vendor_id);
+            // vendor 不存在 / 跨租户 → 交给 validateConfig 报错，这里不写脏数据
+            if (!vendor || vendor.tenant_id !== tenantId) {
+                continue;
+            }
+        }
+        const existing = await vendorModelManager.findByVendorAndModel(upstream.vendor_id, modelName);
+        if (!existing) {
+            await vendorModelManager.create(upstream.vendor_id, modelName);
+            created += 1;
+        }
+    }
+    return created;
+}
+
+
 async function validateConfig(
     model: SgModel,
     tenantId?: number,
@@ -109,9 +149,11 @@ async function resolveAvailableCandidates(
     }
 
     const candidates: ModelRoutingResult[] = [];
+    const skipped: string[] = [];
     for (const upstream of upstreams) {
         const vendor = await vendorManager.findById(upstream.vendor_id);
         if (!vendor) {
+            skipped.push(`vendor ${upstream.vendor_id} not found`);
             continue;
         }
 
@@ -119,17 +161,24 @@ async function resolveAvailableCandidates(
             ? await vendorModelManager.findById(upstream.vendor_model_id)
             : null;
         if (upstream.vendor_model_id && !vendorModel) {
+            skipped.push(`vendor ${upstream.vendor_id}: vendor model ${upstream.vendor_model_id} not found`);
             continue;
         }
         if (!upstream.vendor_model_id && model.routing_mode !== ModelRoutingMode.LOAD_BALANCE) {
             vendorModel = await vendorModelManager.findByVendorAndModel(upstream.vendor_id, model.name);
         }
         if (vendorModel && vendorModel.vendor_id !== upstream.vendor_id) {
+            skipped.push(`vendor ${upstream.vendor_id}: vendor model ${vendorModel.id} belongs to another vendor`);
             continue;
         }
 
-        if (!vendorModel && !upstream.vendor_model_id && model.routing_mode !== ModelRoutingMode.LOAD_BALANCE && model.name) {
-            vendorModel = await vendorModelManager.create(upstream.vendor_id, model.name);
+        // 请求路径只读：vendor_model 的补建已挪到 model 创建/更新时（ensureVendorModels）。
+        // 这里查不到就当该候选不可用——正常流程下不应该发生，发生了就是配置漂移，需要去做一次配置保存。
+        if (!vendorModel && !upstream.vendor_model_id && model.routing_mode !== ModelRoutingMode.LOAD_BALANCE) {
+            skipped.push(
+                `vendor ${upstream.vendor_id}: model ${model.name} is not configured on this vendor (re-save the model to auto-provision)`,
+            );
+            continue;
         }
 
         let supportedFormats: ApiFormat[];
@@ -139,9 +188,11 @@ async function resolveAvailableCandidates(
             upstreamFormat = protocolUtils.resolveUpstreamFormat(clientFormat, supportedFormats);
             // 解析不出该格式的 URL（缺 URL 或无法派生）时，该候选不可用
             if (vendor.getUrlByFormat(upstreamFormat) === null) {
+                skipped.push(`vendor ${upstream.vendor_id}: no ${upstreamFormat} url`);
                 continue;
             }
         } catch {
+            skipped.push(`vendor ${upstream.vendor_id}: unsupported client format ${clientFormat}`);
             continue;
         }
 
@@ -151,6 +202,14 @@ async function resolveAvailableCandidates(
         // 健康状态与"本请求已试过"的过滤已下沉到各策略类
         candidates.push(
             new ModelRoutingResult(vendor, vendorModelName, upstreamFormat),
+        );
+    }
+
+    if (candidates.length === 0) {
+        // 带上逐个候选的不可用原因，避免只有一句 "No available upstream" 无从下手
+        throw new customError.AppError(
+            `No available upstream for model ${model.name}: ${skipped.join("; ") || "none"}`,
+            503,
         );
     }
 
@@ -184,6 +243,7 @@ async function selectUpstream(
 
 export { ModelRoutingResult };
 export default {
+    ensureVendorModels,
     validateConfig,
     selectUpstream,
 };

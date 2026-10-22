@@ -6,20 +6,44 @@ import vendorDefaultUrls from "../util/vendorDefaultUrlsUtil";
 import vendorTestService from "../service/vendorTestService";
 import modelManager from "../manager/modelManager";
 import customError from "../customError";
+import maskUtil from "../util/maskUtil";
 import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
 
 
 /**
+ * 回传给前端的 vendor 配置：代理 URL 里的账号密码必须掩码，凭据不出后端。
+ */
+function maskVendorConfig(config: SgVendor["config"] | null | undefined): unknown {
+    if (config == null) {
+        return config;
+    }
+    // Sutando 自定义 cast 实例需先转普通对象，否则改动会回写到模型上
+    const plain = typeof (config as { toJSON?: () => unknown }).toJSON === "function"
+        ? (config as { toJSON: () => Record<string, unknown> }).toJSON()
+        : config;
+    const result = { ...plain } as Record<string, unknown>;
+    const proxy = result.proxy as { type?: string; url?: string } | null | undefined;
+    if (proxy && typeof proxy.url === "string") {
+        result.proxy = { ...proxy, url: maskUtil.maskUrlCredentials(proxy.url) };
+    }
+    return result;
+}
+
+
+/**
  * Format vendor for API response (parse URLs using model method)
+ *
+ * token 默认掩码（只留前 4 位）：明文凭据不允许通过常规查询接口回传。
+ * 需要明文的场景（如重新复制 key）走独立的高权限接口 + 审计，不复用这里。
  */
 function formatVendor(vendor: SgVendor, modelCount = 0) {
     return {
         id: vendor.id,
         type: vendor.type,
         name: vendor.name,
-        token: vendor.token,
+        token: maskUtil.maskToken(vendor.token),
         urls: vendor.urls,
-        config: vendor.config,
+        config: maskVendorConfig(vendor.config),
         model_count: modelCount,
         created_at: vendor.created_at,
         updated_at: vendor.updated_at,

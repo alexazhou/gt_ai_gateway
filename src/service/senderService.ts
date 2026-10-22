@@ -18,6 +18,7 @@ import responseHandlerService from "./responseHandlerService";
 import fetchUtil from "../util/fetchUtil";
 import routingService, { type ModelRoutingResult } from "./routingService/core";
 import configService from "./configService";
+import { DEFAULT_ANTHROPIC_VERSION } from "../util/protocolConverter/anthropicDefaults";
 import upstreamHealthService from "./upstreamHealthService";
 import abortTimeoutUtil from "../util/abortTimeoutUtil";
 import RoutingContext from "./routingService/routingContext";
@@ -126,6 +127,9 @@ async function sendRequestToUpstream(
     // 并且必须排除客户端自带的鉴权 header，避免泄露或导致合并错误
     // 同时排除浏览器相关的元数据 header，避免上游校验失败
     const finalHeaders = new Headers();
+    // 客户端声明的 anthropic-version 透传给上游（不同版本的能力集不同，写死等于锁死上游版本）；
+    // 客户端没带时回落到我们适配过的默认版本
+    const clientAnthropicVersion = c.req.header("anthropic-version");
     const EXCLUDED_HEADERS = [
         "authorization",
         "x-api-key",
@@ -166,7 +170,7 @@ async function sendRequestToUpstream(
             finalHeaders.set("Authorization", vendor.token.startsWith("Bearer ") ? vendor.token : `Bearer ${vendor.token}`);
         } else {
             finalHeaders.set("x-api-key", vendor.token);
-            finalHeaders.set("anthropic-version", "2023-06-01");
+            finalHeaders.set("anthropic-version", clientAnthropicVersion || DEFAULT_ANTHROPIC_VERSION);
         }
     } else {
         finalHeaders.set("Authorization", vendor.token.startsWith("Bearer ") ? vendor.token : `Bearer ${vendor.token}`);
@@ -401,8 +405,12 @@ async function sendRequest(
             );
         } catch (e) {
             // 路由阶段异常（如配置错误无启用上游）：同样是一次失败请求，不留 init 孤儿记录
+            // 候选全部不可用（配置漂移）也走这里，失败码与原「无可用上游」分支保持一致
+            const isNoUpstream = e instanceof customError.AppError
+                && String(e.message).startsWith("No available upstream");
             await recordService.update(recordId, {
                 status: SgRecordStatus.FAILED,
+                ...(isNoUpstream ? { failed_code: FailedCode.NO_AVAILABLE_UPSTREAM } : {}),
                 end_at: new Date(),
             });
             throw e;

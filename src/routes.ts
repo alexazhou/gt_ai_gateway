@@ -93,10 +93,14 @@ for (const prefix of TENANT_SCOPED_PREFIXES) {
 app.onError((err, c) => {
     const error = err as unknown as Record<string, unknown>;
     const statusCode = error.statusCode as number || 500;
-    const message = error.message as string || String(err);
+    const message = (error.message as string) || "";
+
+    // 未知错误（500）不把内部细节回给客户端：message 可能带 SQL、文件路径、上游地址甚至凭据。
+    // 改为通用文案 + 一次性错误 id，细节只进日志，靠 id 关联（P2-04）
+    const errorId = `err_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
     // 记录错误日志
-    console.error(`[Error] ${c.req.method} ${c.req.path}:`, err);
+    console.error(`[Error] ${c.req.method} ${c.req.path} (${errorId}):`, err);
 
     const apiFormat = c.get("api_format");
     if (apiFormat) {
@@ -119,11 +123,12 @@ app.onError((err, c) => {
         );
     }
 
-    // 处理未知错误
+    // 处理未知错误：只回通用文案 + 错误 id，内部细节看日志
     return c.json(
         {
             error: "Internal server error",
-            message: String(err),
+            message: "Internal server error",
+            request_id: errorId,
         },
         500,
     );

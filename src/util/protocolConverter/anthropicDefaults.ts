@@ -22,3 +22,12 @@ export function resolveAnthropicMaxTokens(requested: unknown): number {
     }
     return DEFAULT_ANTHROPIC_MAX_TOKENS;
 }
+
+
+/**
+ * 上游未指定时使用的 Anthropic API 版本（P2-05）。
+ *
+ * 客户端自带的 `anthropic-version` 会原样透传；缺失时回落到这个我们验证过的版本，
+ * 避免「网关把版本写死」导致客户端用不了上游新版本或依赖旧版本行为。
+ */
+export const DEFAULT_ANTHROPIC_VERSION = "2023-06-01";
