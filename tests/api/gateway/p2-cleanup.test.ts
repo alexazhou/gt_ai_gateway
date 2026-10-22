@@ -1,6 +1,5 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { fetch } from "undici";
-import http from "node:http";
 import requestHelper from "../../helpers/requestHelper";
 import mockHelper from "../../helpers/mockHelper";
 import dbHelper from "../../helpers/dbHelper";
@@ -18,7 +17,6 @@ import config from "../../config";
  */
 
 const MOCK_BASE = config.UPSTREAM_CONFIG.mock.url;
-const MAX_LLM_BODY_BYTES = 32 * 1024 * 1024;
 
 let adminToken: string;
 let userToken: string;
@@ -126,46 +124,65 @@ describe("批次 4 P2 清理项", () => {
         });
     });
 
-    describe("P2-03 请求体上限", () => {
-        // worker 模式跳过：wrangler dev 的 HTTP 前置层会按伪造的 content-length 等满 32MB 才交给 worker，
-        // 用例只能等到 60s 超时（这不是实现缺陷，是 node 原生 http 才允许「先声明后少发」的差异）。
-        // worker 侧「按实读长度兜底 413」由 `MAX_LLM_BODY_BYTES` 上限分支覆盖。
-        it.skipIf(config.TEST_MODE === "worker")("Content-Length 超过 32MB 时直接 413，不读 body", async () => {
-            // 用原生 http 伪造 content-length：网关只读 header 就该拒绝，不会真的收 32MB
-            const response = await new Promise<{ status: number; body: string }>((resolve, reject) => {
-                const req = http.request(
-                    {
-                        host: "127.0.0.1",
-                        port: Number(new URL(config.SERVER_CONFIG.baseUrl).port),
-                        path: "/llm/v1/chat/completions",
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            Authorization: `Bearer ${userToken}`,
-                            "Content-Length": String(MAX_LLM_BODY_BYTES + 1024),
-                        },
-                    },
-                    (res) => {
-                        const chunks: Buffer[] = [];
-                        res.on("data", (c: Buffer) => chunks.push(c));
-                        res.on("end", () => resolve({
-                            status: res.statusCode ?? 0,
-                            body: Buffer.concat(chunks).toString("utf-8"),
-                        }));
-                    },
-                );
-                req.on("error", reject);
-                req.end(JSON.stringify({ model: "whatever", messages: [] }));
-            });
+    describe("P2-03 请求体上限（配置项 llm_max_body_bytes）", () => {
+        const LIMIT = 1024;
+        const setBodyLimit = async (bytes: number) => {
+            const res = await requestHelper.put("/config.json", { llm_max_body_bytes: String(bytes) }, adminToken);
+            expect(res.status, `设置 llm_max_body_bytes 失败: ${JSON.stringify(res.body)}`).toBe(200);
+        };
 
+        afterEach(async () => {
+            // 恢复默认 32MB，避免污染后续用例
+            await setBodyLimit(32 * 1024 * 1024);
+        });
+
+        it("声明长度超上限：不读 body 直接 413（快速路径）", async () => {
+            await setBodyLimit(LIMIT);
+            const payload = JSON.stringify({
+                model: "whatever",
+                messages: [{ role: "user", content: "x".repeat(4096) }],
+            });
+            const response = await fetch(`${config.SERVER_CONFIG.baseUrl}/llm/v1/chat/completions`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${userToken}` },
+                body: payload,
+            });
             expect(response.status, "超限请求体必须 413").toBe(413);
-            expect(response.body).toContain("too large");
+            expect(await response.text()).toContain("too large");
+        });
+
+        it("chunked（无 content-length）超上限：按实读长度兜底 413", async () => {
+            await setBodyLimit(LIMIT);
+            const bytes = new TextEncoder().encode(JSON.stringify({
+                model: "whatever",
+                messages: [{ role: "user", content: "y".repeat(4096) }],
+            }));
+            const stream = new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(bytes);
+                    controller.close();
+                },
+            });
+            // 用流式 body 发请求（无 content-length，走 chunked）；duplex 是 undici 的流式 body 必需项，
+            // 而 undici 的 RequestInit 与 DOM 的 RequestInit 在 ReadableStream 上类型不兼容，这里显式放宽
+            const init: Record<string, unknown> = {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${userToken}` },
+                body: stream,
+                duplex: "half",
+            };
+            const response = await fetch(
+                `${config.SERVER_CONFIG.baseUrl}/llm/v1/chat/completions`,
+                init as unknown as Parameters<typeof fetch>[1],
+            );
+            expect(response.status, "分块传输必须走实读长度兜底").toBe(413);
+            expect(await response.text()).toContain("too large");
         });
     });
 
     describe("P2-04/06 兜底 500 不泄漏内部细节", () => {
         it("内部异常导致 500 时只回通用文案，不含异常串/堆栈/文件路径", async () => {
-            // 用「原型链键」触发一条真实的内部异常路径（fill 时 casts 查表拿到非字符串）
+            // 顺带覆盖 P2-26 的入口清洗：update 路径同一套 fill 逻辑
             const vendor = await requestHelper.post(
                 "/vendor/create.json",
                 {
@@ -206,6 +223,34 @@ describe("批次 4 P2 清理项", () => {
                 .toContain(response.status);
             // 顺带确认没有把 __proto__ 写进模型（原型链未被污染）
             expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        });
+
+        // P2-26 另一处入口：厂商创建同样走 Sutando fill()，同一个根因（见 inputSanitizeUtil）
+        it("POST /vendor/create.json 带 __proto__ / constructor 时静默忽略，不报错也不污染原型", async () => {
+            // 必须用 JSON.parse 造体：对象字面量里的 __proto__ 只会改原型，不是自有属性
+            const payload = JSON.parse(`{
+                "type": "openai",
+                "name": "p2-proto-vendor-${Date.now()}",
+                "token": "sk-p2-proto",
+                "urls": { "openai": "${MOCK_BASE}/chat/completions" },
+                "__proto__": { "polluted": "yes" },
+                "constructor": { "prototype": { "polluted_nested": "yes" } },
+                "prototype": { "polluted_flat": "yes" }
+            }`);
+
+            const response = await requestHelper.post("/vendor/create.json", payload, adminToken);
+            expect(response.status, `危险键应被清洗而不是 500: ${JSON.stringify(response.body)}`).toBe(200);
+            expect(JSON.stringify(response.body)).not.toContain("TypeError");
+
+            const plain: Record<string, unknown> = {};
+            expect(plain.polluted, "__proto__ 键不得污染 Object.prototype").toBeUndefined();
+            expect(plain.polluted_nested).toBeUndefined();
+            expect(plain.polluted_flat).toBeUndefined();
+            expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+
+            if (response.body?.id != null) {
+                await requestHelper.del(`/vendor/${response.body.id}`, adminToken);
+            }
         });
     });
 
