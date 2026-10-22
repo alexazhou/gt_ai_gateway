@@ -9,6 +9,16 @@ import customError from "../customError";
 import { resolveScopeForUser } from "./tenantScopeMiddleware";
 
 
+/**
+ * LLM 请求体上限 32MB（P2-03）。
+ *
+ * 原实现直接 `c.req.text()` 无上限：一个几百 MB 的 body 会把 Worker 内存吃光（128MB 直接 OOM/1102），
+ * 或在 node 侧把内存拖崩。这里先看 Content-Length 快速拒绝，读进来后再兜底校验一次
+ * （Content-Length 可缺失/可伪造，分块传输时也可能没有）。
+ */
+const MAX_LLM_BODY_BYTES = 32 * 1024 * 1024;
+
+
 function extractLlmToken(c: Context): string {
     const authHeader = c.req.header("Authorization");
     if (authHeader) {
@@ -76,7 +86,16 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
         const scope = await resolveScopeForUser(user, c.req.header("X-Tenant-ID"));
         c.set("tenantScope", scope);
 
+        const declaredLength = Number(c.req.header("content-length") ?? "");
+        if (Number.isFinite(declaredLength) && declaredLength > MAX_LLM_BODY_BYTES) {
+            throw new customError.AppError("Request body too large", 413, "invalid_request_error");
+        }
+
         const body = await c.req.text();
+        // 兜底：Content-Length 缺失（chunked）时按实读长度再判一次（字符数 ≤ 字节数，只会漏判不会误判）
+        if (body.length > MAX_LLM_BODY_BYTES) {
+            throw new customError.AppError("Request body too large", 413, "invalid_request_error");
+        }
         const modelName = parseLlmRequestBody(body);
         const { modelConfig } = await llmRequestService.resolveContext(
             user.id,
