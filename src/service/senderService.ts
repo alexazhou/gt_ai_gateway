@@ -511,7 +511,21 @@ async function sendRequest(
 
             return response;
         } catch (e) {
-            if (c.req.raw.signal.aborted || e instanceof customError.AppError) {
+            if (c.req.raw.signal.aborted) {
+                throw e;
+            }
+
+            if (e instanceof customError.AppError) {
+                // AppError 是终态失败：进入上游前被拒绝（路由 / 插件 / 协议转换）或响应转换失败，
+                // 不会再尝试其他上游。必须在这里收尾，否则记录会停留在 init / processing。
+                await recordService.markFailed(recordId, FailedCode.UNKNOWN, {
+                    message: "请求处理失败",
+                    level: ActivityLevel.ERROR,
+                    detail: {
+                        error: e.message,
+                        status_code: e.statusCode,
+                    },
+                });
                 throw e;
             }
 

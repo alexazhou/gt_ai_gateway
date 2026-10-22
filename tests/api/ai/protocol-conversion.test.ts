@@ -760,6 +760,34 @@ describe("AI Protocol Conversion API", () => {
     }, 30000);
 
 
+    it("should finalize the request record as failed when protocol conversion rejects the request", async () => {
+        const response = await requestHelper.postWithAnthropicStyleApiKey(
+            "/llm/v1/messages",
+            {
+                model: anthropicClientModelName,
+                max_tokens: 1024,
+                messages: [{
+                    role: "user",
+                    content: [{ type: "image", source: { type: "base64", media_type: "image/png" } }],
+                }],
+                stream: false,
+            },
+            testUserToken,
+        );
+
+        expect(response.status).toBe(400);
+
+        // 转换在发往上游前失败，请求仍是终态失败，不能留下 init / processing 的孤儿记录
+        const recordsResponse = await requestHelper.get("/record/latest.json?limit=1", adminToken);
+        const record = recordsResponse.body[0];
+        expect(record.user_id).toBe(testUserId);
+        expect(record.model_id).toBe(anthropicClientModelId);
+        expect(record.status).toBe("failed");
+        expect(record.failed_code).toBe("unknown_error");
+        expect(record.end_at).toBeTruthy();
+    }, 30000);
+
+
     it("routes a Responses client directly to the responses upstream derived from a base openai URL", async () => {
         // vendor 配了 openai（base URL，getUrlByFormat 会自动补全 /chat/completions 后缀 → 可派生 responses）
         // + anthropic；getSupportedFormats 与 getUrlByFormat 口径统一后，responses 应直接路由到 responses 上游，
