@@ -1,5 +1,5 @@
 import { sutando } from "sutando";
-import { DatabaseAdapter, D1Adapter, SQLiteAdapter, MySQLAdapter } from "../util/dbAdapterUtil";
+import { DatabaseAdapter, D1Adapter, SQLiteAdapter, MySQLAdapter, type SqlStatement } from "../util/dbAdapterUtil";
 import { MySQLDBAdapter } from "../util/db/mysqlDBAdapter";
 import { SQLiteDBAdapter } from "../util/db/sqliteDBAdapter";
 import dbMigrationService from "./dbMigrationService";
@@ -195,6 +195,16 @@ class ORMService {
             throw new customError.AppError("ORMService not initialized", 500);
         }
         return this._dbAdapter;
+    }
+
+    /**
+     * 原子执行多条参数化语句（全部成功或全部回滚）。
+     * 驱动差异由适配器吸收：D1 走 batch、better-sqlite3 走 db.transaction、MySQL 走显式事务。
+     * 仅用于必须整体一致的写路径（如"记录结算 + 扣费"）。
+     */
+    async runAtomically(statements: SqlStatement[]): Promise<void> {
+        await this.dbAdapter.runAtomically(statements);
+        return;
     }
 
     getKnex(): any {

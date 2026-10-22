@@ -783,7 +783,8 @@ describe("AI Protocol Conversion API", () => {
         expect(record.user_id).toBe(testUserId);
         expect(record.model_id).toBe(anthropicClientModelId);
         expect(record.status).toBe("failed");
-        expect(record.failed_code).toBe("unknown_error");
+        // 失败归因细化：请求侧协议转换失败记 conversion_error（不再糊成 unknown_error）
+        expect(record.failed_code).toBe("conversion_error");
         expect(record.end_at).toBeTruthy();
     }, 30000);
 

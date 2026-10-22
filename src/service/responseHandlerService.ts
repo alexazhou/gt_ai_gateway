@@ -10,10 +10,10 @@ import { ApiFormat, FailedCode, SgRecordStatus, RequestActivityStage, ActivityLe
 import { BaseConverter } from "../util/protocolConverter/BaseConverter";
 import { AccumulatorBase } from "../util/accumulator/accumulatorBase";
 import recordService, { type MarkFailedOptions } from "./recordService";
+import billingSettlementService from "./billingSettlementService";
 import requestActivityService from "./requestActivityService";
 import configService from "./configService";
 import abortTimeoutUtil from "../util/abortTimeoutUtil";
-import userService from "./userService";
 import streamLogService from "./streamLogService";
 import usageUtils, { type Dict } from "../util/protocolUtil/usageUtil";
 import upstreamFailureUtil from "../util/protocolUtil/upstreamFailureUtil";
@@ -44,6 +44,23 @@ interface RunSSELoopOptions {
 
 // 流式读循环日志前缀（runSSELoop 只被 handleStreamResponse 一处调用，直接固化）
 const SSE_LOOP_LOG_PREFIX = "[responseHandlerService]";
+
+
+/**
+ * 安全解析上游 JSON 响应体：解析失败或不是对象时返回 null。
+ * 用于把「上游 200 + 非 JSON 体」识别为上游故障（而不是 success + cost=0）。
+ */
+function parseJsonSafely(text: string): Record<string, unknown> | null {
+    try {
+        const parsed = JSON.parse(text);
+        if (parsed === null || typeof parsed !== "object") {
+            return null;
+        }
+        return parsed as Record<string, unknown>;
+    } catch (e) {
+        return null;
+    }
+}
 
 
 // ====================================================================
@@ -205,62 +222,101 @@ function finalizeStreamResult(
     user: SgUser,
     state: StreamRunResult,
 ): void {
-    let { accumulator, failedCode, errorMessage } = state;
+    const { accumulator, failedCode, errorMessage } = state;
 
     runInBackgroundUtil.runInBackground(c, async () => {
-        // 已完整接收即视为成功：即使随后连接断开，也可能只是客户端拿到完整结果后提前关闭
-        // （客户端断开 / 上游超时不置 errored，不该覆盖成功）；标志语义见 AccumulatorBase
-        if (accumulator.isCompleted()) {
-            const fullResponse = accumulator.getResponse();
-            const normalizedUsage = usageUtils.normalizeUsage(ApiFormat.OPENAI, accumulator.getUsage() as Dict | null);
-            const usageJson = usageUtils.serializeStoredUsage(normalizedUsage?.recordUsage ?? null);
-            const cost = normalizedUsage
-                ? usageUtils.calculateCost(model, normalizedUsage.promptTokens, normalizedUsage.outputTokens, normalizedUsage.cacheReadTokens)
-                : 0;
-            const firstTokenTime = accumulator.getFirstTokenTime();
-
-            await recordService.update(record.id, {
-                response_data: JSON.stringify(fullResponse),
-                status: SgRecordStatus.SUCCESS,
-                usage: usageJson,
-                first_token_latency: firstTokenTime !== null
-                    ? firstTokenTime - record.created_at.getTime()
-                    : null,
-                end_at: new Date(),
-                cost,
+        try {
+            await settleStreamResult(record, model, user, accumulator, failedCode, errorMessage);
+        } catch (e) {
+            // 收尾失败必须"可见"：只 console.error 的话在 Worker 里等于静默丢账。
+            // 这里兜底把记录标失败（含 activity），让「钱账不一致」在库里能被查到。
+            console.error("[responseHandlerService] Failed to finalize stream record:", {
+                recordId: record.id,
+                error: abortTimeoutUtil.describeError(e),
             });
-            await requestActivityService.append(record.id, RequestActivityStage.RESULT, "请求成功", {
-                status: SgRecordStatus.SUCCESS,
-                cost,
+            await recordService.markFailed(record.id, FailedCode.UNKNOWN, {
+                message: "请求收尾失败",
+                detail: { error: abortTimeoutUtil.describeError(e) },
+            }).catch((markError) => {
+                console.error("[responseHandlerService] Failed to mark record failed:", {
+                    recordId: record.id,
+                    error: abortTimeoutUtil.describeError(markError),
+                });
             });
-
-            if (user.type !== "root") {
-                await userService.deductBalance(user.id, cost);
-            }
-            return;
         }
-
-        // 失败收尾：先归一化失败码，再按条件补收尾参数，最后统一写入。
-        // ① 未记录失败码（流结束但归因不到具体原因）→ 兜底未知错误
-        if (failedCode === null) {
-            failedCode = FailedCode.UNKNOWN;
-        }
-
-        // ② 报错文案在 abort 检出的时刻已与失败码一并确定（不按失败码事后生成）；
-        // 上游返回错误则附带 error body（真实上游数据）
-        let failedOptions: MarkFailedOptions | null = null;
-        if (errorMessage !== null) {
-            failedOptions = { response_data: errorMessage };
-        } else if (failedCode === FailedCode.UPSTREAM_ERROR && accumulator.isErrored()) {
-            const errorData = accumulator.getError();
-            failedOptions = {
-                response_data: errorData === null ? null : JSON.stringify(errorData),
-            };
-        }
-
-        // ③ 统一收尾（null 表示无附加参数，交由 markFailed 默认处理）
-        await recordService.markFailed(record.id, failedCode, failedOptions);
     });
+}
+
+
+/**
+ * 流式收尾的主体逻辑（被 finalizeStreamResult 包在 try/catch 与后台任务里调用）。
+ */
+async function settleStreamResult(
+    record: SgRecord,
+    model: SgModel,
+    user: SgUser,
+    accumulator: AccumulatorBase,
+    failedCode: string | null,
+    errorMessage: string | null,
+): Promise<void> {
+    // 已完整接收即视为成功：即使随后连接断开，也可能只是客户端拿到完整结果后提前关闭
+    // （客户端断开 / 上游超时不置 errored，不该覆盖成功）；标志语义见 AccumulatorBase
+    if (accumulator.isCompleted()) {
+        const fullResponse = accumulator.getResponse();
+        const normalizedUsage = usageUtils.normalizeUsage(ApiFormat.OPENAI, accumulator.getUsage() as Dict | null);
+        const usageJson = usageUtils.serializeStoredUsage(normalizedUsage?.recordUsage ?? null);
+        const cost = normalizedUsage
+            ? usageUtils.calculateCost(model, normalizedUsage.promptTokens, normalizedUsage.outputTokens, normalizedUsage.cacheReadTokens)
+            : 0;
+        const firstTokenTime = accumulator.getFirstTokenTime();
+
+        // 计费开关在事务外取（结算事务内不做额外 I/O），root 不扣费
+        const chargeUserId = cost > 0 && user.type !== "root" && await configService.isModuleBillingEnabled()
+            ? user.id
+            : null;
+
+        // 「记录收尾 + 扣费」同事务提交：要么都生效，要么都不留痕（见 billingSettlementService）
+        await billingSettlementService.settleRecord({
+            recordId: Number(record.id),
+            status: SgRecordStatus.SUCCESS,
+            usage: usageJson,
+            cost,
+            endAt: new Date(),
+            firstTokenLatency: firstTokenTime !== null
+                ? firstTokenTime - record.created_at.getTime()
+                : null,
+            responseData: JSON.stringify(fullResponse),
+            chargeUserId,
+        });
+
+        await requestActivityService.append(record.id, RequestActivityStage.RESULT, "请求成功", {
+            status: SgRecordStatus.SUCCESS,
+            cost,
+        });
+        return;
+    }
+
+    // 失败收尾：先归一化失败码，再按条件补收尾参数，最后统一写入。
+    // ① 未记录失败码（流结束但归因不到具体原因）→ 兜底未知错误
+    let code = failedCode;
+    if (code === null) {
+        code = FailedCode.UNKNOWN;
+    }
+
+    // ② 报错文案在 abort 检出的时刻已与失败码一并确定（不按失败码事后生成）；
+    // 上游返回错误则附带 error body（真实上游数据）
+    let failedOptions: MarkFailedOptions | null = null;
+    if (errorMessage !== null) {
+        failedOptions = { response_data: errorMessage };
+    } else if (code === FailedCode.UPSTREAM_ERROR && accumulator.isErrored()) {
+        const errorData = accumulator.getError();
+        failedOptions = {
+            response_data: errorData === null ? null : JSON.stringify(errorData),
+        };
+    }
+
+    // ③ 统一收尾（null 表示无附加参数，交由 markFailed 默认处理）
+    await recordService.markFailed(record.id, code, failedOptions);
 }
 
 
@@ -361,25 +417,54 @@ export async function handleNonStreamResponse(
         return c.body(responseText);
     }
 
+    // 上游 200 但响应体不是 JSON（空 body / HTML 错误页 / 被截断的 JSON）：
+    // 既转不了协议也算不出 usage，属于上游故障，不能记 success + cost=0 污染统计与计费。
+    // 按 upstream_error 记失败，响应仍原样透传（保持"不擅自改上游状态码"的约定）。
+    const parsedUpstream = parseJsonSafely(responseText);
+    if (parsedUpstream === null) {
+        console.error("[responseHandlerService] Upstream returned a non-JSON body with a success status:", {
+            recordId: record.id,
+            status: statusCode,
+            contentType: upstreamRes.headers.get("content-type"),
+            bodyPreview: responseText.slice(0, 500),
+        });
+
+        await recordService.markFailed(record.id, FailedCode.UPSTREAM_ERROR, {
+            message: "上游返回非 JSON 响应",
+            level: ActivityLevel.ERROR,
+            response_data: responseText,
+            detail: {
+                upstream_status: statusCode,
+                content_type: upstreamRes.headers.get("content-type"),
+                reason: responseText.length === 0 ? "empty_body" : "non_json_body",
+            },
+        });
+
+        c.status(statusCode);
+        c.res.headers.set("Content-Type", upstreamRes.headers.get("content-type") || "application/json");
+        return c.body(responseText);
+    }
+
     let clientResponseText = responseText;
     if (converter) {
         try {
-            const responseJson = JSON.parse(responseText);
-            const clientRes = converter.convertResponse(responseJson);
+            const clientRes = converter.convertResponse(parsedUpstream);
             clientResponseText = JSON.stringify(clientRes);
         } catch (e) {
             console.error("[responseHandlerService] Failed to convert response format:", e);
             throw new customError.AppError(
                 `Failed to convert upstream response format: ${e instanceof Error ? e.message : String(e)}`,
                 502,
+                undefined,
+                FailedCode.CONVERSION_ERROR,
             );
         }
     }
 
     let normalizedUsage: ReturnType<typeof usageUtils.normalizeUsage> | null = null;
     try {
-        const responseJson = JSON.parse(responseText);
-        normalizedUsage = usageUtils.normalizeUsage(upstreamFormat, responseJson.usage);
+        const responseJson = parsedUpstream as Record<string, unknown>;
+        normalizedUsage = usageUtils.normalizeUsage(upstreamFormat, responseJson.usage as Dict | null | undefined);
     } catch (e) {
         console.log("Failed to parse response for token stats:", e);
     }
@@ -392,14 +477,27 @@ export async function handleNonStreamResponse(
     const recordStatus = statusCode === 200 ? SgRecordStatus.SUCCESS : SgRecordStatus.FAILED;
     // 非流式：首 token 时间 = 整体响应耗时
     const endedAt = Date.now();
-    await recordService.update(record.id, {
-        response_data: clientResponseText,
+
+    // 计费开关在事务外取（结算事务内不做额外 I/O），root / 失败请求不扣费
+    const chargeUserId = recordStatus === SgRecordStatus.SUCCESS
+        && cost > 0
+        && user.type !== "root"
+        && await configService.isModuleBillingEnabled()
+        ? user.id
+        : null;
+
+    // 「记录收尾 + 扣费」同事务提交：要么都生效，要么都不留痕（见 billingSettlementService）
+    await billingSettlementService.settleRecord({
+        recordId: Number(record.id),
         status: recordStatus,
         usage: usageJson,
-        end_at: new Date(endedAt),
-        cost: cost,
-        first_token_latency: endedAt - record.created_at.getTime(),
+        cost,
+        endAt: new Date(endedAt),
+        firstTokenLatency: endedAt - record.created_at.getTime(),
+        responseData: clientResponseText,
+        chargeUserId,
     });
+
     await requestActivityService.append(record.id, RequestActivityStage.RESULT,
         recordStatus === SgRecordStatus.SUCCESS ? "请求成功" : "请求失败",
         {
@@ -409,10 +507,6 @@ export async function handleNonStreamResponse(
         },
         recordStatus === SgRecordStatus.SUCCESS ? ActivityLevel.INFO : ActivityLevel.ERROR,
     );
-
-    if (user.type !== "root" && statusCode === 200) {
-        await userService.deductBalance(user.id, cost);
-    }
 
     c.status(statusCode);
     c.header("Content-Type", "application/json");

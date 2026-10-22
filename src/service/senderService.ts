@@ -6,7 +6,8 @@ import { SgRecord } from "../model/sgRecord";
 import recordService from "./recordService";
 import type { MarkFailedOptions } from "./recordService";
 import requestActivityService from "./requestActivityService";
-import { SgRecordStatus, ApiFormat, VendorAuthMode, FailedCode, RequestActivityStage, ActivityLevel, ConfigKey } from "../constants";
+import { SgRecordStatus, ApiFormat, VendorAuthMode, FailedCode, RequestActivityStage, ActivityLevel, ConfigKey, MIN_DEDUCTION_UNIT } from "../constants";
+import billingUtil from "../util/protocolUtil/billingUtil";
 import pluginService from "./pluginService";
 import hostService from "./hostService";
 import { ConverterFactory } from "../util/protocolConverter/ConverterFactory";
@@ -353,10 +354,12 @@ async function sendRequest(
     const mainTenantId = scope?.mainTenantId;
 
     // 预检：仅全局计费开启时检查余额（module_billing_enabled 关闭则完全不拦）。
-    // 余额为负的用户阻止请求，不向上游发起（负余额在完成时扣减产生，充值前不再放行）
-    // balance 为整数微元，负值即欠费；但未启用计费（价格未设置或为 0）的模型不拦截
+    // 口径：不做透支 —— 余额必须覆盖「最小可计费成本」(MIN_DEDUCTION_UNIT) 才放行。
+    // 修复前只拦 balance < 0，导致 0 余额用户可以并发发起任意多请求一起透支。
+    // balance 为整数微元；未启用计费（价格未设置或为 0）的模型不拦截
     const billingEnabled = await configService.isModuleBillingEnabled();
-    if (billingEnabled && user.balance < 0 && modelConfig.hasBilling()) {
+    const minChargeableUnits = billingUtil.toUnits(MIN_DEDUCTION_UNIT);
+    if (billingEnabled && modelConfig.hasBilling() && user.balance < minChargeableUnits) {
         await recordService.recordFailedRequest(
             user.id,
             modelConfig.name,
@@ -518,7 +521,9 @@ async function sendRequest(
             if (e instanceof customError.AppError) {
                 // AppError 是终态失败：进入上游前被拒绝（路由 / 插件 / 协议转换）或响应转换失败，
                 // 不会再尝试其他上游。必须在这里收尾，否则记录会停留在 init / processing。
-                await recordService.markFailed(recordId, FailedCode.UNKNOWN, {
+                // 失败归因优先用错误自带的 failedCode（如协议转换失败 → conversion_error），
+                // 否则才兜底 unknown_error，避免所有终态失败都糊成同一个码。
+                await recordService.markFailed(recordId, e.failedCode ?? FailedCode.UNKNOWN, {
                     message: "请求处理失败",
                     level: ActivityLevel.ERROR,
                     detail: {

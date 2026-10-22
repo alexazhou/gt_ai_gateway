@@ -1,5 +1,14 @@
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { DBAdapter } from "./dbAdapter";
+
+// 参数白名单：dbName / configPath 只允许标识符、路径分隔、点、横线与下划线。
+// 这里的目标不是"转义"，而是让非法值永远进不了 argv（见 README 安全约定）。
+const SAFE_ARG_PATTERN = /^[\w./-]+$/;
+// 超过该长度的 SQL 走临时文件（argv 长度上限因平台而异，Windows 约 32KB）
+const INLINE_SQL_LIMIT = 32 * 1024;
 
 export class WranglerDBAdapter implements DBAdapter {
     private target: "--local" | "--remote";
@@ -10,18 +19,45 @@ export class WranglerDBAdapter implements DBAdapter {
         this.target = target;
         this.configPath = configPath;
         this.dbName = dbName;
+        this.assertSafeArg(dbName, "dbName");
+        this.assertSafeArg(configPath, "configPath");
     }
 
-    private runWrangler(args: string[]): string {
-        let cmd = `npx wrangler d1 execute ${this.dbName} ${this.target}`;
-        if (this.configPath) {
-            cmd += ` --config ${this.configPath}`;
+    /**
+     * 校验会进入子进程 argv 的路径/标识符参数。
+     * 空串表示"未配置"，放行；含 `..`（路径穿越）、存在非法字符一律抛错，
+     * 保证调用方拿到明确错误而不是拼出一条意外的命令行。
+     */
+    private assertSafeArg(value: string, label: string): void {
+        if (!value) {
+            return;
         }
-        cmd += ` ${args.join(" ")}`;
-        console.log(`> ${cmd}`);
+        if (!SAFE_ARG_PATTERN.test(value) || value.split("/").some((seg) => seg === "..")) {
+            throw new Error(`Invalid ${label} for wrangler d1 execute: ${value}`);
+        }
+    }
+
+    private buildArgs(extra: string[]): string[] {
+        this.assertSafeArg(this.dbName, "dbName");
+        const args = ["wrangler", "d1", "execute", this.dbName, this.target];
+        if (this.configPath) {
+            this.assertSafeArg(this.configPath, "configPath");
+            args.push("--config", this.configPath);
+        }
+        args.push(...extra);
+        return args;
+    }
+
+    /**
+     * 用 execFileSync + argv 数组调用 npx，**不经过 shell**：
+     * SQL 里的 `$()`、反引号、`;`、引号都只是普通字节，不会被解释成命令。
+     * 修复前是 execSync 拼字符串（只转义双引号），存在命令注入。
+     */
+    private runWrangler(extra: string[]): string {
+        const args = this.buildArgs(extra);
+        console.log(`> npx ${args.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(" ")}`);
         try {
-            const output = execSync(cmd, { encoding: "utf-8", stdio: "pipe" });
-            return output;
+            return execFileSync("npx", args, { encoding: "utf-8", stdio: "pipe" });
         } catch (e) {
             const error = e as { message?: string; stdout?: unknown; stderr?: unknown };
             console.error("Wrangler command failed:", error.message);
@@ -31,18 +67,33 @@ export class WranglerDBAdapter implements DBAdapter {
         }
     }
 
+    /**
+     * 执行 SQL：短 SQL 走 `--command`，超长走临时文件 `--file`（避免 argv 上限）。
+     * 两种方式都以独立 argv 元素传递，SQL 内容不再被 shell 解析，也不再对换行做替换
+     * （原实现把 `\n` 换成空格，会改坏 SQL 字符串字面量里的换行）。
+     */
+    private runWithSql(sql: string, extra: string[] = []): string {
+        if (sql.length <= INLINE_SQL_LIMIT) {
+            return this.runWrangler([...extra, "--command", sql]);
+        }
+
+        const dir = mkdtempSync(join(tmpdir(), "gtgw-sql-"));
+        const file = join(dir, "query.sql");
+        try {
+            writeFileSync(file, sql, "utf-8");
+            return this.runWrangler([...extra, "--file", file]);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    }
+
     exec(sql: string): void {
-        // Instead of passing huge SQL directly on CLI args which can lead to quotes issues,
-        // let's try direct --command first
-        const singleLine = sql.replace(/\n/g, " ");
-        this.runWrangler([`--command="${singleLine.replace(/"/g, '\\"')}"`]);
+        this.runWithSql(sql);
     }
 
     query<T>(sql: string): T[] {
         // Wrangler --json output format: [{results: [...], success: true, ...}]
-        const output = this.runWrangler([
-            `--json --command="${sql.replace(/"/g, '\\"')}"`,
-        ]);
+        const output = this.runWithSql(sql, ["--json"]);
         try {
             const match = output.match(/\[.*\]/s);
             if (match) {

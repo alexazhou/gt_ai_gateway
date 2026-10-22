@@ -1,5 +1,5 @@
 import { Context } from "hono";
-import { ApiFormat } from "./constants";
+import { ApiFormat, FailedCode } from "./constants";
 
 // 使用 Symbol 标记来识别 AppError 实例
 const APP_ERROR_SYMBOL = Symbol.for("AppError");
@@ -12,6 +12,11 @@ class AppError extends Error {
         public message: string,
         public statusCode: number = 400,
         public code?: string,
+        /**
+         * 落库用的失败归因（record.failed_code）。未指定时由调用方兜底为 unknown_error；
+         * 典型用法：协议转换失败 → FailedCode.CONVERSION_ERROR，便于按原因统计排障。
+         */
+        public failedCode?: FailedCode,
     ) {
         super(message);
         this.name = "AppError";
