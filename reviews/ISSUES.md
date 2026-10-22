@@ -22,13 +22,13 @@
 
 | 编号 | 问题 | 位置 | 负责人 | 状态 | 修复方案 |
 |---|---|---|---|---|---|
-| P1-01 | **今日统计时区错位**：本地零点被 `toISOString()` 转成 UTC 作 cutoff，而 `created_at` 按本地时区存 → UTC+8 下"今日"多算 8 小时（已实测：cutoff=昨日 16:00） | `src/controller/statsController.ts:15-16,31` | 阿张 | TODO | cutoff 改用 `recordManager.formatDbDatetime`（或抽公共 util）；补 `TZ=Asia/Shanghai` 用例 |
-| P1-02 | **SSE 跨 chunk CRLF 归一化污染**：整个 buffer 做 `\r\n→\n` 后 remainingBuffer 已被污染，`\r` 跨 chunk 时凭空多出事件分隔符 → 单事件被拆两个，下游 JSON 半截（已复现） | `src/util/protocolUtil/sseEventUtil.ts:16-19` | 阿张 | TODO | 只对已完成帧归一化，remainingBuffer 保留原始片段（悬挂 `\r` 留给下个 chunk）；补 chunk 边界用例 |
-| P1-03 | **SSE `data:` 值被过度 trim**：整体 `.trim()`，规范只允许去掉一个前导空格 → 合法前后空格被吞，内容失真 | `src/util/protocolUtil/sseEventUtil.ts:26-29` | 阿张 | TODO | 仅 `if (value.startsWith(" ")) value = value.slice(1)`，多行 data 用 `\n` 拼接 |
-| P1-04 | **流结束未 flush TextDecoder**：尾部半个多字节 UTF-8 字符丢失（中文/emoji），可能影响尾部 usage 帧 | `src/service/responseHandlerService.ts:146` | 阿张 | TODO | `result.done` 分支先 `const tail = decoder.decode(); if (tail) buffer += tail;` |
-| P1-05 | **SSE 读缓冲无上限**：上游不发 `\n\n` 时 buffer 无界增长，Worker 128MB 直接 502 | `src/service/responseHandlerService.ts:93,149` | 阿张 | TODO | 设阈值（如 8MB），超限按 `sse_parse_error` 收尾并取消上游读；补用例 |
+| P1-01 | **今日统计时区错位**：本地零点被 `toISOString()` 转成 UTC 作 cutoff，而 `created_at` 按本地时区存 → UTC+8 下"今日"多算 8 小时（已实测：cutoff=昨日 16:00） | `src/controller/statsController.ts:15-16,31` | 阿张 | VERIFIED | cutoff 改用 `recordManager.formatDbDatetime`（或抽公共 util）；补 `TZ=Asia/Shanghai` 用例 **已验（李哥）**：用例 `tests/api/stats/dashboardTimezone.node.test.ts`（4 例，`TZ=Asia/Shanghai` 下绿）——昨天 20:00 不计入 / 昨天 23:59 排除 / 今天 00:01 与零点计入 / 与 `/record/latest` 口径一致。UTC 环境是天然盲区（本地零点=UTC 零点），文件头写明必须带 TZ 跑；本机就是 UTC+8，node 全量默认覆盖。 |
+| P1-02 | **SSE 跨 chunk CRLF 归一化污染**：整个 buffer 做 `\r\n→\n` 后 remainingBuffer 已被污染，`\r` 跨 chunk 时凭空多出事件分隔符 → 单事件被拆两个，下游 JSON 半截（已复现） | `src/util/protocolUtil/sseEventUtil.ts:16-19` | 阿张 | VERIFIED | 只对已完成帧归一化，remainingBuffer 保留原始片段（悬挂 `\r` 留给下个 chunk）；补 chunk 边界用例 **已验（李哥）**：`tests/unit/util/protocolUtil/sseEventUtil.crossChunk.test.ts`（chunk 投喂模拟任意切分：CRLF 切在 `\r|\n` 之间、裸 `\r` 切在帧中间、逐字节投喂与一次性投喂等价）。对修前代码（b957356 版）实测红：CRLF 跨界被拆成两条事件 `[{hel},{lo}]`。 |
+| P1-03 | **SSE `data:` 值被过度 trim**：整体 `.trim()`，规范只允许去掉一个前导空格 → 合法前后空格被吞，内容失真 | `src/util/protocolUtil/sseEventUtil.ts:26-29` | 阿张 | VERIFIED | 仅 `if (value.startsWith(" ")) value = value.slice(1)`，多行 data 用 `\n` 拼接 **已验（李哥）**：同文件 —— 只去一个前导空格、尾随空格保留、多行 data 按 `\n` 拼接、纯空格 data `data:  ` 不得丢。修前实测：`data:  two  spaces  ` → `two  spaces`（trim 过度）、`data:  ` → 事件被丢。 |
+| P1-04 | **流结束未 flush TextDecoder**：尾部半个多字节 UTF-8 字符丢失（中文/emoji），可能影响尾部 usage 帧 | `src/service/responseHandlerService.ts:146` | 阿张 | VERIFIED | `result.done` 分支先 `const tail = decoder.decode(); if (tail) buffer += tail;` **已验（李哥）**：`tests/api/ai/stream-sse-boundary.test.ts` + mock 新路由 `/chat/completions/split-multibyte`（按**字节**切片写，三字节中文字符被切成 1+2/2+1）——客户端内容完整 `中文流式内容测试ABC`、无 U+FFFD、记录 success。口径说明：`stream:true` 本身已覆盖跨 chunk 完整字符，flush 的直接可观测面很窄，本用例钉的是「字节级切片端到端不丢字」。 |
+| P1-05 | **SSE 读缓冲无上限**：上游不发 `\n\n` 时 buffer 无界增长，Worker 128MB 直接 502 | `src/service/responseHandlerService.ts:93,149` | 阿张 | VERIFIED | 设阈值（如 8MB），超限按 `sse_parse_error` 收尾并取消上游读；补用例 **已验（李哥）**：同文件 + mock 路由 `/chat/completions/no-terminator`（只写单换行、永不出现空行）。`sse_max_buffer_bytes=4096` 时窗口内（<15s）流被主动关闭、记录 `failed/sse_parse_error`、文案含「缓冲上限」。 |
 | P1-06 | **上游 200 + 空/非 JSON body 记 success 且 cost=0**：解析不出 JSON 就跳过失败判定，污染统计计费，客户端拿到 200+空体 | `src/service/responseHandlerService.ts:392,413`；`src/util/protocolUtil/upstreamFailureUtil.ts:80-83` | 阿张 | VERIFIED | body 为空或协议必需字段缺失 → `upstream_error`，响应原样透传，cost=0；补空/HTML/截断 JSON 三类用例 **已改**：`handleNonStreamResponse` 用 `parseJsonSafely` 区分「非 JSON 体」；空/HTML/截断 JSON → `failed_code=upstream_error`、`cost=0`、响应原样透传（HTTP 状态不变）；detail 记 `reason=empty_body|non_json_body`。 |
-| P1-07 | **OpenAI→Anthropic 缺省注入 `max_tokens=32768`**：客户端不传（合法）时超 haiku 等模型上限 → 上游 400，且 4xx 不触发 failover | `src/util/protocolConverter/OpenAIToAnthropicConverter.ts:128` | 阿张 | TODO | 按 `vendor_model.max_output_tokens` 钳制，缺省取安全值（如 4096）；补"未传 max_tokens"用例 |
+| P1-07 | **OpenAI→Anthropic 缺省注入 `max_tokens=32768`**：客户端不传（合法）时超 haiku 等模型上限 → 上游 400，且 4xx 不触发 failover | `src/util/protocolConverter/OpenAIToAnthropicConverter.ts:128` | 阿张 | VERIFIED | 按 `vendor_model.max_output_tokens` 钳制，缺省取安全值（如 4096）；补"未传 max_tokens"用例 **已验（李哥）**：`tests/unit/protocolConverter/openaiToAnthropicMaxTokens.test.ts`（7 例）——未传缺省 4096（≤8192 安全档）、显式值透传、`max_completion_tokens` 生效、0/负数回落、`tool_choice` 各形态映射、`response_format` 组合不炸且不污染 messages。注：按上限钳制落在 vendor_model 层（转换器只做安全缺省），本次只钉缺省与组合口径。 |
 | P1-08 | **管理端回传 vendor 明文 token 与代理配置**：`/vendor/list.json` 原样下发上游密钥，与 inspect 模式已脱敏口径不一致 | `src/controller/vendorController.ts:20` | 阿张 | TODO | 默认脱敏（`maskUtil.maskToken`、proxy 去凭据），编辑"留空=不修改"；如需明文另开高权限 reveal 接口并审计 |
 | P1-09 | **updateModel 批量赋值（mass assignment）**：仅排除 `id`/`tenant_id`，其余 body 全量 `fill`，可篡改 `created_at` 等审计列 | `src/service/modelService.ts:57-58`；`src/controller/modelController.ts:58` | 阿张 | TODO | 显式字段白名单 pick，或给 `SgModel` 加 `fillable` |
 | P1-10 | **选路读路径执行写操作**：`resolveAvailableCandidates` 找不到 vendorModel 时在请求链路里 `create`，高并发产生重复行/污染配置 | `src/service/routingService/core.ts:132` | 阿张 | TODO | 自动补建挪到配置写入时；请求路径只读，找不到则 fail 并给可读错误 |
@@ -65,7 +65,7 @@
 | P2-22 | **测试口径与用例问题**：文件数 107 vs 文档 123；worker 跳过客户端断开 6 例 + R2 1 例（真实环境无覆盖）；`ai.negative.test.ts:257` 命名与断言不符；CORS 无用例且无 Origin 时返回 `*` + credentials | `tests/`、`vitest.worker.config.ts`、`src/middleware/corsMiddleware.ts` | 李哥 | VERIFIED | ① `ai.negative.test.ts` 两处 "should return 401 when model does not exist" 改为 404（断言本就是 404）；② 新增 `tests/api/gateway/cors.test.ts`（A1 放行 5 源 / A2 拒绝 6 源含 4 条前缀绕过回归 / A3 纯函数口径 / A4 无 Origin 不回 ACAO），顺带修出 P1-12；③ node-only 用例统一 `*.node.test.ts` 命名，worker 配置 `exclude: ['**/*.node.test.ts']`；④ **worker 的 7 例跳过全部消除**（skipped 从 7 → 0）：`stream-failure` 3 例改 `it.fails` 看门狗（P2-23 运行时语义）、2 例 `upstream-timeout` 改模式化断言（两模式都必须"已收尾 + 文案可读 + 不落裸 AbortError"）、`objectStorageChain` 在 worker 改走 R2 回读（详情 API 两次回读逐字节一致）；⑤ 新增 `tests/unit/util/timeoutAbortController.test.ts`（6 例，双模式）钉死"客户端信号一断就产出 CLIENT_DISCONNECTED 标记"；⑥ 口径实测：node **114 文件 / 1293 例**、worker **86 文件 / 1078 例（0 跳过）** |
 | P2-23 | **Worker 本地不传播「客户端断开」信号**：`c.req.raw.signal` 在 `wrangler dev` 下不会因客户端 abort 而中止，流式请求断开后记录会停在 `processing`（实测 8s 采样不动），最终靠空闲超时（180s）/ 孤儿扫描（10min）兜底；非流式则跑到上游超时收尾（`upstream_timeout`）。node 模式同链路正常落 `client_disconnected` | `src/service/senderService.ts:285`、`src/util/abortTimeoutUtil.ts:206-220`、`src/service/responseHandlerService.ts:117-165` | 阿张 | VERIFIED | 已做：① 新增 `stream_max_duration_ms`（默认 30min）作为流式总时长硬上限，trickle 场景已验证生效（`tests/api/ai/stream-max-duration.test.ts`）；② 明确两个阈值关系：`stream_max_duration_ms`(30min) > `orphan_recover_threshold_ms`(10min)，孤儿回收会先触发，调参时需成对考虑。**仍缺**：上限只在 chunk 边界检查，上游"发几个 chunk 后挂住"时循环阻塞在 `readChunk(idle=180s)` 里，deadline 轮不到 → 该形态未兜住（看门狗 `tests/api/ai/stream-max-duration-hang.test.ts`，当前为 `it.fails`）。建议把剩余额度传进单次读等待：`readChunk(reader, Math.min(idleTimeoutMs, streamDeadline - Date.now()))`，或对 read 做 `raceWithTimeout(remaining)`。 **已验（李哥，b5 复验）**：③ 单次读等待已按剩余额度收窄（`readChunk(reader, Math.max(1, Math.min(idleTimeoutMs, streamDeadline - Date.now())))`），并补了「deadline 到点归因按 deadline 判定」的收尾分支；看门狗 `stream-max-duration-hang.test.ts` 已由 `it.fails` 转为正式断言且在 node/worker 双模式绿（worker 侧 4.6s 完成）。④ 同时确认 `abortWith()` 先到先得守卫（P2-24）与本项配合：断开/超时只归因一次。**残留（本地 dev 环境差异，非缺陷）**：`wrangler dev` 不保证把客户端断开传播成可收尾失败，请求上下文被一并取消时 handler 里连 markFailed 都执行不到 → 该记录只能靠孤儿回收兜住；生产 CF 会传播 signal，故不做代码兜底，用例口径改为「要么直接收尾、要么必须能被回收兜住」 |
 | P2-24 | **`abortWith()` 缺"先到先得"守卫，失败归因会被覆盖**：客户端断开先到后，固定超时定时器到点仍把 `tagged` 改写成 `UPSTREAM_TIMEOUT`，详情页/统计里 failed_code 可能从 `client_disconnected` 变成 `upstream_timeout` | `src/util/abortTimeoutUtil.ts:206-235` | 阿张 | VERIFIED | `abortWith()` 开头加 `if (this.controller.signal.aborted) return;`，第一个原因赢。回归用例 `tests/unit/util/timeoutAbortController.test.ts > 超时与断开竞争时，先到的一方赢（不会双写标记）`（已从 `it.fails` 转为正式断言，node/worker 双模式绿） |
-| P2-25 | **共享限流存储有写放大**：`SqlRateLimitStore.consume()` 每个放行请求都先执行一条 `INSERT ... ON CONFLICT(bucket_key) DO NOTHING`（除首个请求外必然是主键冲突的无用写），再执行扣减 UPDATE；D1 上等于每次放行 2 次写 + 概率清扫写 | `src/util/rule/sqlRateLimitStore.ts:26-40` | 阿张 | TODO | 改成「先 UPDATE；0 行时用 SELECT 区分『桶不存在』与『令牌不足』，桶不存在则 INSERT 后重试一次 UPDATE」，放行快路径降到 1 条写。功能正确性已有用例保障（`tests/unit/service/rateLimitStore.crossIsolate.node.test.ts` + `tests/unit/util/sharedStateStores.node.test.ts`），本项纯性能优化 |
+| P2-25 | **共享限流存储有写放大**：`SqlRateLimitStore.consume()` 每个放行请求都先执行一条 `INSERT ... ON CONFLICT(bucket_key) DO NOTHING`（除首个请求外必然是主键冲突的无用写），再执行扣减 UPDATE；D1 上等于每次放行 2 次写 + 概率清扫写 | `src/util/rule/sqlRateLimitStore.ts:26-40` | 阿张 | VERIFIED | 改成「先 UPDATE；0 行时用 SELECT 区分『桶不存在』与『令牌不足』，桶不存在则 INSERT 后重试一次 UPDATE」，放行快路径降到 1 条写。功能正确性已有用例保障（`tests/unit/service/rateLimitStore.crossIsolate.node.test.ts` + `tests/unit/util/sharedStateStores.node.test.ts`），本项纯性能优化 **已验（李哥）**：`tests/unit/util/rule/sqlRateLimitStore.writeCount.node.test.ts`（5 例，真 better-sqlite3 + 语句分类计数包装器）——桶已存在时放行**只 1 条写且 `run()` 0 次**、连放 5 次= 5 条写、缺桶仍 INSERT 1 次并落库、令牌不足不多写、桶被删后能重初始化。 |
 
 ---
 
@@ -197,3 +197,33 @@ worker 侧这 7 例原来的 `skipIf` 处理方式（不是简单删掉 skip）�
 **复验数字（b5，当前 worktree）**：Worker **89 文件 / 1101 例全绿，skipped 0，exit 0**；tsc exit 0。
 
 **踩坑记录（并发）**：b5 首轮 Node 全量出现 47 文件 / 334 例红，报 `SQLITE_READONLY_DBMOVED`（155 次）+ `no such table: client_config` —— 典型「跑的时候 `test.db` 被另一轮 globalSetup 删了/重建了」。**Node 全量必须独占**，跑前在群里报备；出现这类集体红先看是不是 `READONLY_DBMOVED`，不要当成业务回归。
+
+### 批次 3 复验（李哥）：协议与统计边界用例 + 四道门
+
+**新增用例（5 个文件 / 27 例）**
+
+| 项 | 文件 | 例数 | 关键断言 |
+|---|---|---|---|
+| P1-02/P1-03 | `tests/unit/util/protocolUtil/sseEventUtil.crossChunk.test.ts` | 9 | 任意 chunk 切分下拆帧结果不变；data 值只去一个前导空格、尾随/行首空格保留、纯空格 data 不丢 |
+| P1-04/P1-05 | `tests/api/ai/stream-sse-boundary.test.ts` | 2 | 字节级切片下内容不缺字、无 U+FFFD；坏流在缓冲上限内中止并落 `sse_parse_error` |
+| P1-07 | `tests/unit/protocolConverter/openaiToAnthropicMaxTokens.test.ts` | 7 | 未传 max_tokens → 4096（≤8192 安全档）、显式值透传、非法值回落、tool_choice/response_format 组合 |
+| P2-25 | `tests/unit/util/rule/sqlRateLimitStore.writeCount.node.test.ts` | 5 | 快路径 1 条写且 `run()` 0 次；缺桶/令牌不足/桶被删三条降级路径都验 |
+| P1-01 | `tests/api/stats/dashboardTimezone.node.test.ts` | 4 | 昨天 20:00 不计入、昨天 23:59 排除、今天 00:01 与零点计入、与 `/record/latest` 口径一致 |
+
+**mock 侧新增路由**（`tests/helpers/mockServer.ts`）：`/chat/completions/split-multibyte`（按字节切片写，逼出跨 chunk 多字节字符）、`/chat/completions/no-terminator`（只写单换行、永不出现空行）。
+
+**四道门（批次 3 worktree，含阿张 P1 修复）**
+
+| 门 | 命令 | 结果 |
+|---|---|---|
+| Node 全量 | `TEST_MODE=node npx vitest --run --config vitest.config.ts` | **123 文件 / 1347 passed + 3 skipped (1350)，exit 0**（78s） |
+| Worker 全量 | `TEST_MODE=worker npx vitest --run --config vitest.worker.config.ts` | **92 文件 / 1120 passed，skipped 0，exit 0** |
+| 类型检查 | `npx tsc --noEmit` | exit 0 |
+| 覆盖率 | `npm run backend:test:coverage` | exit 0，stmts **59.31** / branch **55.01** / funcs **62.31** / lines **59.24**（地板 55/50/55/55） |
+
+**两个坑（都吃掉过一整轮）**
+
+1. **孤儿 `tsx src/local.ts` 会拖死全量**：机器上残留 6 个 20 分钟前、PPID=1 的本地服务，持有 test.db 连接 → 全量整体变慢（3 分钟只跑 4 个文件），并出现 `upstream-timeout` 3 例「5~7s 超时」假红。判据：`ps ax -o pid,ppid,etime,command | grep "[t]sx src/local.ts"`，PPID=1 且 etime 长的一律清掉再跑。注意**别连当前正在跑的服务器一起杀**（我杀错一次，那一轮 63 文件 / 434 例全红，纯自伤）。
+2. **worker 全量启动即失败 `Port 9999 is already in use`**：上一轮全局 teardown 没回收 mock server（父进程被 kill 时还会走到 teardown，但端口没释放）。跑之前 `lsof -nP -iTCP:9999,9720 -sTCP:LISTEN` 确认干净，比事后 debug 便宜。
+
+**测试写法坑**：读流断言里 `Promise.race([reader.read(), timeout])` 超时后若丢弃在飞的 `read()`，它会继续消费后续 chunk 并丢数据 → 假红「客户端只收到 [DONE]」。必须把 pending promise 跨轮复用；客户端侧解码同样要用 `TextDecoder({stream:true})`，否则网络分片切到多字节字符时会解出 U+FFFD 假红。

@@ -299,6 +299,10 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleHangHeaders(req, res);
     } else if (url.includes("/chat/completions/trickle")) {
         handleOpenAIStreamTrickle(req, res);
+    } else if (url.includes("/chat/completions/no-terminator")) {
+        handleOpenAIStreamNoTerminator(req, res);
+    } else if (url.includes("/chat/completions/split-multibyte")) {
+        handleOpenAIStreamSplitMultibyte(req, res);
     } else if (url.includes("/chat/completions/bad-data")) {
         handleOpenAIStreamBadData(req, res);
     } else if (url.includes("/chat/completions/heartbeat")) {
@@ -1707,6 +1711,98 @@ function handleOpenAIStreamTrickle(req: IncomingMessage, res: ServerResponse): v
                 clearInterval(interval);
             }
         }, 400);
+    });
+}
+
+
+/**
+ * P1-05：上游持续写「永远不出现空行」的数据。
+ *
+ * 帧分隔符是空行，所以这些数据在网关侧永远切不出完整事件，全部堆在 remainingBuffer 里。
+ * 未加缓冲上限时 isolate 内存会被这条坏流吃爆（线上表现为 Worker 内存超限被杀、
+ * 记录停在 processing）；加上限后应在阈值内按 sse_parse_error 收尾并断开上游。
+ *
+ * 节奏：每 20ms 写一条 256 字节的 data 行（≈12KB/s），上限设 4KB 时几百毫秒就能撞线；
+ * 即使网关不中止，最多写 200 条（48KB）后停手，避免把 mock 自己耗死。
+ */
+function handleOpenAIStreamNoTerminator(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+        const payload = `data: {"id":"chatcmpl-flood","object":"chat.completion.chunk","model":"${data.model || "gpt-3.5-turbo"}","choices":[{"index":0,"delta":{"content":"${"x".repeat(200)}"}}]}`;
+        let sent = 0;
+        const interval = setInterval(() => {
+            if (res.writableEnded || (res as any).destroyed) {
+                clearInterval(interval);
+                return;
+            }
+            if (sent >= 200) {
+                // 不 end：坏流就该一直开着。网关侧若正确中止会主动断开
+                clearInterval(interval);
+                return;
+            }
+            // 注意：故意不写 \n\n，让网关永远切不出帧
+            res.write(payload + "\n");
+            sent++;
+        }, 20);
+        res.on("close", () => clearInterval(interval));
+    });
+}
+
+/**
+ * P1-04：多字节 UTF-8 被 chunk 边界切开。
+ *
+ * 按**字节**切片写（而不是按字符），保证每个中文三字节字符都可能被切成 1+2 / 2+1，
+ * 网关的 `TextDecoder({stream:true})` 必须把半个字符留住、下个 chunk 补齐；
+ * 最后一帧结束后直接 EOF（不发 [DONE]），检验 EOF 分支的收尾是否丢尾部字符。
+ */
+function handleOpenAIStreamSplitMultibyte(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+
+        const content = "中文流式内容测试ABC";
+        const event = {
+            id: "chatcmpl-multibyte",
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: data.model || "gpt-3.5-turbo",
+            choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: "stop" }],
+        };
+        // 两帧：内容帧 + DONE 帧，整体按字节切片投喂
+        const raw = Buffer.from(`data: ${JSON.stringify(event)}\n\ndata: [DONE]\n\n`, "utf-8");
+        const sliceSizes = [17, 1, 2, 3, 5, 7, 11, 13];
+        let offset = 0;
+        let i = 0;
+        const interval = setInterval(() => {
+            if (res.writableEnded || (res as any).destroyed) {
+                clearInterval(interval);
+                return;
+            }
+            if (offset >= raw.length) {
+                clearInterval(interval);
+                res.end();
+                return;
+            }
+            const size = sliceSizes[i % sliceSizes.length];
+            const end = Math.min(offset + size, raw.length);
+            res.write(raw.subarray(offset, end));
+            offset = end;
+            i++;
+        }, 15);
+        res.on("close", () => clearInterval(interval));
     });
 }
 
