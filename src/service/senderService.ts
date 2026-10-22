@@ -387,6 +387,10 @@ async function sendRequest(
     let lastFailureCode: string | null = null;
 
     while (true) {
+        // 路由选路的 isDown 是同步路径（读本 isolate 缓存），这里先按 TTL 从共享存储刷新一次，
+        // 让其他 isolate 刚标记的 DOWN 在本次选路就生效（Worker 跨 isolate 冷却，见 P0-3）
+        await upstreamHealthService.syncFromStore();
+
         let routingResult: ModelRoutingResult;
         try {
             routingResult = await routingService.selectUpstream(
@@ -541,7 +545,7 @@ async function sendRequest(
             // 4xx 请求侧错误不惩罚上游，避免健康上游被无辜跳过（本请求的循环防护由 routingContext 承担）
             const failureStatus = httpFailure ? e.response.status : null;
             if (upstreamHealthService.shouldMarkFailure(failureStatus)) {
-                upstreamHealthService.markFailure(vendor.id, vendorModelName, upstreamFormat);
+                await upstreamHealthService.markFailure(vendor.id, vendorModelName, upstreamFormat);
             }
 
             // failover 关闭：HTTP 错误直接回传响应，网络异常抛原始异常，不继续尝试
