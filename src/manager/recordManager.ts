@@ -4,6 +4,7 @@ import billingUtil from "../util/protocolUtil/billingUtil";
 import requestActivityService from "../service/requestActivityService";
 import ormService from "../service/ormService";
 import type { TenantScope } from "../middleware/tenantScopeMiddleware";
+import type { SqlStatement } from "../util/dbAdapterUtil";
 
 interface RecordListOptions {
     status?: string;
@@ -182,8 +183,66 @@ export function formatDbDatetime(d: Date): string {
  * start_at 距现在超过 thresholdMs）统一标 FAILED + recovered_orphan，并追加 RESULT 活动。
  * 返回回收条数。
  */
-// 单批回收条数：SQLite 的变量上限是 999，200 条 × 3 个参数还有余量，也不至于一条语句太大
+// 单批回收条数（分页大小）：决定一次查多少行，与「一条 SQL 能带多少个 id」是两件事
+// （后者见 RECOVER_ORPHAN_BIND_BUDGET / resolveRecoverOrphanIdChunk，P2-27）
 const RECOVER_ORPHAN_BATCH = 200;
+
+/**
+ * 单条 SQL 的绑定变量预算（P2-27）。
+ *
+ * **D1 单语句的绑定变量上限是 100**，超过即 `D1_ERROR: too many SQL variables`；
+ * 而 SQLite 是 999、MySQL 更高，所以把分页大小直接塞进一条 `WHERE id IN (...)` 时，
+ * node 侧一直绿、worker 侧整个接口 500。这里取 90（留 10 个余量给以后可能新增的赋值参数），
+ * **不要按 node 的上限或分页大小 200 来定这个值**。
+ */
+const RECOVER_ORPHAN_BIND_BUDGET = 90;
+
+
+/**
+ * 由「SET 子句的赋值参数个数」算出单条 UPDATE 最多能带多少个 id（P2-27）。
+ *
+ * 运行时算而不是写死 87：以后给 SET 子句加一个字段（比如 recovered_at），
+ * 片大小会自动收窄；写死的话「常量不同步」就会再次超限，且只在 worker 大数据量下才炸。
+ * 预算不足（SET 参数本身就 ≥ 90）直接抛，属于编码错误，早失败比线上 500 好。
+ */
+export function resolveRecoverOrphanIdChunk(setParamCount: number): number {
+    const chunk = RECOVER_ORPHAN_BIND_BUDGET - setParamCount;
+    if (chunk <= 0) {
+        throw new Error(
+            `RECOVER_ORPHAN 绑定变量预算不足：SET 参数 ${setParamCount} 个，预算 ${RECOVER_ORPHAN_BIND_BUDGET}`,
+        );
+    }
+    return chunk;
+}
+
+
+/**
+ * 单次 batch 提交包含多少条语句。
+ * D1 的 `batch()` 一次算一次 subrequest，但一批语句太多也不健康（内存/超时），
+ * 50 条一批在「往返次数」与「单批体积」之间取平衡（P2-27）。
+ */
+const RECOVER_ORPHAN_STATEMENTS_PER_BATCH = 50;
+
+
+/**
+ * 分批原子提交语句：批内原子（D1 batch / sqlite transaction / mysql 事务），批间顺序执行。
+ * 用于「几百条记录一起收尾」这类会撞 D1 subrequest 配额的场景（P2-27）。
+ */
+async function runInStatementBatches(statements: SqlStatement[]): Promise<void> {
+    for (let i = 0; i < statements.length; i += RECOVER_ORPHAN_STATEMENTS_PER_BATCH) {
+        await ormService.runAtomically(statements.slice(i, i + RECOVER_ORPHAN_STATEMENTS_PER_BATCH));
+    }
+}
+
+
+/** 按步长把 id 列表切段（构造 IN (...) 时单语句绑定变量不能超预算） */
+function chunkIds(ids: number[], size: number): number[][] {
+    const chunks: number[][] = [];
+    for (let i = 0; i < ids.length; i += size) {
+        chunks.push(ids.slice(i, i + size));
+    }
+    return chunks;
+}
 
 
 /**
@@ -222,20 +281,59 @@ async function recoverOrphans(thresholdMs: number, tenantId?: number): Promise<n
             break;
         }
 
-        const placeholders = ids.map(() => "?").join(", ");
+        // 记录更新 + 活动写入合成一批语句（P2-27）。
+        //
+        // 两处都必须批量化，否则在 Worker 下会撞两个不同的墙：
+        // ① 记录更新：一页 200 个 id 拼成一条 `WHERE id IN (...)` 是 203 个绑定变量，
+        //    超过 D1 的 100 上限（node 的 sqlite 上限 999，所以 node 侧看不出来）→ 分片；
+        //    片大小 = 预算 90 - SET 参数个数（当前 3 个 → 87），由 resolveRecoverOrphanIdChunk 现算；
+        // ② 活动日志：原来是逐条 append（每条 3 次往返），250 条 = 750 次 D1 往返，
+        //    直接打爆 Worker 的 subrequest 配额 —— 客户端看到的不是报错而是连接被重置（ECONNRESET）。
+        //    改为「分片批量读 + 内存拼 JSON + 分批 UPSERT」。
+        //
+        // 分片后仍是同一批语义：同一批 id 的更新在一批里原子提交、`WHERE id IN (...)` /
+        // `ON CONFLICT(record_id)` 天然幂等（重复执行只写入同样的值），一条记录只会被回收一次。
         const now = formatDbDatetime(new Date());
-        await ormService.dbAdapter
-            .prepare(`UPDATE record SET status = ?, failed_code = ?, end_at = ? WHERE id IN (${placeholders})`)
-            .run(SgRecordStatus.FAILED, FailedCode.RECOVERED_ORPHAN, now, ...ids);
 
-        // 活动日志是读改写的 JSON 列，无法单条语句批量写；改为并行（内部 best-effort，单条失败不影响其它）
-        await Promise.all(ids.map(id => requestActivityService.append(
-            id,
-            RequestActivityStage.RESULT,
-            "孤儿记录回收",
-            { status: SgRecordStatus.FAILED, failed_code: FailedCode.RECOVERED_ORPHAN },
-            ActivityLevel.WARN,
-        )));
+        // SET 子句由对象生成：占位符与参数同源，加字段时不会出现「参数加了、片大小没跟着改」
+        const assignments: Record<string, unknown> = {
+            status: SgRecordStatus.FAILED,
+            failed_code: FailedCode.RECOVERED_ORPHAN,
+            end_at: now,
+        };
+        const setClause = Object.keys(assignments).map((column) => `${column} = ?`).join(", ");
+        const setParams = Object.values(assignments);
+        const idChunkSize = resolveRecoverOrphanIdChunk(setParams.length);
+
+        const updateStatements: SqlStatement[] = chunkIds(ids, idChunkSize).map((idChunk) => ({
+            sql: `UPDATE record SET ${setClause} WHERE id IN (${idChunk.map(() => "?").join(", ")})`,
+            params: [...setParams, ...idChunk],
+        }));
+
+        await runInStatementBatches(updateStatements);
+
+        // 活动日志是读改写的 JSON 列，无法只靠 SQL 追加；保持原来的 best-effort 语义
+        // （活动写失败不能让已经回收成功的记录回滚/丢回收），所以单独一批并吞掉异常，
+        // 但必须留下可发现的日志（P2-11 的教训：静默 catch 等于假装兜底）
+        try {
+            const activityStatements = await requestActivityService.buildAppendedStatements(
+                ids,
+                {
+                    stage: RequestActivityStage.RESULT,
+                    message: "孤儿记录回收",
+                    details: { status: SgRecordStatus.FAILED, failed_code: FailedCode.RECOVERED_ORPHAN },
+                    level: ActivityLevel.WARN,
+                },
+                now,
+            );
+            await runInStatementBatches(activityStatements);
+        } catch (e) {
+            console.warn("[recordManager] 孤儿回收活动日志写入失败（记录已回收）:", {
+                count: ids.length,
+                firstRecordId: ids[0],
+                error: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+            });
+        }
 
         recovered += ids.length;
         if (rows.length < RECOVER_ORPHAN_BATCH) {
