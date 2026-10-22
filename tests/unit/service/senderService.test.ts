@@ -435,7 +435,7 @@ describe("convertRequestBody - OpenAI to Anthropic", () => {
         expect(parsed.stop_sequences).toEqual(["STOP", "END"]);
     });
 
-    it("should default max_tokens to 32768 when not provided", () => {
+    it("should default max_tokens to the safe default 4096 when not provided (P1-07)", () => {
         const openaiReq = {
             model: "gpt-4",
             messages: [
@@ -446,7 +446,8 @@ describe("convertRequestBody - OpenAI to Anthropic", () => {
         const result = convertRequestBody(body, ApiFormat.OPENAI, ApiFormat.ANTHROPIC);
         const parsed = JSON.parse(result);
 
-        expect(parsed.max_tokens).toBe(32768);
+        // P1-07：缺省值从 32768（硬顶）改为安全缺省 4096，避免小上限模型直接 400
+        expect(parsed.max_tokens).toBe(4096);
     });
 
     it("should convert OpenAI tool_calls to Anthropic tool_use content blocks", () => {

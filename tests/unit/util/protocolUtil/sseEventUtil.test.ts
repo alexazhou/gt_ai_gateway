@@ -39,7 +39,14 @@ describe("sseEventUtil", () => {
 
     it("should return null for events without data", () => {
         expect(sseEventUtil.parseEvent("event: ping")).toBeNull();
-        expect(sseEventUtil.parseEvent("data:   ")).toBeNull();
+        expect(sseEventUtil.parseEvent("id: 7")).toBeNull();
+    });
+
+    it("纯空白 data 不再被 trim 成空事件（P1-03 语义变更）", () => {
+        // 修复前 data 值走 `.trim()`，`data:   ` 会被吃成空串从而整条丢弃。
+        // 规范只允许去掉 `data:` 后的**一个**前导空格，所以这里的数据是 "  "，是合法事件；
+        // 丢掉它会让下游少一条事件（心跳式用法常见）。
+        expect(sseEventUtil.parseEvent("data:   ")?.data).toBe("  ");
     });
 
     it("should split CRLF-framed events (\\r\\n line endings)", () => {

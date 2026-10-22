@@ -22,6 +22,7 @@ import {
     thinkingConfigToAnthropic,
 } from "./thinkingConfig";
 import protocolConverterUtil from "./protocolConverterUtil";
+import { resolveAnthropicMaxTokens } from "./anthropicDefaults";
 
 const ANTHROPIC_TO_OPENAI_STOP_REASON: Record<string, string> = {
     end_turn: "stop",
@@ -125,7 +126,8 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
 
         const anthropicReq: AnthropicRequest = {
             model: clientReq.model,
-            max_tokens: clientReq.max_tokens || clientReq.max_completion_tokens || 32768,
+            // P1-07：Anthropic 必填；缺省值不能取 32768（小上限模型会直接 400）
+            max_tokens: resolveAnthropicMaxTokens(clientReq.max_tokens ?? clientReq.max_completion_tokens),
             messages,
             stream: clientReq.stream,
             temperature: clientReq.temperature,

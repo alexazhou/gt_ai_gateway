@@ -1,6 +1,6 @@
 import { Context } from "hono";
 import { SgRecordStatus } from "../constants";
-import recordManager from "../manager/recordManager";
+import recordManager, { formatDbDatetime } from "../manager/recordManager";
 import ormService from "../service/ormService";
 import { parsePaginationQuery } from "../util/paginationUtil";
 
@@ -13,7 +13,10 @@ async function dashboardStats(c: Context) {
     const scope = c.get("tenantScope")!;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todayCutoff = today.toISOString().slice(0, 19).replace("T", " ");
+    // P1-01：库里的时间列存的是**本地时间**字符串（见 recordManager.formatDbDatetime），
+    // 这里不能再走 toISOString()（会转 UTC）——东八区会把「今日」往前挪 8 小时，
+    // 凌晨 0~8 点的请求被漏统计、前一天 16~24 点被多统计。统一用同一个本地格式化。
+    const todayCutoff = formatDbDatetime(today);
     // tenantId 为经解析的整数，直接内联安全（与 status 内联同套路）
     const tenantCond = ` AND tenant_id = ${scope.tenantId}`;
 

@@ -6,7 +6,11 @@ import { setupAdminUser } from "../../globalSetup";
 let adminToken: string;
 
 // 构造 record 插入语句，created_at/updated_at 按驱动生成：
-// sqlite 用 datetime('now', '-N day')，mysql 用 NOW() - INTERVAL N DAY
+// sqlite 用 datetime('now','localtime', '-N day')，mysql 用 NOW() - INTERVAL N DAY
+//
+// 注意 must 用 localtime（P1-01）：应用侧写库用的是 formatDbDatetime(new Date())，即**本地时间**字符串；
+// sqlite 的 datetime('now') 是 UTC，东八区会比本地时间早 8 小时，导致「今天」的记录被判成昨天，
+// 统计用例就会假红（这不是业务 bug，是造数据方式与真实写入口径不一致）。
 // tenant_id 落 main 主租户（多租户隔离：统计按当前视角租户过滤）
 async function insertRecords(rows: [number, number, string, number][]): Promise<void> {
     const isMysql = process.env.DB_DRIVER === "mysql";
@@ -16,10 +20,10 @@ async function insertRecords(rows: [number, number, string, number][]): Promise<
                 dayOffset === 0
                     ? isMysql
                         ? "NOW()"
-                        : "datetime('now')"
+                        : "datetime('now', 'localtime')"
                     : isMysql
                         ? `NOW() - INTERVAL ${dayOffset} DAY`
-                        : `datetime('now', '-${dayOffset} day')`;
+                        : `datetime('now', 'localtime', '-${dayOffset} day')`;
             return `(${u}, ${m}, '${s}', (SELECT id FROM tenant WHERE name = 'main'), ${dt}, ${dt})`;
         })
         .join(",\n");

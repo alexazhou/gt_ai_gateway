@@ -22,6 +22,8 @@ const CONFIG_DEFAULTS: Record<string, string> = {
     [ConfigKey.UPSTREAM_STREAM_IDLE_TIMEOUT_MS]: "180000",
     // 流式响应总时长上限（P2-23 兜底）：0 = 不限
     [ConfigKey.STREAM_MAX_DURATION_MS]: "1800000",
+    // 流式读缓冲上限（P1-05）：8MB，0 = 不限
+    [ConfigKey.SSE_MAX_BUFFER_BYTES]: "8388608",
     [ConfigKey.ORPHAN_RECOVER_THRESHOLD_MS]: "600000",
     // 多租户隔离默认关闭（存量单租户部署迁移后行为与迁移前一致）
     [ConfigKey.MULTI_TENANT_ENABLED]: "false",
