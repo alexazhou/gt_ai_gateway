@@ -254,7 +254,7 @@ describe("AI Chat API (Negative)", () => {
             });
         }, 30000);
 
-        it("should return 401 when model does not exist", async () => {
+        it("should return 404 when model does not exist", async () => {
             const chatRequest = mockHelper.generateOpenAIChatRequest({
                 model: "non-existent-model",
             });
@@ -391,7 +391,7 @@ describe("AI Chat API (Negative)", () => {
             });
         }, 30000);
 
-        it("should return 401 when model does not exist", async () => {
+        it("should return 404 when model does not exist", async () => {
             const messageRequest = mockHelper.generateAnthropicMessageRequest({
                 model: "non-existent-model",
             });

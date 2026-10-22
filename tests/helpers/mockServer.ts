@@ -159,6 +159,58 @@ function captureRequest(
 }
 
 
+/**
+ * 非 JSON / 空响应体上游：HTTP 200 + 空 body / HTML 错误页 / 被截断的 JSON。
+ *
+ * 用途（P1-06 回归）：这类响应既转不了协议也算不出 usage，网关必须按 upstream_error
+ * 记 failed + cost=0，同时仍把响应体原样透传给客户端（HTTP 状态保持 200，不擅自改成 5xx）。
+ * 三种形态共用一套 URL 标记，协议侧只靠 vendor url 的路径后缀区分。
+ */
+function handleNonJsonUpstream(
+    url: string,
+    req: IncomingMessage,
+    res: ServerResponse,
+): boolean {
+    const isEmptyBody = url.includes("/empty-body");
+    const isHtmlBody = url.includes("/html-body");
+    const isTruncatedJson = url.includes("/truncated-json");
+    if (!isEmptyBody && !isHtmlBody && !isTruncatedJson) {
+        return false;
+    }
+
+    let body = "";
+    req.on("data", (chunk) => {
+        body += chunk.toString();
+    });
+
+    req.on("end", () => {
+        try {
+            captureRequest(req, body, body ? JSON.parse(body) : null);
+        } catch {
+            captureRequest(req, body, null);
+        }
+
+        if (isEmptyBody) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end("");
+            return;
+        }
+
+        if (isHtmlBody) {
+            res.writeHead(200, { "Content-Type": "text/html" });
+            res.end("<html><body><h1>502 Bad Gateway</h1></body></html>");
+            return;
+        }
+
+        // 被截断的 JSON：解析必然失败
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end('{"id":"cmpl_truncated","object":"chat.completion","choices":[');
+    });
+
+    return true;
+}
+
+
 function handleTestRequest(
     url: string,
     req: IncomingMessage,
@@ -216,6 +268,12 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
     }
 
     if (handleTestRequest(url, req, res)) {
+        return;
+    }
+
+    // 非 JSON / 空体上游（P1-06 回归用例）：必须放在各协议通用路由之前匹配
+    // /empty-body  /html-body  /truncated-json
+    if (handleNonJsonUpstream(url, req, res)) {
         return;
     }
 
