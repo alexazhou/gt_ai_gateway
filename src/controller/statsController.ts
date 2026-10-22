@@ -17,27 +17,28 @@ async function dashboardStats(c: Context) {
     // 这里不能再走 toISOString()（会转 UTC）——东八区会把「今日」往前挪 8 小时，
     // 凌晨 0~8 点的请求被漏统计、前一天 16~24 点被多统计。统一用同一个本地格式化。
     const todayCutoff = formatDbDatetime(today);
-    // tenantId 为经解析的整数，直接内联安全（与 status 内联同套路）
-    const tenantCond = ` AND tenant_id = ${scope.tenantId}`;
 
     // 拆成两条 SQL：
     // 1. 今日数据：WHERE 过滤后走 idx_record_tenant_created_at 索引，只回表今天的少量行
     // 2. 总请求数：单独 COUNT(*) 走 idx_record_tenant_id 覆盖索引，不读主表
+    //
+    // P2-08：全部走 `?` 参数绑定（驱动负责转义），不再把 tenantId / cutoff / status 拼进 SQL 文本。
     const todaySql = `
         SELECT
             COUNT(*) AS today_requests,
-            SUM(CASE WHEN status = '${SgRecordStatus.SUCCESS}' THEN 1 ELSE 0 END) AS success_count,
-            SUM(CASE WHEN status = '${SgRecordStatus.FAILED}' THEN 1 ELSE 0 END) AS failed_count,
+            SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS success_count,
+            SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS failed_count,
             COUNT(DISTINCT user_id) AS active_users,
             COUNT(DISTINCT model_id) AS active_models
         FROM record
-        WHERE created_at >= '${todayCutoff}'${tenantCond}
+        WHERE created_at >= ? AND tenant_id = ?
     `;
-    const totalSql = `SELECT COUNT(*) AS total_requests FROM record WHERE tenant_id = ${scope.tenantId}`;
+    const todayParams = [SgRecordStatus.SUCCESS, SgRecordStatus.FAILED, todayCutoff, scope.tenantId];
+    const totalSql = "SELECT COUNT(*) AS total_requests FROM record WHERE tenant_id = ?";
 
     const [todayRow, totalRow] = await Promise.all([
-        Promise.resolve(ormService.dbAdapter.prepare(todaySql).first()),
-        Promise.resolve(ormService.dbAdapter.prepare(totalSql).first()),
+        Promise.resolve(ormService.dbAdapter.prepare(todaySql).first(...todayParams)),
+        Promise.resolve(ormService.dbAdapter.prepare(totalSql).first(scope.tenantId)),
     ]) as [Record<string, unknown> | undefined, Record<string, unknown> | undefined];
 
     const totalRequests = toSafeNumber(totalRow?.total_requests);
