@@ -1,7 +1,7 @@
 # GT AI Gateway v1.9.0-beta1 问题台账（ISSUES）
 
 > 汇总来源：`reviews/ai-gateway-code-review-阿张.md`（代码与安全）、`reviews/ai-gateway-test-review-李哥.md`（测试与质量）、`reviews/regression-cases-p0-李哥.md`（回归用例）
-> 去重后合计 **41 项：P0 × 4、P1 × 12、P2 × 25**（P1-12、P2-23～P2-25 为验收阶段新发现）
+> 去重后合计 **43 项：P0 × 4、P1 × 12、P2 × 27**（P1-12、P2-23～P2-27 为验收阶段新发现；P2-26 原型污染、P2-27 D1 绑定变量上限）
 > 状态口径：`TODO` / `IN_PROGRESS` / `FIXED(待验)` / `VERIFIED` / `WONTFIX`
 > 更新规则：修完由执行人改为 `FIXED(待验)`，验收通过后改为 `VERIFIED`。
 
@@ -18,7 +18,7 @@
 
 ---
 
-## P1 — 功能缺陷（11 项）
+## P1 — 功能缺陷（12 项）
 
 | 编号 | 问题 | 位置 | 负责人 | 状态 | 修复方案 |
 |---|---|---|---|---|---|
@@ -37,7 +37,7 @@
 
 ---
 
-## P2 — 质量改进 / 测试缺口（22 项）
+## P2 — 质量改进 / 测试缺口（27 项）
 
 | 编号 | 问题 | 位置 | 负责人 | 状态 | 建议 |
 |---|---|---|---|---|---|
@@ -48,24 +48,25 @@
 | P2-05 | `anthropic-version` 被写死 `2023-06-01`，客户端高版本被静默降级 | `src/service/senderService.ts:131,168` | 阿张 | VERIFIED | 透传客户端版本，缺省再回落  **已修（阿张·批次4）**：客户端 `anthropic-version` 透传，缺失回落 `DEFAULT_ANTHROPIC_VERSION`（`anthropicDefaults.ts`）。 | **已验证（李哥·批次4）**：`p2-cleanup.test.ts` — anthropic vendor（`auth_mode=x_api_key`）下客户端 `anthropic-version: 2024-06-01` 原样到达上游（mock `/_test/requests` 断言）。
 | P2-06 | catch 分支 `String(err)` 泄漏（多处） | `routes.ts:126`、`balanceController.ts:23,47`、`userController.ts:87`、`systemController.ts:177` | 阿张 | VERIFIED | 同上，统一错误文案  **已修（阿张·批次4）**：`routes.ts` 兜底已改通用文案（见 P2-04）；复核 `balanceController` / `userController` / `systemController` 已无 `String(err)` 残留。保留 `modelController.ts:179` 的 `e.message`——那是管理端「测试模型」接口，需 inspect 权限且本身就是给管理员看上游报错，属预期行为。 | **已验证（李哥·批次4）**：`p2-cleanup.test.ts` — 兜底 500 响应体不含内部异常串/堆栈/路径；`grep String(err)` 复核无残留。
 | P2-07 | `AppError` 一律记 `FailedCode.UNKNOWN`，失败归因不可用 | `src/service/senderService.ts:521` | 阿张 | VERIFIED | 按 statusCode/类型映射（含新增 `conversion_error`）——**与 P1-06 一次改完** **已改**：新增 `FailedCode.CONVERSION_ERROR`；`AppError` 增加可选 `failedCode`，`senderService` 兜底改为 `e.failedCode ?? UNKNOWN`；请求侧/响应侧协议转换失败记 `conversion_error`。 |
-| P2-08 | 租户条件模板字符串拼 SQL（当前不可注入） | `src/manager/ruleManager.ts:33`；`statsController.ts:26,31` | 阿张 | TODO | 改 `?` 参数绑定 （批次 4 未纳入，顺延批次 5） |
-| P2-09 | 选路 N+1 查询（每 upstream 串行 findById） | `src/service/routingService/core.ts:157` | 阿张 | TODO | 批量 `whereIn` 一次取回 （批次 4 未纳入，顺延批次 5） |
-| P2-10 | `recoverOrphans` 串行逐条 update | `src/manager/recordManager.ts:185` | 阿张 | TODO | 批量 UPDATE + 分页 （批次 4 未纳入，顺延批次 5） |
-| P2-11 | `recordFailedRequest` catch 内仅 console.error，失败静默 | `src/service/recordService.ts` | 阿张 | TODO | 重试或落 fallback 日志表 |
-| P2-12 | 每 chunk 打 console.log（高 QPS 即瓶颈）；`createWriteStream` 未挂 error/未 await | `src/service/streamLogService.ts` | 阿张 | TODO | 采样/降级 + 正确 await （批次 4 未纳入，顺延批次 5） |
-| P2-13 | `deleteByPrefixFromLocation` 全量收 key，内存峰值高 | `src/service/objectStorageService.ts` | 阿张 | TODO | 游标式分页删除 （批次 4 未纳入，顺延批次 5） |
-| P2-14 | `_updateD1Binding` 静默吞异常，后续用旧 binding | `src/service/ormService.ts` | 阿张 | TODO | 失败即抛或强制重新 init （批次 4 未纳入，顺延批次 5） |
+| P2-08 | 租户条件模板字符串拼 SQL（当前不可注入） | `src/manager/ruleManager.ts:33`；`statsController.ts:26,31` | 阿张 | VERIFIED | 改 `?` 参数绑定  **已修（阿张·b52060d）**：`RULE_SCOPE_SQL = "(tenant_id = ? OR (tenant_id = ? AND cross_tenant = 1))"`（`ruleManager.ts:36`），`statsController` 两处条件同样改绑定，值不再进 SQL 文本。 **已验（李哥·批次5）**：`tests/api/tenant/tenantScopeBinding.test.ts`（6 例）—— main 租户只看自己（对照）；带单引号的租户名按名字精确匹配 200 而非 500；注入形状的租户名不放宽条件（看不到任何人记录）；不存在的租户名 400 可读错误；统计面板在同一注入形状下 today/total 全 0 且不报 SQL 错；`findByName` 同样是绑定参数。 |
+| P2-09 | 选路 N+1 查询（每 upstream 串行 findById） | `src/service/routingService/core.ts:157` | 阿张 | VERIFIED | 批量 `whereIn` 一次取回  **已修（阿张·b52060d）**：显式绑定按 id 批量取（`getByIds`）、隐式绑定按 vendor 批量取回，注释记录原 N+1 次数。 **已验（李哥·批次5）**：`tests/api/ai/routingBatchResolution.test.ts`（3 例）—— 3 上游里前两个故障时批量解析后仍能 failover 到第三个并成功（候选顺序/去重未被批量化改变）；显式 `vendor_model_id` 的 `getByIds` 路径同样有效；vendor 已被删除的上游被跳过并给可读错误（不 500）。 |
+| P2-10 | `recoverOrphans` 串行逐条 update | `src/manager/recordManager.ts:185` | 阿张 | VERIFIED | 批量 UPDATE + 分页  **已修（阿张·b52060d）**：保留 200/页分页，批内改批量 UPDATE + `seen` 去重。 **已验（李哥·批次5）**：`tests/api/record/recoverOrphans.batch.test.ts`（2 例）—— 超过一批（200）的孤儿跨批全部回收（`recovered` 达标、`processing` 残留 0、`failed/recovered_orphan` 且 `end_at` 全部落值）、未超阈值的「新请求」不被误判（FRESH 条数精确相等）、重复调用幂等（`recovered=0` 且不重复改写；worker 下因 P2-27 暂时跳过）。**本条用例直接发现了 P2-27。** |
+| P2-11 | `recordFailedRequest` catch 内仅 console.error，失败静默 | `src/service/recordService.ts` | 阿张 | VERIFIED | 重试或落 fallback 日志表  **已修（阿张·b52060d）**：`recordFailedRequest` 失败重试一次，两次都失败则输出 `[RECORD_WRITE_FAILED]` 结构化日志（含两次错误摘要），且不向调用方抛错。 **已验（李哥·批次5）**：`tests/unit/service/recordFailedRequest.test.ts`（5 例）—— 首次成功只写一次且不打失败日志；首次失败重试成功共写两次、仍不打失败日志；两次都失败输出结构化日志且不抛；日志不含请求体内容/凭据；重试成功后不重复写活动日志。 |
+| P2-12 | 每 chunk 打 console.log（高 QPS 即瓶颈）；`createWriteStream` 未挂 error/未 await | `src/service/streamLogService.ts` | 阿张 | VERIFIED | 采样/降级 + 正确 await  **已修（阿张·b52060d）**：`console.log` 改为采样（首个 + 每 200 个 chunk），**文件写入仍是全量**；`createWriteStream` 挂 `error` 并等 `finish`/`close`。 **已验（李哥·批次5）**：`tests/unit/service/streamLogService.sampling.test.ts`（8 例）—— 每个 chunk 都写进文件、只对 console 采样（第 1 与第 200 打，199/201 不打）、不同流各自计数（WeakMap 不串流）、`logStream=null` 安全跳过、`end()` 后等 `finish` 才 resolve、`close` 也算落盘完成、写日志失败不抛出、`error` 事件不吃掉请求结果。 |
+| P2-13 | `deleteByPrefixFromLocation` 全量收 key，内存峰值高 | `src/service/objectStorageService.ts` | 阿张 | VERIFIED | 游标式分页删除  **已修（阿张·b52060d）**：每轮 `list({ limit: 1000, prefix })` 后**立即删本页**，不攒全量 key；注释写明不能「边删边用旧 cursor」——R2 list cursor 基于当前页位置，删后用旧 cursor 会跳过或失效，故每轮从头部重新 list。 **已验（李哥·批次5）**：`tests/unit/service/objectStoragePagedDelete.test.ts`（5 例）—— 分页时每页立即删（内存不攒全量 key）、单页未截断只 list 一轮、前缀下无对象返回 0 且不调 delete、删除未生效时提前退出不死循环、10 页 × 1000 大批量不一次性攒 key。 |
+| P2-14 | `_updateD1Binding` 静默吞异常，后续用旧 binding | `src/service/ormService.ts` | 阿张 | VERIFIED | 失败即抛或强制重新 init  **已修（阿张·b52060d）**：改走 `this.getKnex()?.client`（原 `getInstance().manager["default"].connector.client` 在当前 sutando 版本取不到 → 异常被 catch 吞掉 → 注释宣称的「每请求更新 D1 binding」**从未生效**，属 no-op）；取不到即抛。 **已验（李哥·批次5）**：`tests/unit/service/ormD1Binding.test.ts`（4 例）—— client 就绪时把当前请求 binding 挂上、完全拿不到 knex 实例必须抛错（不允许静默 no-op）、有实例但无 client 必须抛错且提示排查 sutando 结构、client 已存在时零 DB I/O（只做属性赋值）。worker 侧：批次5 全量 worker 门无 `_updateD1Binding` 相关红。**本条是「静默 catch 把 no-op 伪装成已修复」的典型，已写进发布说明。** |
 | P2-15 | `fetchUpstreamModels` 无超时，错误把上游响应体拼进 AppError | `src/service/vendorService.ts` | 阿张 | VERIFIED | `AbortSignal.timeout`，错误只回状态码  **已修（阿张·批次4）**：`AbortSignal.timeout(10000)`；非 2xx 只回 `Upstream returned <status>`（不再带回上游 body），超时 → 504 `upstream timeout`，其它网络错误 → 502 `upstream unreachable`（不回底层 message，避免带出 URL/代理地址）。 | **已验证（李哥·批次4）**：`p2-cleanup.test.ts` — 上游 5xx 只回状态码（不含上游 `INTERNAL_SECRET`/`letmein`）；上游挂起时 <15s 返回且文案含 timeout。
-| P2-16 | SPA fallback 只判断 `/v1/` 前缀，实际前缀为 `/llm/v1/` → 死代码 | `src/index.ts` | 阿张 | TODO | 对齐路由表 （批次 4 未纳入，顺延批次 5） |
-| P2-17 | ESM 中使用 `require()` | `src/local.ts:190`；`src/util/db/mysqlDBAdapter.ts:19` | 阿张 | TODO | 改 `import` / `await import` （批次 4 未纳入，顺延批次 5） |
-| P2-18 | `requireAdmin`/`requireTenantAdmin` 逻辑逐行重复 | `src/middleware/authMiddleware.ts`、`tenantScopeMiddleware.ts` | 阿张 | TODO | 抽公共 `authenticate(c)` |
-| P2-19 | `APP_ERROR_SYMBOL` 定义未使用，跨 realm 判定意图未落地 | `src/customError.ts` | 阿张 | TODO | 统一 `isAppError(e)` 替换 `instanceof` （批次 4 未纳入，顺延批次 5） |
+| P2-16 | SPA fallback 只判断 `/v1/` 前缀，实际前缀为 `/llm/v1/` → 死代码 | `src/index.ts` | 阿张 | WONTFIX(误报) | 对齐路由表  **误报，WONTFIX（阿张自查 → 小马哥核实 → 李哥复核）**：`/v1/` 是历史别名，`tests/api/frontend/frontendApi.test.ts:28` 明确断言 `GET /v1/nonexistent` 返回 JSON 404 —— **不是死代码**；代码已恢复并加注释「不是死代码，别再删」（`src/index.ts:16`）。责任在审查结论（含我转述的初版报告），不在实现。另：`tests/unit/entry/spaFallback.test.ts`（8 例）**不是为修本项而写**，而是进程内驱动 `index.ts` fallback 分支的覆盖率抓手（前端路由回 index.html、`/llm/` 与 `/v1/` 未注册路径均 404、`*.json` 未知接口 404、无 ASSETS binding 退回 404、ASSETS 抛错/非 ok 兜底 404、已注册 API 不受影响）。 |
+| P2-17 | ESM 中使用 `require()` | `src/local.ts:190`；`src/util/db/mysqlDBAdapter.ts:19` | 阿张 | VERIFIED | 改 `import` / `await import`  **已修（阿张·b52060d）**：`mysql2/promise` 改懒加载（`await import`）+ 池 Promise 缓存，构造函数保持同步；`src/local.ts` 的 `require` 同批清掉。 **已验（李哥·批次5）**：`grep require(` 在 `src/local.ts` / `src/util/db/mysqlDBAdapter.ts` 已无实际调用（只剩解释性注释）；`tsc --noEmit` exit 0 + node/worker 全量绿 —— ESM 下残留 `require` 会直接 `ReferenceError`，全量能起即证明该路径可用。属静态重构，**无专项用例，如实标注**。 |
+| P2-18 | `requireAdmin`/`requireTenantAdmin` 逻辑逐行重复 | `src/middleware/authMiddleware.ts`、`tenantScopeMiddleware.ts` | 阿张 | VERIFIED | 抽公共 `authenticate(c)`  **已修（阿张·b52060d）**：抽 `authUtil.authenticateAdmin`，`requireAdmin` / `requireTenantAdmin` 共用同一实现。 **已验（李哥·批次5）**：`tests/api/auth/authMatrix.test.ts`（8 例）—— 完全不带 Authorization / 凭证方案不对 / Bearer 空 token / 伪造 token 四条均 401 且两条路由文案一致；停用用户 403 `User disabled`（与 401 严格区分）；普通用户 403 `Admin access required`；管理员两条都放行；401/403 响应体是 JSON（不是 HTML/纯文本）。 |
+| P2-19 | `APP_ERROR_SYMBOL` 定义未使用，跨 realm 判定意图未落地 | `src/customError.ts` | 阿张 | VERIFIED | 统一 `isAppError(e)` 替换 `instanceof`  **已修（阿张·b52060d）**：`isAppError()` 先查 `Symbol.for(APP_ERROR_SYMBOL)` 标记再 `instanceof`。 **已验（李哥·批次5）**：`tests/unit/util/customError.isAppError.test.ts`（8 例）—— 认出原生 AppError 及 4xx 子类；`ClientWriteError`（内部写流信号，继承 Error 但不是 4xx）不被当 AppError；**跨 realm（`instanceof` 失效）靠 Symbol 仍能认出 4xx**；普通错误/非对象不误判；只有 Symbol 标记、无原型关系的对象按 AppError 处理（避免 4xx 被当 500）；`kind` 重载按 name 收窄不串子类；跨 realm 克隆体的 kind 判定同样有效；子类属性（`retryAfterSeconds` / `ruleId`）保留。 |
 | P2-20 | `waitUntil(task())` 未挂 catch，后台 reject 静默 | `src/util/runInBackgroundUtil.ts:18` | 阿张 | VERIFIED | `waitUntil(task().catch(log))` + 落 activity（**与 P0-4 一起做**） **已改**：`runInBackground` 统一 `task().catch(reportBackgroundError)`（waitUntil 与本地兜底同一条路径），异常走 `getLogger().error` + `console.error`，不再产生未处理拒绝；流式收尾 catch 额外 markFailed（含 activity）保证失败可见。 |
 | P2-21 | **覆盖率产物失效且无门禁**：`coverage-final.json` 仅 3/121 文件有数据（3.1%），CI 无覆盖率任务 | `coverage/`、`.github/workflows/test.yml`、`vitest.config.ts` | 李哥 | VERIFIED | ① CI 新增 `test-coverage` job（`npm run backend:test:coverage` + artifact 上传）；② 两个 vitest 配置加 `coverage.thresholds` 棘轮地板：node `stmts 55 / branch 50 / funcs 55 / lines 55`（实测基线 58.41/54.83/60.57/58.37），worker `50/45/50/50`；③ `backend:test:coverage` 脚本补 `TEST_MODE=node` + 显式 `--config`（原脚本跑的是默认模式，config 不明确）；④ `coverage/` 本就在 `.gitignore`（`git check-ignore` 已确认，历史产物未入库）。**目标 60% 需批次 2 补 `src/index.ts`、`src/local.ts` 等入口后再收紧** |
 | P2-22 | **测试口径与用例问题**：文件数 107 vs 文档 123；worker 跳过客户端断开 6 例 + R2 1 例（真实环境无覆盖）；`ai.negative.test.ts:257` 命名与断言不符；CORS 无用例且无 Origin 时返回 `*` + credentials | `tests/`、`vitest.worker.config.ts`、`src/middleware/corsMiddleware.ts` | 李哥 | VERIFIED | ① `ai.negative.test.ts` 两处 "should return 401 when model does not exist" 改为 404（断言本就是 404）；② 新增 `tests/api/gateway/cors.test.ts`（A1 放行 5 源 / A2 拒绝 6 源含 4 条前缀绕过回归 / A3 纯函数口径 / A4 无 Origin 不回 ACAO），顺带修出 P1-12；③ node-only 用例统一 `*.node.test.ts` 命名，worker 配置 `exclude: ['**/*.node.test.ts']`；④ **worker 的 7 例跳过全部消除**（skipped 从 7 → 0）：`stream-failure` 3 例改 `it.fails` 看门狗（P2-23 运行时语义）、2 例 `upstream-timeout` 改模式化断言（两模式都必须"已收尾 + 文案可读 + 不落裸 AbortError"）、`objectStorageChain` 在 worker 改走 R2 回读（详情 API 两次回读逐字节一致）；⑤ 新增 `tests/unit/util/timeoutAbortController.test.ts`（6 例，双模式）钉死"客户端信号一断就产出 CLIENT_DISCONNECTED 标记"；⑥ 口径实测：node **114 文件 / 1293 例**、worker **86 文件 / 1078 例（0 跳过）** |
 | P2-23 | **Worker 本地不传播「客户端断开」信号**：`c.req.raw.signal` 在 `wrangler dev` 下不会因客户端 abort 而中止，流式请求断开后记录会停在 `processing`（实测 8s 采样不动），最终靠空闲超时（180s）/ 孤儿扫描（10min）兜底；非流式则跑到上游超时收尾（`upstream_timeout`）。node 模式同链路正常落 `client_disconnected` | `src/service/senderService.ts:285`、`src/util/abortTimeoutUtil.ts:206-220`、`src/service/responseHandlerService.ts:117-165` | 阿张 | VERIFIED | 已做：① 新增 `stream_max_duration_ms`（默认 30min）作为流式总时长硬上限，trickle 场景已验证生效（`tests/api/ai/stream-max-duration.test.ts`）；② 明确两个阈值关系：`stream_max_duration_ms`(30min) > `orphan_recover_threshold_ms`(10min)，孤儿回收会先触发，调参时需成对考虑。**仍缺**：上限只在 chunk 边界检查，上游"发几个 chunk 后挂住"时循环阻塞在 `readChunk(idle=180s)` 里，deadline 轮不到 → 该形态未兜住（看门狗 `tests/api/ai/stream-max-duration-hang.test.ts`，当前为 `it.fails`）。建议把剩余额度传进单次读等待：`readChunk(reader, Math.min(idleTimeoutMs, streamDeadline - Date.now()))`，或对 read 做 `raceWithTimeout(remaining)`。 **已验（李哥，b5 复验）**：③ 单次读等待已按剩余额度收窄（`readChunk(reader, Math.max(1, Math.min(idleTimeoutMs, streamDeadline - Date.now())))`），并补了「deadline 到点归因按 deadline 判定」的收尾分支；看门狗 `stream-max-duration-hang.test.ts` 已由 `it.fails` 转为正式断言且在 node/worker 双模式绿（worker 侧 4.6s 完成）。④ 同时确认 `abortWith()` 先到先得守卫（P2-24）与本项配合：断开/超时只归因一次。**残留（本地 dev 环境差异，非缺陷）**：`wrangler dev` 不保证把客户端断开传播成可收尾失败，请求上下文被一并取消时 handler 里连 markFailed 都执行不到 → 该记录只能靠孤儿回收兜住；生产 CF 会传播 signal，故不做代码兜底，用例口径改为「要么直接收尾、要么必须能被回收兜住」 |
 | P2-24 | **`abortWith()` 缺"先到先得"守卫，失败归因会被覆盖**：客户端断开先到后，固定超时定时器到点仍把 `tagged` 改写成 `UPSTREAM_TIMEOUT`，详情页/统计里 failed_code 可能从 `client_disconnected` 变成 `upstream_timeout` | `src/util/abortTimeoutUtil.ts:206-235` | 阿张 | VERIFIED | `abortWith()` 开头加 `if (this.controller.signal.aborted) return;`，第一个原因赢。回归用例 `tests/unit/util/timeoutAbortController.test.ts > 超时与断开竞争时，先到的一方赢（不会双写标记）`（已从 `it.fails` 转为正式断言，node/worker 双模式绿） |
 | P2-25 | **共享限流存储有写放大**：`SqlRateLimitStore.consume()` 每个放行请求都先执行一条 `INSERT ... ON CONFLICT(bucket_key) DO NOTHING`（除首个请求外必然是主键冲突的无用写），再执行扣减 UPDATE；D1 上等于每次放行 2 次写 + 概率清扫写 | `src/util/rule/sqlRateLimitStore.ts:26-40` | 阿张 | VERIFIED | 改成「先 UPDATE；0 行时用 SELECT 区分『桶不存在』与『令牌不足』，桶不存在则 INSERT 后重试一次 UPDATE」，放行快路径降到 1 条写。功能正确性已有用例保障（`tests/unit/service/rateLimitStore.crossIsolate.node.test.ts` + `tests/unit/util/sharedStateStores.node.test.ts`），本项纯性能优化 **已验（李哥）**：`tests/unit/util/rule/sqlRateLimitStore.writeCount.node.test.ts`（5 例，真 better-sqlite3 + 语句分类计数包装器）——桶已存在时放行**只 1 条写且 `run()` 0 次**、连放 5 次= 5 条写、缺桶仍 INSERT 1 次并落库、令牌不足不多写、桶被删后能重初始化。 |
+| P2-26 | **原型污染导致 500**：`__proto__` / `constructor` / `prototype` 经 `JSON.parse` 成为自有属性 → Sutando `fill()` 的 casts 命中原型链 → `TypeError: …toLocaleLowerCase is not a function` → 500 | `src/controller/modelController.ts:61`、`src/controller/vendorController.ts:114` | 阿张 | VERIFIED | 新增 `stripUnsafeKeys()`（`src/util/inputSanitizeUtil.ts`），在 `new SgModel(...)` / `new SgVendor(...)` 之前剔除三类危险键，非对象原样返回。取舍：**静默忽略而非报错** —— 客户端多传一个 `constructor` 不该让创建/更新整体失败。 **已验（李哥·批次4/5）**：`tests/api/gateway/p2-cleanup.test.ts` —— PUT `/model/:id` 带 `__proto__` 不再 500，响应体不含 `TypeError`/`castType`/`toLocaleLowerCase`；`updateModel` 走 `pickUpdatableFields` 白名单、`updateVendor` 用解构只取已知字段，原型键两条路径都进不去。**发现（李哥·批次4 复核，原台账漏登）** |
 | P2-27 | **孤儿回收批量 UPDATE 在 D1 上超绑定变量上限**：`recoverOrphans` 按 200/批拼 `UPDATE record SET ... WHERE id IN (?,?,...)`，200 个 id + 3 个赋值参数 = 203 个绑定变量，D1 单语句绑定变量有限 → `D1_ERROR: too many SQL variables` → 回收接口 500（worker 环境回收完全失效，node 正常） | `src/manager/recordManager.ts:196-241` | 阿张 | TODO | 建议把 `RECOVER_ORPHAN_BATCH` 调到 D1 安全值（如 90）或按 90 一组分片执行同一批 UPDATE；同时补 worker 侧回归（`tests/api/record/recoverOrphans.batch.test.ts` 第一条在 worker 下为 `it.fails` 看门狗，修好后转红即改回 `it`）。**发现（李哥·批次5）**：worker 日志实测 `D1_ERROR: too many SQL variables at offset 362`，`POST /record/recover-orphans.json` 返回 500 |
 
 ---
@@ -98,7 +99,7 @@
 
 ---
 
-## 附 B：批次 1 验收记录（李哥）
+## 附 D：批次验收记录
 
 | 项 | 命令 | 结果 |
 |---|---|---|
@@ -257,3 +258,53 @@ worker 侧这 7 例原来的 `skipIf` 处理方式（不是简单删掉 skip）�
 | 覆盖率 | `npm run backend:test:coverage` | exit 0，stmts **58.54** / branch **54.03** / funcs **61.70** / lines **58.46**（地板 55/50/55/55 之上；较批次 3 降约 0.75pp，因新增分支尚未全被用例覆盖） |
 
 **顺延批次 5**：P2-08（模板串 SQL → 参数绑定）、P2-09（N+1）、P2-10（recoverOrphans）、P2-12（streamLog）、P2-13（objectStorage 分页）、P2-14（`_updateD1Binding`）、P2-16（SPA fallback 死代码）、P2-17（ESM `require`）、P2-19（`APP_ERROR_SYMBOL`）——本轮不硬塞，避免把数据安全项的验证面搅浑。
+
+### 批次 5 验收记录（李哥）
+
+**代码**：P2 清理 11 项由阿张在 `668868f`（批1：P2-08/11/14/17/19）、`b52060d`（批2：P2-09/10/12/13/18 + 顺带 P2-16 复核、P2-26 新增）交付；P2-02 的 204 由 `65f9b05` 交付。
+**基线**：`fix/p2-cleanup`（`81780f1`）+ `65f9b05` 合并为 `verify/p2-02`，已 fast-forward 进 `origin/1.9_dev @ 3f95eea`。
+
+**新增用例：12 个文件 / 74 例**（其中 1 个是覆盖率抓手、非对应某项缺陷）
+
+| 项 | 文件 | 例数 | 关键断言（摘要） |
+|---|---|---|---|
+| P2-08 | `tests/api/tenant/tenantScopeBinding.test.ts` | 6 | 租户名带引号/注入形状按值参与比较、不放宽条件、不 500 |
+| P2-09 | `tests/api/ai/routingBatchResolution.test.ts` | 3 | 批量解析后 failover 顺序与去重不变、显式 `getByIds` 路径有效 |
+| P2-10 | `tests/api/record/recoverOrphans.batch.test.ts` | 2 | 跨 200/批全量回收 + 幂等；**本条发现 P2-27** |
+| P2-11 | `tests/unit/service/recordFailedRequest.test.ts` | 5 | 重试一次、两次失败落 `[RECORD_WRITE_FAILED]`、日志不带凭据 |
+| P2-12 | `tests/unit/service/streamLogService.sampling.test.ts` | 8 | 全量落盘 + 仅 console 采样、`finish`/`close` 都算完成 |
+| P2-13 | `tests/unit/service/objectStoragePagedDelete.test.ts` | 5 | 每页立即删、不攒 key、删除不生效时不死循环 |
+| P2-14 | `tests/unit/service/ormD1Binding.test.ts` | 4 | 取不到 client 必须抛（不允许静默 no-op）、已存在则零 I/O |
+| P2-16 | `tests/unit/entry/spaFallback.test.ts` | 8 | `/llm/`、`/v1/`、`*.json` 均 404；前端路由回 index.html（**覆盖率抓手**） |
+| P2-18 | `tests/api/auth/authMatrix.test.ts` | 8 | 401/403 口径一致、停用用户 403 不混 401、响应体是 JSON |
+| P2-19 | `tests/unit/util/customError.isAppError.test.ts` | 8 | 跨 realm 靠 Symbol 识别 4xx、`ClientWriteError` 不算 AppError |
+| P2-03 补 | `tests/unit/middleware/llmBodyLimit.test.ts` | 9 | 实读长度兜底 413（不依赖伪造 `content-length`，worker 也能跑） |
+| 冒烟 | `tests/api/inprocess/adminRoutes.node.test.ts` | 8 | 进程内 `app.request()` 打 routes→middleware→controller |
+
+**四道门（`verify/p2-02` 与干净 worktree `/Volumes/PDATA/GitDB/sag-verify` 各跑一次，数字一致）**
+
+| 门 | 命令 | 结果 |
+|---|---|---|
+| 类型检查 | `npx tsc --noEmit` | exit 0 |
+| Node 全量 | `npm run test:locked` | **140 文件 / 1458 passed + 3 skipped (1461)，exit 0** |
+| Worker 全量 | `npm run test:locked:worker` | **107 文件 / 1217 passed + 1 skipped (1218)，exit 0**（唯一 skipped 是 P2-27 幂等用例） |
+| 覆盖率 | `npm run test:locked:coverage` | exit 0；stmts **65.20** / branch **57.33** / funcs **68.06** / lines **65.41**（地板 **60/52/60/60**） |
+
+**覆盖率结论（口径已由小马哥拍板）**
+
+- 真因不是「入口文件没覆盖」，而是 **API 用例全部 `spawn("npx tsx src/local.ts")` 在子进程跑，V8 覆盖率统计不到** → `routes.ts` / controllers / `responseHandlerService` / `senderService` 的进程内计数长期 **0%**。
+- 抓手是**进程内 `app.request()`**：`adminRoutes.node.test.ts`（14 条只读管理端链路 + CORS 预检 + 401/404）与 `spaFallback.test.ts`（驱动 `index.ts` fallback，mock 掉 `ormService.init` 与 routes），lines 57.84% → 65.53%，达标后再把地板抬到 60/52/60/60。
+- **禁止为凑数字硬盖 `src/index.ts` / `local.ts`**：进程内用例必须 `ormService.init({ mode: NODE, dbPath })` + `app.request(url, init, { ROOT_TOKEN })`（root 身份靠 `env.ROOT_TOKEN`），文件名带 `.node.test.ts`（worker 配置 exclude）。
+
+**本批发现的两个问题**
+
+1. **P2-27（新缺陷，阿张修）**：`recoverOrphans` 的 `WHERE id IN (200 个 ?)` + 3 个赋值参数 = 203 个绑定变量，超 D1 单语句上限 → worker 下 `POST /record/recover-orphans.json` 500、孤儿回收整体失效。node 侧全绿所以长期没暴露。看门狗：`recoverOrphans.batch.test.ts` 首条 worker 下 `it.fails`、幂等条 `it.skipIf`。
+2. **P2-16 定性为误报（WONTFIX）**：`/v1/` 是历史别名且有 404 断言，不是死代码；审查结论有误，实现无问题。
+
+**踩过的坑（写给下一位）**
+
+1. **并发跑全量必假红**：`SQLITE_READONLY_DBMOVED` / `no such table` 成片出现 = 有人同时删/重建了 `test.db`；一律先检查是否并发，别当业务回归。
+2. **共享工作区不能作为验收依据**：必须独立 worktree（本项目用 `/Volumes/PDATA/GitDB/sag-verify`，`node_modules` 与 `frontend/dist` 软链，软链写进该 worktree 的 `info/exclude`），`git status` 干净时跑出的数字才算数。
+3. **worker 新建 worktree 的 `.wrangler` 是空库**：先 `db.ts migrate --env worker-local --db-name gt_ai_gateway_test --config wrangler.test.toml`，否则 worker globalSetup 只清表不建表 → 大批「红」全是假的。
+4. **worker 下 `dbHelper.execute` 每次起一遍 `wrangler d1 execute`（约 1s）**：大批量造数用**单条多值 INSERT**，别循环。
+5. **mock `/_test/requests` 跨用例累积**：断言必须按 model 名过滤，别取全局最新。
