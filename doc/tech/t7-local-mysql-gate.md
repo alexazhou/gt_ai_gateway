@@ -202,3 +202,24 @@ sqlite node 门：`140 passed (140)` / `1459 passed | 3 skipped (1462)` / exit 0
 - **`@@hostname` 的两条边界（故意的副作用，别当 bug 报）**：
   1. `@@hostname` **只允许出现在前置检查**（`script/check-mysql-gate.ts`，用 mysql2 直连判定实例身份）；**禁止进心跳用例** —— 否则会退回 `@@version` 的老问题（在 SQLite 报 `unrecognized token: "@"`，是**语法错**不是**引擎错**，会与「SQL 写错」混淆）。
   2. 门要求容器 hostname 必须是 `t7-mysql-gate`（compose 里固定）→ **任何人手工 `docker run` 起一个 MySQL 连 3306，都会被判 `FATAL-④ 连错实例`**。这是**故意的**：没有这个判据就无法区分「本门容器」与「本机别的 MySQL」。要覆盖用 `T7_GATE_HOSTNAME=<你的 hostname>`。
+
+## 7. `#22` C1 合入后的预期（交接用，**照实测写，不按估计**）
+
+| 状态 | 期望三数（本地门，141 文件） | 失败文件 |
+|---|---|---|
+| `7f4fba2`（门基线，实测 3 次） | `27 failed \| 114 passed (141)`、`91 failed \| 1362 passed \| 12 skipped (1465)` | 27 |
+| `b71e8c7`（C1 之后，CI 实测） | `3 failed \| 137 passed (140)`（本地按 +心跳文件 +3 例推 `3 failed \| 138 passed (141)`） | **3** |
+
+C1 之后剩下的 **3 个** 失败文件（用阿张的 `22-c1-b71e8c7-mysql.log` 独立复核：`Test Files 3 failed | 137 passed (140)`；与门基线失败清单 `comm -12` **三个全命中**、`comm -23` **为空**）：
+
+1. `tests/api/record/recoverOrphans.batch.test.ts` —— `afterAll → activityTableExists` 查 `sqlite_master`
+2. `tests/api/model/modelWhitelist.test.ts` —— `PRAGMA table_info`
+3. `tests/api/rule/sharedStateD1.test.ts` —— 3 例
+
+→ **谁若报「C1 之后还剩 20 多个失败文件」，那是把 `usage` 的连带失败当成独立缺陷**（`28 - 3 = 25` 是连带，不是 25 个缺陷）。
+
+### 7.1 两条判据纪律（都踩过）
+
+1. **判据只用「失败文件数 + 失败用例数」，不用「错误串出现次数」**：同一个模式 `near 'usage = ?`，本地日志出现 **24** 次、CI 日志 **27** 次 —— 差异来自去重与路径，同一份代码不该得出两个「缺陷严重度」。
+2. **禁止为了「让 MySQL 门安静」扩大 `exclude`**：`tests/api/ai/responses.node.test.ts` 这类 `*.node.test.ts` 在本门里红是**合理**的（它跑结算链路，会碰到 `usage`）。一旦有人把 `*.node.test.ts` 也排除，`usage` 这类缺陷就会漏 —— 这是 `mergeConfig` 那个坑（§5.1 第 3 条）的第二次。**本门的 `exclude` 只允许有一项：`node_modules`。**
+
