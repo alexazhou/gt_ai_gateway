@@ -17,6 +17,10 @@
  *   → `command not found`）。docker 只出现在**提示文案**里，判断一律走驱动直连 / socket 探测。
  * - **端口探测用 node 的 `net` 自己 bind**，不用 `lsof`（同样可能不在 PATH，且解析输出易错）。
  * - **不信任注释**：`_t7_gate_marker` 的存在与否是唯一能区分「本次容器」与「本机别的 MySQL」的证据。
+ * - **marker 必须放在测试库之外（`t7_gate` 库）**：`tests/helpers/dbHelper.ts` 的 `initDatabase()`
+ *   在 MySQL 模式下开头就 `dropAllMysqlTables()`（**无条件** DROP `DATABASE()` 里的所有表）。
+ *   marker 若跟测试表同库，第一跑建库时就被删 → 第二跑 ④ 会把「连对了容器」误报成「连错了实例」。
+ *   这条是实测出来的（`c12bf61` 第二次跑即命中），不是预防性设计。
  */
 import net from "node:net";
 import { execSync } from "node:child_process";
@@ -26,6 +30,9 @@ const COMPOSE_CMD = "docker compose -f docker-compose.test-mysql.yml up -d";
 const APP_PORT = 9720; // tests/config.ts:21 TEST_PORT —— startTestServer() 无条件监听
 const MOCK_PORT = 9999; // tests/config.ts:142 TEST_UPSTREAM_MOCK_URL 默认端口
 const MARKER = "t7-local-mysql-gate";
+// marker 在**独立库**里：测试初始化会 DROP 掉测试库里所有表（见文件头第 5 条约束）
+const MARKER_DB = "t7_gate";
+const MARKER_FQN = `${MARKER_DB}._t7_gate_marker`;
 
 function mask(conn: { user: string; password: string; host: string; port: number; database: string }): string {
     const pwd = conn.password ? "***" : "";
@@ -118,16 +125,19 @@ async function main(): Promise<void> {
         version = String((rows as any[])[0]?.v ?? "");
 
         try {
-            const [mrows] = await pool.query("SELECT marker FROM _t7_gate_marker WHERE id = 1");
+            const [mrows] = await pool.query(`SELECT marker FROM ${MARKER_FQN} WHERE id = 1`);
             marker = String((mrows as any[])[0]?.marker ?? "");
         } catch (e: any) {
             await pool.end().catch(() => {});
-            console.error(`\n[FATAL-④] 连上了 MySQL（${version || "版本未知"}），但**没有 _t7_gate_marker 表**`);
+            console.error(`\n[FATAL-④] 连上了 MySQL（${version || "版本未知"}），但读不到 ${MARKER_FQN}`);
             console.error(`          → 连到的**不是本次容器**（可能是本机已有的其它 MySQL 占着 3306）。`);
             console.error(`          连接串（脱敏）: ${masked}`);
-            console.error(`          处理：确认 3306 没被本机其它 MySQL 占用；重建本门容器（marker 由 init 脚本创建）：`);
-            console.error(`            docker compose -f docker-compose.test-mysql.yml down -v`);
-            console.error(`            ${COMPOSE_CMD}`);
+            console.error(`          底层错误      : ${e?.code ?? ""} ${e?.message ?? e}`);
+            console.error(`          处理（二选一）：`);
+            console.error(`            a) 本机 3306 被别的 MySQL 占着 → 先停掉它；`);
+            console.error(`            b) 容器是**旧数据卷**（init 脚本只在空卷上跑一次，marker 库/表不会自动重建）：`);
+            console.error(`               docker compose -f docker-compose.test-mysql.yml down -v`);
+            console.error(`               ${COMPOSE_CMD}`);
             process.exit(1);
         }
         await pool.end();
@@ -150,7 +160,7 @@ async function main(): Promise<void> {
     }
 
     console.log(`引擎探测（SELECT version()）: OK → ${version}`);
-    console.log(`实例身份（_t7_gate_marker） : OK → ${marker}`);
+    console.log(`实例身份（${MARKER_FQN}）: OK → ${marker}`);
     console.log(`端口 ${MOCK_PORT}/${APP_PORT}          : 空闲`);
     console.log("=== 前置检查通过（全通），开始跑 MySQL 门 ===\n");
 }
