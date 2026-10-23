@@ -69,6 +69,11 @@ docker compose -f docker-compose.test-mysql.yml down
 | 依赖来源链 | `sag-t7/node_modules` → `sag-verify/node_modules` → **主工作区 `node_modules`**（依赖树来自主工作区 `7f4fba2` 那次安装；`frontend/dist` 同样软链自 `sag-verify`） |
 | worktree / 容器 | `/Volumes/PDATA/GitDB/sag-t7` / `mysql:8`（8.4.11，`hostname=t7-mysql-gate`，healthy） |
 
+> **证据链锚点：门代码定版于 `1b25525`。** 此后 `8c7e0ca` / `8a01c35` / `e1c1534` 及以后的
+> `docs(...)` 提交**均不触碰门代码**（`git diff --name-status <sha> HEAD -- script/ vitest.mysql.config.ts docker-compose*.yml package.json | grep -v '^A '`
+> 应只剩新增文件或为空）。要判断「门是否被改过」，比的是**文件名清单**，不是提交总数 ——
+> 这样纯文档提交既不破坏出生证明，也不会让 sha 漂移。
+
 **结果：红（预期）—— 裁定 A 之后连续 3 次，三数完全一致**
 
 | 跑 | 起止（+0800） | Test Files | Tests | `dbMigrationService.test.ts` | 日志 |
@@ -216,10 +221,32 @@ C1 之后剩下的 **3 个** 失败文件（用阿张的 `22-c1-b71e8c7-mysql.lo
 2. `tests/api/model/modelWhitelist.test.ts` —— `PRAGMA table_info`
 3. `tests/api/rule/sharedStateD1.test.ts` —— 3 例
 
-→ **谁若报「C1 之后还剩 20 多个失败文件」，那是把 `usage` 的连带失败当成独立缺陷**（`28 - 3 = 25` 是连带，不是 25 个缺陷）。
+→ **谁若报「C1 之后还剩 20 多个失败文件」，那是把 `usage` 的连带失败当成独立缺陷**（见 §7.2 的三行口径：`28 - 3 = 25` 属**timeout 修好前**的旧口径；现行门基线 `27 - 3 = 24`）。
 
 ### 7.1 两条判据纪律（都踩过）
 
-1. **判据只用「失败文件数 + 失败用例数」，不用「错误串出现次数」**：同一个模式 `near 'usage = ?`，本地日志出现 **24** 次、CI 日志 **27** 次 —— 差异来自去重与路径，同一份代码不该得出两个「缺陷严重度」。
-2. **禁止为了「让 MySQL 门安静」扩大 `exclude`**：`tests/api/ai/responses.node.test.ts` 这类 `*.node.test.ts` 在本门里红是**合理**的（它跑结算链路，会碰到 `usage`）。一旦有人把 `*.node.test.ts` 也排除，`usage` 这类缺陷就会漏 —— 这是 `mergeConfig` 那个坑（§5.1 第 3 条）的第二次。**本门的 `exclude` 只允许有一项：`node_modules`。**
+1. **R2 补充 —— 缺陷规模只用「失败文件数 + 失败用例数」**，不用「错误串出现次数」：同一个模式 `near 'usage = ?`，本地日志出现 **24** 次、CI 日志 **27** 次 —— 差异来自去重与路径，同一份代码不该得出两个「缺陷严重度」。错误串次数只用于「红在哪条错误上」的**定位**。
+2. **R13 —— 门的 `exclude`/`include` 变更必须单独评审**：`tests/api/ai/responses.node.test.ts` 这类 `*.node.test.ts` 在本门里红是**合理且有信息量**的（它跑结算链路，会碰到 `usage`）。一旦有人为了「让门安静」把 `*.node.test.ts` 排除，`usage` 这类缺陷就会整体漏掉 —— 这是 `mergeConfig` 那个坑（§5.1 第 3 条）的第二次。**本门的 `exclude` 只允许有一项：`node_modules`。**
+
+### 7.2 三行对账口径（**报任何数都必须带基线**：sha + 时刻 + 日志路径）
+
+同一条门，出现过 **28** 和 **27** 两个基线 —— 不是谁算错，是**基线不同**。所以口径必须写死：
+
+| 口径 | 基线（sha / 日志） | 失败**文件** | 明细 |
+|---|---|---|---|
+| **A. timeout 修好前**（历史，不再使用） | `87f2a83` 前状态 / `t7-birth-red-final-87f2a83.log` | **28** | 24 `usage` 连带 + 3 方言探针 + **1** `dbMigrationService`（5s 超时） |
+| **B. timeout 修好后的门基线（现行）** | 门代码 `1b25525` / `t7-gate-t20-run{1,2,3}.log` | **27** | 24 `usage` 连带 + 3 方言探针（超时那 1 个已由裁定 A 消除，§5.2） |
+| **C. `#22` C1 合入后（预期）** | C1 `b71e8c7` / `22-c1-b71e8c7-mysql.log` | **3** | 只剩 3 个方言探针（`4 failed` 用例，与 CI 的 4 一致） |
+
+集合运算（两份日志的失败文件清单，`comm`）：
+
+```
+基线 27  ∩ C1 3   = 3      ← C1 之后仍红（= 上表 C 行）
+基线 27  − C1 3   = 24     ← usage 连带，C1 之后应消失
+C1 3  − 基线 27   = 0      ← **这条才是「C1 没引入新问题」的硬证据**
+```
+
+> 纪律：报「C1 后还剩 N 个」时，**N 必须落在这三行之一**，并附基线 sha 与日志路径。
+> 只报数字不报基线 = 无法复算 = 不算证据（与 R2 / R3 同源）。
+
 
