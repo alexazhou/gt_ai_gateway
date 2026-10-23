@@ -6,9 +6,13 @@
 #
 # 起 / 停：
 #   docker compose -f docker-compose.test-mysql.yml up -d
-#   docker compose -f docker-compose.test-mysql.yml down -v
+#   docker compose -f docker-compose.test-mysql.yml down -v      # down 必须带 -v，否则 marker 表会留在旧卷里
 #
 # 参数必须与 CI 逐项一致（root/rootpass + DB=test + 3306），否则「本地绿、CI 红」会再出现一次。
+#
+# `resource/mysql-gate/init/01_marker.sql` 建 `_t7_gate_marker`：**实例身份证据**。
+# `SELECT version()` 只能证明「连到的是 MySQL」，证明不了「连到的是这个容器」——
+# 本机若另有 MySQL 占 3306，心跳会全绿而门是假的。marker 只存在于本次容器自己的数据卷里。
 services:
   mysql:
     image: mysql:8
@@ -18,6 +22,8 @@ services:
       MYSQL_DATABASE: test
     ports:
       - "3306:3306"
+    volumes:
+      - ./resource/mysql-gate/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-prootpass"]
       interval: 10s
