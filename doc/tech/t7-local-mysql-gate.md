@@ -55,18 +55,59 @@ docker compose -f docker-compose.test-mysql.yml down -v
 
 先修 `#22` 再建门 → **永久拿不到出生证明**，只剩两条人手贴的日志（「人手贴的证据」最容易被后来的自己相信）。先建门 → 「红 → 绿」是**门自己产出的证据链**，谁都不用自证。代价是门会先红一段时间（看着像「把门弄坏了」），所以出生证明必须留两处：commit message + `#22.result` 里贴同一份红日志原文（带取数时刻与 run id）。
 
-## 5. 出生证明（首跑）
+## 5. 出生证明（首跑必红）
 
-见 `#25.result`；日志持久化在 `/Volumes/PDATA/GitDB/beta2-record-backup/`（**不只在 `/tmp`**）。
+**四要素（缺一不可 —— 门代码也会演进，只写一个 sha 无法复现「当时那个门跑当时那个代码」）**
 
-**建门当日的引擎级预检（不依赖端口，直连 MySQL 8.4.11）**：
+| 要素 | 值 |
+|---|---|
+| 被测代码 sha | **`7f4fba2`**（`usage` 仍裸 = 修复前状态） |
+| **门自身 sha** | **`1613d5a`** |
+| 取数时刻 | **2026-10-23T08:34:06+0800** |
+| 日志路径 | `/Volumes/PDATA/GitDB/beta2-record-backup/t7-birth-red.log`（7618 行，sha256 `6dd30f951c8b…`，**持久位，不在 `/tmp`**） |
+| worktree / 容器 | `/Volumes/PDATA/GitDB/sag-t7` / `mysql:8`（8.4.11，healthy） |
+
+**结果：红（预期）**
+
+```
+Test Files  27 failed | 114 passed (141)
+     Tests  91 failed | 1362 passed | 12 skipped (1465)
+gate_exit=1
+```
+
+- 红在 **`near 'usage = ? WHERE id = ?' at line 1`**，全日志出现 **24 次**（`ER_PARSE_ERROR` / errno 1064）
+- 心跳 3 例全过：`[mysql-gate] 引擎探测成功：8.4.11`
+- **与 CI 的 MySQL job 逐位一致**：CI `27 failed / 113 passed (140)`、`91 failed / 1359 passed / 12 skipped (1462)`；本地唯一增量就是新增的心跳文件（+1 文件 / +3 例，全过）。失败文件清单双向 `comm` 差集**均为空**。
+
+**既有门不受影响（实测，不是推理）**：同一分支上跑 `npm run backend:test`（sqlite 全量门）→
+`Test Files 140 passed (140)` / `Tests 1459 passed | 3 skipped (1462)` / `exit 0`，
+与建门前基线**逐位相同**（新增的 `*.mysql.test.ts` 被基础配置排除，只在 MySQL 门里收集）。
+日志：`/Volumes/PDATA/GitDB/beta2-record-backup/t7-sqlite-gate-unaffected.log`（取数时刻 2026-10-23T08:37:13+0800）。
+
+**提交结构**：`7f4fba2` → **`1613d5a`（门本体，出生证明对应的就是它）** → `74839c1`（本文档）。
+之所以把文档单列一个 commit 而不是 amend 进门里：**amend 会改写 sha，出生证明里的「门自身 sha」就再也对不上任何真实提交** —— 证据链优先于提交整洁。
+
+### 5.1 建门过程：4 次首跑，前 3 次都被「门自身的缺陷」拦下
+
+这段保留是因为它证明了一件事：**门也需要被证据验证**（R5）。三次都不是产品问题，都是门自己写错：
+
+| 跑 | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | `[FATAL] DB_DRIVER=sqlite`，门把自己拦住了 | `package.json` 里 `cmd1 && VAR=值 cmd2` 的变量**只对 cmd2 生效**，前置检查看不到 `DB_DRIVER` | 抽 `scripts/run-mysql-gate.sh`，`export` 到整个脚本作用域 |
+| 2 | 心跳红在 `Error: Database not initialized` | 心跳用 `dbHelper.query()`，而 vitest 的 `globalSetup` 与 test worker 是**不同模块上下文**，adapter 在用例里是 `undefined` | 心跳改为**直连** `mysql2`（同一份 `DB_*` 配置），只回答「这个连接是不是 MySQL」 |
+| 3 | 心跳文件根本没被收集（日志里一眼看不出它没跑） | `mergeConfig` 对数组是**拼接**不是覆盖 → 基础配置里的 `**/*.mysql.test.ts` 排除仍然生效 | 基础配置展开 + **显式替换** `exclude` |
+| 4（终版） | `27 failed / 114 passed`、91 例、`near 'usage = ?'` × 24 | — | ✅ 出生证明 |
+
+另外第 2 次顺带暴露一条「与 MySQL 无关的红」：本地比 CI 多红一个 `tests/api/frontend/frontend.test.ts` —— 因为 **CI 会先 `npm run frontend:build`**，本地缺 `frontend/dist`。入口脚本已加警告（不阻断，门的主职责是方言差异，不是替前端构建把关）。
+
+**建门当日的引擎级预检（不依赖 9999/9720，可与他人测试并行）**
 
 | 探测 | 结果 |
 |---|---|
 | `SELECT version()` | `8.4.11` ✅ |
 | `SELECT sqlite_version()` | `ER_SP_DOES_NOT_EXIST`（errno 1305）✅ 心跳反向守卫成立 |
 | `UPDATE t SET usage = 1`（裸列名） | **`ER_PARSE_ERROR`（1064）`near 'usage = 1 …'`** ✅ 复现 #22 |
-| `UPDATE t SET `` `usage`` ` = 1`（反引号） | OK ✅ 证明修法方向成立 |
+| ``UPDATE t SET `usage` = 1``（反引号） | OK ✅ 修法方向成立 |
 | `INSERT INTO t (id, usage) VALUES …`（裸列名） | `ER_PARSE_ERROR`（1064）`near 'usage) VALUES …'` ✅ 与 SET 同源 |
 
 ## 6. 已知边界
