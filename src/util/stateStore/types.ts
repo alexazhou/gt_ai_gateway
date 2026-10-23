@@ -100,6 +100,13 @@ export interface SetOptions extends TimeOptions {
  * 而调用方看不出来。语义化操作保证「限流判定只有一份」。
  *
  * 同一个 key 只能归属一种语义（令牌桶 / 计数器 / 纯可丢缓存）：混用会抛 TypeError。
+ *
+ * **实现边界（S2 之前必读）**：现有唯一实现 `memoryStateStore` 是 **per-isolate** 的 ——
+ * 状态只在该进程 / 该 isolate 的内存里。node/桌面单进程够用；**workerd 下每个 isolate 各一份、
+ * isolate 之间不共享**，同一租户的额度会被放大成「isolate 数 × 额度」。
+ * 所以 worker 模式跑 memory 只是过渡：**它能过 worker 门，但证明不了跨 isolate 的共享性**。
+ * 这条由 S2 的 `StateStoreDO`（一个桶 = 一个 DO 实例 + DO input gate 串行）解决；
+ * **在那之前不要把 StateStore 接进 worker 的限流 / 冷却判定链路**。
  */
 export interface StateStore {
     /**

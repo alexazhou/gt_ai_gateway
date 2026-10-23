@@ -316,6 +316,45 @@ describe("createStateStore 降级路径反证", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 共享性边界：memory = per-isolate，不跨 isolate 共享（S2 由 StateStoreDO 解决）
+//
+// 这条用例的价值不在断言实现，而在于把「worker 门绿 ≠ 跨 isolate 共享生效」这件事
+// 写进**测试产物**（而不仅是注释）：worker 模式跑本文件只是跑在 vitest 的 node 进程里，
+// 它只能证明「模块可加载 / 工厂分支正确 / 契约一致」，证明不了 workerd 里多个 isolate 之间的共享性。
+// 不这样标出来，后人极容易把 worker 门的绿读成「P0-2 / P0-3 已修」。
+// ---------------------------------------------------------------------------
+describe("memory 后端的共享性边界：per-isolate，不跨 isolate 共享（S2 由 StateStoreDO 解决）", () => {
+    it("memory 后端是 per-isolate 语义：每次 create 得到独立状态，额度会被放大成「isolate 数 × 额度」", async () => {
+        // ① 意图标注：工厂的 memory 分支就是内存实现，没有隐藏的全局单例
+        expect(createStateStore({ backend: "memory" })).toBeInstanceOf(MemoryStateStore);
+
+        // ② 行为对照：把两个实例当成两个 isolate（每个 isolate 各一份内存）
+        const isolateA = createStateStore({ backend: "memory" });
+        const isolateB = createStateStore({ backend: "memory" });
+        const opts = { capacity: 1, refillPerSec: 0, nowMs: BASE };
+
+        // A 内额度用尽
+        await expect(isolateA.consume("tenant:1:model:1", opts)).resolves.toEqual({
+            allowed: true,
+            remaining: 0,
+            retryAfterMs: 0,
+        });
+        await expect(isolateA.consume("tenant:1:model:1", opts)).resolves.toEqual({
+            allowed: false,
+            remaining: 0,
+            retryAfterMs: null,
+        });
+        // B 完全不受影响 → 同一个 key 在两个 isolate 里各放行一次：
+        // 这就是「多 isolate 不共享 → 实际额度 = isolate 数 × 额度」的可执行证据（已知限制）。
+        await expect(isolateB.consume("tenant:1:model:1", opts)).resolves.toEqual({
+            allowed: true,
+            remaining: 0,
+            retryAfterMs: 0,
+        });
+    });
+});
+
+// ---------------------------------------------------------------------------
 // 内存实现专属：键数上界保护（无界增长 = 内存泄漏）
 // 这些用例验证的是「回收是语义等价的」，因此必须同时给出「不该回收的没被回收」的反证。
 // ---------------------------------------------------------------------------
