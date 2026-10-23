@@ -1,0 +1,25 @@
+# 本地 MySQL 测试门（T7）专用容器 —— 与 .github/workflows/test.yml 的 `services.mysql` 对齐
+#
+# 为什么需要它：`usage` 在 SQLite 里可以裸用（能解析、能执行、不报错），只有 MySQL 把它当保留字。
+# → 任何 MySQL-only 的语法/语义缺陷，本地 sqlite 门永远绿、worker 门（D1/sqlite 方言）也永远绿，
+#   缺陷在本地「物理上不可见」，加用例、抬覆盖率都补不上。这条门是唯一能在本地看见它的东西。
+#
+# 起 / 停：
+#   docker compose -f docker-compose.test-mysql.yml up -d
+#   docker compose -f docker-compose.test-mysql.yml down -v
+#
+# 参数必须与 CI 逐项一致（root/rootpass + DB=test + 3306），否则「本地绿、CI 红」会再出现一次。
+services:
+  mysql:
+    image: mysql:8
+    container_name: sag-test-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: test
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-prootpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
