@@ -72,7 +72,11 @@ function buildRecordUpdateSql(input: RecordSettlementInput, now: string): SqlSta
     ];
 
     if (input.usage !== undefined) {
-        sets.push("usage = ?");
+        // `usage` 是 MySQL 保留字（GRANT USAGE），作为列名必须加引号标识符，否则 MySQL 报
+        // `near 'usage = ?'`（SQLite / D1 恰好接受裸 usage，所以本地门测不出来）。
+        // 反引号在 SQLite / D1 / MySQL 三方都合法，故先就地对这一处加引号；
+        // 「SET 子句统一按方言生成标识符」留后续收敛（见 issue P2 方言收敛项），本提交不做抽象。
+        sets.push("`usage` = ?");
         params.push(input.usage);
     }
     if (input.failedCode !== undefined) {
