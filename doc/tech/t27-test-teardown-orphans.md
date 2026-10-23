@@ -91,8 +91,9 @@ vitest ──> npx                      ← child.pid / testServerProcess.pid �
 日志：`beta2-record-backup/t29-migrationmode-BEFORE.log` / `t29-migrationmode-AFTER.log`
 （各自含 `[BEFORE-start]`/`[AFTER-start]` 时间戳 + vitest 汇总 + `[RESIDUAL]` 行，**自包含**）。
 
-> 取数时刻：2026-10-23T22:32:28（BEFORE）/ 22:32:47（AFTER），同一 worktree `sag-t27`、
-> 同一命令、同一分支状态，只把用例文件内容在两版之间切换；两次跑之间做了彻底清理（计数 0）。
+> 取数时刻（取自日志首行，不凭记忆）：`[BEFORE-start] 2026-10-23T22:31:33+0800` /
+> `[AFTER-start] 22:31:44+0800`，同一 worktree `sag-t27`、同一命令、同一分支状态，
+> 只把用例文件内容在两版之间切换；两次跑之间做了彻底清理（`pkill -KILL -f "src/local.ts"` 到计数 0）。
 
 **这一组同时证伪了三条旧判据**：
 
@@ -117,17 +118,31 @@ vitest ──> npx                      ← child.pid / testServerProcess.pid �
 
 ## 6. 四道门复跑（本分支内，`fix/t27-teardown-orphans`）
 
-| 门 | 用例计数 | 退出码 | 日志内 `[RESIDUAL]` | `post+30s` 实测 |
+基线 = `origin/1.9_dev` = **`b71e8c7`**（C1 已合入）；全部经 `scripts/with-test-lock.sh` 串行。
+
+| 门 | Test Files | Tests | exit | 日志内 `[RESIDUAL]` |
 |---|---|---|---|---|
-| node（`backend:test:node`） | `140 passed (140)` / `1459 passed \| 3 skipped (1462)` | 0 | `count=0 settle_ms=46` | count=0 |
-| worker（`backend:test:worker`） | `107 passed (107)` / `1219 passed (1219)` | 0 | 见日志 | 见日志 |
-| mysql（`test:mysql`） | `27 failed \| 114 passed (141)` / `91 failed \| 1362 passed \| 12 skipped (1465)` | 1（C1 后预期） | 见日志 | — |
-| coverage（`backend:test:coverage`） | `140 passed (140)` / `1459 passed \| 3 skipped (1462)`；All files 64.72% stmts / 57.1% branch | 0 | 见日志 | — |
+| `tsc --noEmit` | — | — | 0 | — |
+| node（`backend:test:node`） | `140 passed (140)` | `1459 passed \| 3 skipped (1462)` | 0 | `count=0 settle_ms=47`；`post+30s` 实测 0 |
+| coverage（`backend:test:coverage`） | `140 passed (140)` | `1459 passed \| 3 skipped (1462)`；All files **64.71%** stmts / 57.08% branch | 0 | `count=0 settle_ms=46` |
+| worker（`backend:test:worker`） | `1 failed \| 106 passed (107)` | `2 failed \| 1217 passed (1219)` | 1 | `count=0 settle_ms=57` |
+| mysql（`test:mysql`） | 本分支**无此脚本**（T7 门未合入 `1.9_dev`），未跑 | — | — | — |
 
-mysql 门的 `27 failed` 与 CI（run `39876661016` / job `120163791890`）失败文件双向 `comm` 为空，
-即本提交**没有新增**失败；这 27 个是被测代码 `7f4fba2` 的既有问题，由 C1 负责。
+**worker 的 2 个红与本改动无关（同模式全量对照，不是单文件推断）**：
 
-日志：`beta2-record-backup/t29-{node,worker,mysql,coverage}-gate.log`。
+| 侧 | 基线 | Test Files | Tests |
+|---|---|---|---|
+| 本分支（含本改动） | `b71e8c7` + 4 文件 | `1 failed \| 106 passed (107)` | `2 failed \| 1217 passed (1219)` |
+| **无改动基线**（worktree `sag-t29-base`，detached `b71e8c7`） | 纯 `b71e8c7` | `1 failed \| 106 passed (107)` | `2 failed \| 1217 passed (1219)` |
+
+两侧失败文件都是 `tests/api/record/recoverOrphans.batch.test.ts`（`TypeError: fetch failed` → `ECONNRESET`）
+→ **`1.9_dev @ b71e8c7` 自身在 worker 模式下就是红的**，不是 #27/#29 引入的。
+日志：`t29-worker-gate.log` / `t29-baseline-worker-gate.log`。
+
+mysql 门的等价验证（本分支没有门脚本）：在 `sag-t7`（含 T7 门 + 本改动）22:15 跑
+`27 failed | 114 passed (141)` / `91 failed | 1362 passed | 12 skipped (1465)`，与门基线一致
+→ 本改动不影响 MySQL 门（该门的 `27 failed` 与 CI run `39876661016` / job `120163791890`
+失败文件双向 `comm` 为空，即被测代码既有问题，由 C1 负责）。
 
 ## 7. 边界与纪律
 
