@@ -6,28 +6,33 @@
 #
 # 起 / 停：
 #   docker compose -f docker-compose.test-mysql.yml up -d
-#   docker compose -f docker-compose.test-mysql.yml down -v      # down 必须带 -v，否则 marker 表会留在旧卷里
+#   docker compose -f docker-compose.test-mysql.yml down        # 停；不带 -v 可保留数据卷
 #
 # 参数必须与 CI 逐项一致（root/rootpass + DB=test + 3306），否则「本地绿、CI 红」会再出现一次。
 #
-# `resource/mysql-gate/init/01_marker.sql` 在**独立库 `t7_gate`** 里建 `_t7_gate_marker`：**实例身份证据**。
-# `SELECT version()` 只能证明「连到的是 MySQL」，证明不了「连到的是这个容器」——
-# 本机若另有 MySQL 占 3306，心跳会全绿而门是假的。marker 只存在于本次容器自己的数据卷里。
-#
-# 为什么是独立库而不是测试库 `test`：`tests/helpers/dbHelper.ts` 的 `initDatabase()` 在 MySQL 模式下
-# 会 `dropAllMysqlTables()`（无条件 DROP 测试库内所有表）。marker 若同库，**第一跑就被删**，
-# 第二跑前置检查会 FATAL-④ 并把「连对了容器」误报成「连错了实例」。实测踩过（`c12bf61`）。
+# `hostname: t7-mysql-gate` —— **实例同一性证据**，别删：
+#   `SELECT version()` 只能证明「连到的是 MySQL」，证明不了「连到的是这个容器」；
+#   本机若另有 MySQL 占 3306，两条心跳照样全绿而门是假的。hostname 由本文件固定，
+#   宿主机上的其它 MySQL 不会叫这个名字 → `script/check-mysql-gate.ts` 的 ④ 用它判身份。
+#   为什么不用「建库建表塞一行 marker」（两版都试过，都坏）：
+#     ① marker 放测试库 `test`：`tests/helpers/dbHelper.ts` 的 `initDatabase()` 在 MySQL 模式下
+#        开头就 `dropAllMysqlTables()`（无条件 DROP 测试库内所有表）→ marker 第一跑就被删，
+#        第二跑前置检查 ④ 会把「连对了容器」误报成「连错了实例」（实测 c12bf61）。
+#     ② marker 放独立库 `t7_gate`：不会被删了，但**多一个 schema 会让迁移慢约 2.5s** ——
+#        `tests/unit/service/dbMigrationService.test.ts` 里两个「跑完 33 个迁移」的用例
+#        从 2.6s/3.0s 涨到 5.3s/5.4s，**顶穿 5000ms 默认 timeout**（A/B 实测可重复）。
+#        门为了自证身份而让被测套件多红 2 例，是本末倒置。
+#   → 结论：身份证据必须是**零 schema、零表、零 DDL** 的容器属性，即 hostname。
 services:
   mysql:
     image: mysql:8
     container_name: sag-test-mysql
+    hostname: t7-mysql-gate
     environment:
       MYSQL_ROOT_PASSWORD: rootpass
       MYSQL_DATABASE: test
     ports:
       - "3306:3306"
-    volumes:
-      - ./resource/mysql-gate/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-prootpass"]
       interval: 10s
