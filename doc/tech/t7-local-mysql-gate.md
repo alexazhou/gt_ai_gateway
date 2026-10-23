@@ -174,7 +174,11 @@ sqlite node 门：`140 passed (140)` / `1459 passed | 3 skipped (1462)` / exit 0
 | 08:58 | `324e5a0` | 28 / 113 (141) | 92 / 1361 (1465) | ❌ 1 例（7443ms） |
 
 - CI（原生 Linux Docker）上该文件**不红**；本机 MySQL 跑在 OrbStack 的 VM 里，全量并发下 DDL 慢一档 → 顶穿 5s。
-- **本门没有为它放宽任何东西**：不改 `testTimeout`、不 skip、不缩范围。要不要把这两例的 timeout 提到 15~20s，属**独立决定**（会动被测测试文件），需 `#25` 验收人裁定；不裁定的话，本地 MySQL 门的总数就固定是 `28 / 113 (141)`，比 CI 多这 1~2 例噪声。
+**已裁定（`#25` 第二次验收，裁定 A）**：允许抬，但**只在 `vitest.mysql.config.ts`（config 级）**抬上限 —— `testTimeout: 20000` / `hookTimeout: 30000`；**禁止**改测试文件、禁止给用例加 `{ timeout }`、禁止 `skip`、禁止加到 60s 掩盖别的问题。断言 / 用例集 / `exclude` / 覆盖率地板一律不动 —— 抬的只是**上限**，不是门槛。
+
+**验收要求**：连续 **3 次**全量 MySQL 门，每次数值 + 取数时刻 + 日志路径入证明，要求 3 次都是 `27 failed | 114 passed (141)` / `91 failed … (1465)` 且 `dbMigrationService.test.ts` 稳定绿；**若 3 次里仍有 1~2 例抖动 → 不许继续抬上限，回来重新定因**（说明不是纯超时）。
+
+> 为什么不能改测试文件：CI 用默认 5s 是能过的（同一份用例、同一个 sha）→ 这是**本机慢**，不是产品的语义差异。把上限塞回测试文件，等于让 CI 也背一个本地机器的补丁。
 
 ## 6. 已知边界
 
@@ -183,3 +187,6 @@ sqlite node 门：`140 passed (140)` / `1459 passed | 3 skipped (1462)` / exit 0
 - 与 sqlite 门**共用** `tests/globalSetup.ts`（会重建库、起 9999 端口的 app）→ 必须走 `test:locked:mysql` 抢锁串行，不能与其它 vitest 并行。
 - 门运行期间**禁止在别处 `npm ci`**（R9）：`npm ci` 会整目录删除 `node_modules`，本门依赖链是**软链**（`sag-t7/node_modules → sag-verify/node_modules → 主工作区`），一旦被删，正在跑的门会变成 `ENOENT`，事后必被误判成「环境偶发」。
 - 容器重建后**第一跑**比后续慢（MySQL 数据目录刚初始化），但不会改变红点清单（`dbMigrationService` 的超时另有原因，见 §5.2）。
+- **`@@hostname` 的两条边界（故意的副作用，别当 bug 报）**：
+  1. `@@hostname` **只允许出现在前置检查**（`script/check-mysql-gate.ts`，用 mysql2 直连判定实例身份）；**禁止进心跳用例** —— 否则会退回 `@@version` 的老问题（在 SQLite 报 `unrecognized token: "@"`，是**语法错**不是**引擎错**，会与「SQL 写错」混淆）。
+  2. 门要求容器 hostname 必须是 `t7-mysql-gate`（compose 里固定）→ **任何人手工 `docker run` 起一个 MySQL 连 3306，都会被判 `FATAL-④ 连错实例`**。这是**故意的**：没有这个判据就无法区分「本门容器」与「本机别的 MySQL」。要覆盖用 `T7_GATE_HOSTNAME=<你的 hostname>`。
