@@ -63,19 +63,26 @@ docker compose -f docker-compose.test-mysql.yml down
 | 要素 | 值 |
 |---|---|
 | 被测代码 sha | **`7f4fba2`**（`usage` 仍裸 = 修复前状态） |
-| **门自身 sha** | **`324e5a0`**（门代码终版；本文件单独 commit，只改文档） |
-| 取数时刻 | **2026-10-23T08:55:15+0800**（run 起点；进程结束 08:58:15） |
-| 日志路径 | `/Volumes/PDATA/GitDB/beta2-record-backup/t7-gate-324e5a0-run1.log`（**持久位，不在 `/tmp`**） |
+| **门自身 sha** | **`1b25525`**（门代码终版，含裁定 A 的 config 级 `testTimeout=20s`/`hookTimeout=30s`） |
+| 取数时刻 | **三次连续跑**：2026-10-23T21:48:24→21:50:59 / 21:51:07→21:53:44 / 21:53:52→21:56:24（+0800） |
+| 日志路径 | `/Volumes/PDATA/GitDB/beta2-record-backup/t7-gate-t20-run{1,2,3}.log`（**持久位，不在 `/tmp`**） |
 | 依赖来源链 | `sag-t7/node_modules` → `sag-verify/node_modules` → **主工作区 `node_modules`**（依赖树来自主工作区 `7f4fba2` 那次安装；`frontend/dist` 同样软链自 `sag-verify`） |
 | worktree / 容器 | `/Volumes/PDATA/GitDB/sag-t7` / `mysql:8`（8.4.11，`hostname=t7-mysql-gate`，healthy） |
 
-**结果：红（预期）**
+**结果：红（预期）—— 裁定 A 之后连续 3 次，三数完全一致**
+
+| 跑 | 起止（+0800） | Test Files | Tests | `dbMigrationService.test.ts` | 日志 |
+|---|---|---|---|---|---|
+| 1 | 21:48:24 → 21:50:59 | `27 failed \| 114 passed (141)` | `91 failed \| 1362 passed \| 12 skipped (1465)` | ✅ 7 tests 6352ms | `t7-gate-t20-run1.log` |
+| 2 | 21:51:07 → 21:53:44 | 同上 | 同上 | ✅ 5777ms | `t7-gate-t20-run2.log` |
+| 3 | 21:53:52 → 21:56:24 | 同上 | 同上 | ✅ 5494ms | `t7-gate-t20-run3.log` |
 
 ```
-Test Files  28 failed | 113 passed (141)
-     Tests  93 failed | 1360 passed | 12 skipped (1465)
+Test Files  27 failed | 114 passed (141)
+     Tests  91 failed | 1362 passed | 12 skipped (1465)
 [gate-exit] 1
 ```
+（`testTimeout` 抬高之前的三次是 `28 failed | 113 passed (141)` / `92~93 failed`，差异全部来自 `dbMigrationService.test.ts` —— 见 §5.2。）
 
 - 红在 **`near 'usage = ? WHERE id = ?' at line 1`**（`ER_PARSE_ERROR` / errno 1064）
 - 心跳 3 例全过：`✓ tests/unit/db/mysqlGateHeartbeat.mysql.test.ts (3 tests) 41ms`、`[mysql-gate] 引擎探测成功：8.4.11`
@@ -85,17 +92,17 @@ Test Files  28 failed | 113 passed (141)
 
 CI = run **`39876661016`** / job **`120163791890`**（`Test (Node Mode, MySQL)`，`1.9_dev @ 7f4fba2`）：
 
-| | 本地门（`324e5a0`） | CI（同 sha） | 差 |
+| | 本地门（`1b25525`，3 次均为） | CI（同 sha `7f4fba2`） | 差 |
 |---|---|---|---|
-| Test Files | `28 failed \| 113 passed (141)` | `27 failed \| 113 passed (140)` | +1 文件（本地多心跳文件，通过）+1 失败 |
-| Tests | `93 failed \| 1360 passed \| 12 skipped (1465)` | `91 failed \| 1359 passed \| 12 skipped (1462)` | +3 例（心跳，通过）+2 失败 |
+| Test Files | `27 failed \| 114 passed (141)` | `27 failed \| 113 passed (140)` | **失败数相等**；通过数 +1 = 本地多心跳文件（3 例全过） |
+| Tests | `91 failed \| 1362 passed \| 12 skipped (1465)` | `91 failed \| 1359 passed \| 12 skipped (1462)` | **失败数相等**；通过数 +3 = 心跳 3 例 |
 
-失败**文件**清单双向 `comm` 差集：
+失败**文件**清单双向 `comm` 差集（`t7-gate-t20-run3.log` vs CI job `120163791890`）：
 
-- 仅本地多出：`tests/unit/service/dbMigrationService.test.ts`
+- 仅本地多出：**空**
 - 仅 CI 多出：**空**
 
-→ 即「**27 个失败文件逐位一致**；唯一的本地增量不是产品问题，是这两例的 5s timeout 在本机（OrbStack VM 里的 MySQL）全量并发跑时被顶穿」（定性见 §5.2）。
+→ 「**本地 27 = CI 27，两个方向都为空**」现在在**三次连续跑**上都成立，门与 CI **可对账**（这是 T7 存在的意义，不是「本地也能红」）。`near 'usage = ?` 命中 24 次，与最早那次出生证明一致。
 
 **既有门不受影响（实测，不是推理）**：`vitest.worker.config.ts` 追加了 `**/*.mysql.test.ts` 排除，所以必须复跑 worker 门：
 `107 passed (107)` / `1219 passed (1219)` / `exit 0`（2026-10-23T09:01:41→09:08:28，日志 `t7-worker-gate-324e5a0.log`）——
@@ -153,14 +160,15 @@ sqlite node 门：`140 passed (140)` / `1459 passed | 3 skipped (1462)` / exit 0
 | ``UPDATE t SET `usage` = 1``（反引号） | OK ✅ 修法方向成立 |
 | `INSERT INTO t (id, usage) VALUES …`（裸列名） | `ER_PARSE_ERROR`（1064）`near 'usage) VALUES …'` ✅ 与 SET 同源 |
 
-### 5.2 已知的本地 / CI 差异（`dbMigrationService.test.ts`，**不是门引入的**）
+### 5.2 本地 / CI 差异（`dbMigrationService.test.ts`）—— **已由裁定 A 消除**
 
 `tests/unit/service/dbMigrationService.test.ts` 里两个用例各自要跑完 33 个迁移，用的是 vitest 默认 `testTimeout: 5000`。
 
 | 跑法 | 耗时 | 结果 |
 |---|---|---|
 | 单文件隔离跑（同一个容器、同一份代码） | 3067ms / 2686ms（另一次 3023ms / 2649ms） | ✅ 7 例全绿 |
-| 全量并发跑（141 文件同跑） | 文件总 7443 ~ 10752ms | ❌ 1~2 例 `Test timed out in 5000ms` |
+| 全量跑（141 文件，`fileParallelism: false`） | 文件总 7443 ~ 10752ms | ❌ 1~2 例 `Test timed out in 5000ms`（**抬高上限前**） |
+| 全量跑（`testTimeout: 20000` 后，3 连） | 6352 / 5777 / 5494ms | ✅ 7 例全绿 ×3 |
 
 六次全量跑的实测矩阵（用来证明这是**边界性抖动、不是稳定失败**）：
 
@@ -172,8 +180,12 @@ sqlite node 门：`140 passed (140)` / `1459 passed | 3 skipped (1462)` / exit 0
 | 08:49 | `c5fc6e1` | 28 / 113 (141) | 93 / 1360 (1465) | ❌ 2 例 |
 | 08:55 | `324e5a0` | 28 / 113 (141) | 93 / 1360 (1465) | ❌ 2 例（10752ms） |
 | 08:58 | `324e5a0` | 28 / 113 (141) | 92 / 1361 (1465) | ❌ 1 例（7443ms） |
+| **21:48**（裁定 A：`testTimeout=20s`） | `1b25525` | **27 / 114 (141)** | **91 / 1362 (1465)** | ✅ 7 tests 6352ms |
+| **21:51** | `1b25525` | **27 / 114 (141)** | **91 / 1362 (1465)** | ✅ 5777ms |
+| **21:53** | `1b25525` | **27 / 114 (141)** | **91 / 1362 (1465)** | ✅ 5494ms |
 
-- CI（原生 Linux Docker）上该文件**不红**；本机 MySQL 跑在 OrbStack 的 VM 里，全量并发下 DDL 慢一档 → 顶穿 5s。
+- CI（原生 Linux Docker）上该文件**不红**；本机 MySQL 跑在 OrbStack 的 VM 里，全量跑时 DDL 慢一档 → 顶穿默认 5s。
+- **结论：已消除。** 裁定 A 的 config 级上限落地后，连续 3 次全量跑三数完全一致且该文件稳定绿（见上表 21:48/21:51/21:53 三行），本地与 CI 的失败文件差集为**空**。
 **已裁定（`#25` 第二次验收，裁定 A）**：允许抬，但**只在 `vitest.mysql.config.ts`（config 级）**抬上限 —— `testTimeout: 20000` / `hookTimeout: 30000`；**禁止**改测试文件、禁止给用例加 `{ timeout }`、禁止 `skip`、禁止加到 60s 掩盖别的问题。断言 / 用例集 / `exclude` / 覆盖率地板一律不动 —— 抬的只是**上限**，不是门槛。
 
 **验收要求**：连续 **3 次**全量 MySQL 门，每次数值 + 取数时刻 + 日志路径入证明，要求 3 次都是 `27 failed | 114 passed (141)` / `91 failed … (1465)` 且 `dbMigrationService.test.ts` 稳定绿；**若 3 次里仍有 1~2 例抖动 → 不许继续抬上限，回来重新定因**（说明不是纯超时）。
