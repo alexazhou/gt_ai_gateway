@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['tests/**/*.test.ts', 'src/**/*.test.ts'],
-    exclude: ['node_modules', '**/*.node.test.ts'],
+    exclude: ['node_modules', '**/*.node.test.ts', '**/*.mysql.test.ts'], // `*.mysql.test.ts` 只在 T7 本地 MySQL 门（vitest.mysql.config.ts）收集
     environment: 'node',
     globalSetup: ['./tests/globalSetup.ts'],
     // Run tests sequentially to avoid database and port conflicts
