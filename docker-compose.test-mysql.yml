@@ -10,9 +10,13 @@
 #
 # 参数必须与 CI 逐项一致（root/rootpass + DB=test + 3306），否则「本地绿、CI 红」会再出现一次。
 #
-# `resource/mysql-gate/init/01_marker.sql` 建 `_t7_gate_marker`：**实例身份证据**。
+# `resource/mysql-gate/init/01_marker.sql` 在**独立库 `t7_gate`** 里建 `_t7_gate_marker`：**实例身份证据**。
 # `SELECT version()` 只能证明「连到的是 MySQL」，证明不了「连到的是这个容器」——
 # 本机若另有 MySQL 占 3306，心跳会全绿而门是假的。marker 只存在于本次容器自己的数据卷里。
+#
+# 为什么是独立库而不是测试库 `test`：`tests/helpers/dbHelper.ts` 的 `initDatabase()` 在 MySQL 模式下
+# 会 `dropAllMysqlTables()`（无条件 DROP 测试库内所有表）。marker 若同库，**第一跑就被删**，
+# 第二跑前置检查会 FATAL-④ 并把「连对了容器」误报成「连错了实例」。实测踩过（`c12bf61`）。
 services:
   mysql:
     image: mysql:8
