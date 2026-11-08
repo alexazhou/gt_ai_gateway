@@ -96,7 +96,8 @@ async function deleteRecord(c: Context) {
         return c.json({ error: "Invalid ID" }, 400);
     }
 
-    const deleted = await recordManager.deleteById(id, scope.tenantId);
+    // 级联删除：record + payload + request_activity（只删 record 会留下孤儿数据）
+    const deleted = await recordService.deleteOne(id, scope.tenantId);
     if (!deleted) {
         return c.json({ error: "Record not found" }, 404);
     }
@@ -112,9 +113,14 @@ async function clearPayload(c: Context) {
 
 async function clearAll(c: Context) {
     const scope = c.get("tenantScope")!;
-    const count = await recordManager.count(scope.tenantId);
-    await recordManager.deleteAll(scope.tenantId);
-    return c.json({ success: true, deleted: count });
+    // 级联清理 payload + activity + record；只删 record 会让数据库几乎不缩小
+    const result = await recordService.clearAll(scope.tenantId);
+    return c.json({
+        success: true,
+        deleted: result.deleted,
+        cleared_payloads: result.clearedPayloads,
+        deleted_activities: result.deletedActivities,
+    });
 }
 
 async function recoverOrphans(c: Context) {

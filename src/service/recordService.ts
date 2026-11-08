@@ -66,6 +66,66 @@ async function clearPayloads(tenantId?: number): Promise<number> {
     return cleared;
 }
 
+export interface ClearRecordsResult {
+    /** 删除的 record 行数（对外回报用，与旧接口的 deleted 语义一致） */
+    deleted: number;
+    /** 清理的 payload 条数（请求/响应原文，storage_record 或 R2） */
+    clearedPayloads: number;
+    /** 清理的活动时间线行数（request_activity） */
+    deletedActivities: number;
+}
+
+/**
+ * 删除一条记录及其全部附属数据。
+ *
+ * 顺序固定：payload → activity → record。
+ * - payload / activity 都是无外键的逻辑关联，漏删就是永久孤儿数据（曾导致「删了但磁盘不降」）；
+ * - record 最后删：中途失败时记录仍在，用户能看见并重试，不会出现「查不到却占空间」的残留。
+ */
+async function deleteOne(recordId: number, tenantId?: number): Promise<boolean> {
+    const record = tenantId === undefined
+        ? await recordManager.findById(recordId)
+        : await recordManager.findByIdInTenant(recordId, tenantId);
+    if (!record) {
+        return false;
+    }
+
+    await objectStorageService.delete(storageKey(recordId));
+    await requestActivityService.clearByRecordIds([recordId]);
+    await recordManager.deleteById(recordId, tenantId);
+    return true;
+}
+
+/**
+ * 删除某个租户的全部记录及其附属数据（「删除完整请求记录」的实际实现）。
+ *
+ * 旧实现只删 record 一张表，storage_record 与 request_activity 全部残留，
+ * 是「点了删除但数据库不缩小」的根因；这里按 payload → activity → record 的顺序级联清理。
+ *
+ * `tenantId` 必填：request_activity 没有 tenant_id 列，租户维度只能靠 record id 列表收敛，
+ * 一旦允许「不传租户」就会退化成整表清空（跨租户误删），故不提供该分支。
+ */
+async function clearAll(tenantId: number): Promise<ClearRecordsResult> {
+    const deleted = await recordManager.count(tenantId);
+    // 先取一次 id 列表，payload 与 activity 共用，避免重复查库
+    const tenantRecordIds = await recordManager.listIdsByTenant(tenantId);
+
+    // ① payload：按 id 列表逐个删，避免误删其他租户的原文
+    let clearedPayloads = 0;
+    for (const id of tenantRecordIds) {
+        await objectStorageService.delete(storageKey(id));
+        clearedPayloads += 1;
+    }
+
+    // ② activity：按该租户的 record id 批量删
+    const deletedActivities = await requestActivityService.clearByRecordIds(tenantRecordIds);
+
+    // ③ 最后删 record 本体
+    await recordManager.deleteAll(tenantId);
+
+    return { deleted, clearedPayloads, deletedActivities };
+}
+
 // 一条用户请求 = 一条 record：进入路由循环前创建，此时还不知道命中的上游
 // 上游信息（vendor_id / vendor_model_name / upstream_format）由后续每次上游尝试 update 覆盖
 async function create(
@@ -225,4 +285,6 @@ export default {
     recordFailedRequest,
     attachPayload,
     clearPayloads,
+    deleteOne,
+    clearAll,
 };

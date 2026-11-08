@@ -42,6 +42,24 @@ async function getRecordCount(): Promise<number> {
 }
 
 
+/**
+ * 直接查库统计「随 record 一起应该被清掉」的两张附属表。
+ *
+ * 用 SQL 而不是走接口：接口层面根本看不到这两张表，历史用例只断言 record 计数归零，
+ * 正是漏删 storage_record / request_activity 却能一直绿的原因。
+ */
+async function countRows(table: "request_activity" | "storage_record"): Promise<number> {
+    const rows = await dbHelper.query<{ cnt: number | string }>(`SELECT COUNT(*) AS cnt FROM ${table}`);
+    return Number(rows[0]?.cnt ?? 0);
+}
+
+
+async function assertCascadeCleared(): Promise<void> {
+    expect(await countRows("request_activity")).toBe(0);
+    expect(await countRows("storage_record")).toBe(0);
+}
+
+
 async function assertRecordPayload(recordId: number, hasPayload: boolean): Promise<void> {
     const res = await requestHelper.get(`/record/${recordId}`, adminToken);
     expect(res.status).toBe(200);
@@ -98,6 +116,27 @@ describe("Record Delete API", () => {
             expect(res.status).toBe(200);
         });
 
+        it("should cascade-delete payload and activity of that record", async () => {
+            // 先清空，保证断言看到的是「本条记录」的附属数据，而不是历史残留
+            await requestHelper.del("/record/clear-all", adminToken);
+
+            const record = await createTestRecord();
+            await assertRecordPayload(record.id, true);
+
+            const activityRes = await requestHelper.get(`/record/${record.id}/activity.json`, adminToken);
+            expect(activityRes.status).toBe(200);
+            expect(activityRes.body.activities.length).toBeGreaterThan(0);
+
+            expect(await countRows("request_activity")).toBeGreaterThan(0);
+            expect(await countRows("storage_record")).toBeGreaterThan(0);
+
+            const res = await requestHelper.del(`/record/${record.id}`, adminToken);
+            expect(res.status).toBe(200);
+
+            // 只删 record 会让这两张表留下永久孤儿数据
+            await assertCascadeCleared();
+        });
+
         it("should return 404 for non-existent record", async () => {
             const res = await requestHelper.del("/record/999999", adminToken);
             expect(res.status).toBe(404);
@@ -138,6 +177,23 @@ describe("Record Delete API", () => {
 
             // All records deleted
             expect(await getRecordCount()).toBe(0);
+        });
+
+        it("should cascade-delete storage_record and request_activity", async () => {
+            await createTestRecord();
+            await createTestRecord();
+
+            // 前置：确有附属数据（否则后面的 0 是假绿）
+            expect(await countRows("storage_record")).toBeGreaterThan(0);
+            expect(await countRows("request_activity")).toBeGreaterThan(0);
+
+            const res = await requestHelper.del("/record/clear-all", adminToken);
+            expect(res.status).toBe(200);
+            expect(res.body.success).toBe(true);
+            expect(res.body.cleared_payloads).toBeGreaterThan(0);
+            expect(res.body.deleted_activities).toBeGreaterThan(0);
+
+            await assertCascadeCleared();
         });
     });
 });
