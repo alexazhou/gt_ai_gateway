@@ -206,6 +206,8 @@ app.post("/record/recover-orphans.json", authMiddleware.requireAdmin, recordCont
 app.get("/record/:id", authMiddleware.requireAdmin, recordController.getRecord);
 app.delete("/record/clear-payload", authMiddleware.requireAdmin, recordController.clearPayload);
 app.delete("/record/clear-all", authMiddleware.requireAdmin, recordController.clearAll);
+// 必须排在 /record/:id 之前，否则会被当成 id="clear-orphans" 命中
+app.delete("/record/clear-orphans", authMiddleware.requireAdmin, recordController.clearOrphans);
 app.delete("/record/:id", authMiddleware.requireAdmin, recordController.deleteRecord);
 
 // Record Activity (需要管理员权限，独立控制器 recordActivityController)

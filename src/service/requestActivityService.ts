@@ -82,8 +82,22 @@ async function clearByRecordIds(recordIds: number[]): Promise<number> {
 }
 
 
+/**
+ * 找出「指向不存在 record」的活动行（孤儿）并删除，返回删除行数。
+ *
+ * `request_activity` 无外键、也无 tenant_id：判定孤儿只能靠「record_id 不在现存
+ * record id 集合里」。调用方必须先收敛到全局视角（root-only），否则会误删其他租户数据。
+ */
+async function clearOrphans(existingRecordIds: number[]): Promise<number> {
+    const existing = new Set(existingRecordIds);
+    const orphanIds = (await requestActivityManager.listRecordIds()).filter(id => !existing.has(id));
+    return await requestActivityManager.deleteByRecordIds(orphanIds);
+}
+
+
 export default {
     append,
     getByRecordId,
     clearByRecordIds,
+    clearOrphans,
 };

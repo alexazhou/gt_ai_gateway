@@ -37,9 +37,19 @@ async function deleteByRecordIds(recordIds: number[]): Promise<number> {
     return deleted;
 }
 
+/**
+ * 列出表中全部 record_id（只取该列，不加载 activities JSON）。
+ * 孤儿清理用：与 record 表 id 集合求差集，得到「指向已删记录」的行。
+ */
+async function listRecordIds(): Promise<number[]> {
+    const rows = await SgRequestActivity.query().select("record_id").get();
+    return rows.all().map(r => Number(r.record_id));
+}
+
 export default {
     findByRecordId,
     updateActivities,
     createActivity,
     deleteByRecordIds,
+    listRecordIds,
 };

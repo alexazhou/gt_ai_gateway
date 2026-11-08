@@ -126,6 +126,52 @@ async function clearAll(tenantId: number): Promise<ClearRecordsResult> {
     return { deleted, clearedPayloads, deletedActivities };
 }
 
+export interface ClearOrphansResult {
+    /** 删除的 payload 条数（record 已不存在、原文还留在 storage_record / R2 里） */
+    clearedPayloads: number;
+    /** 删除的活动时间线行数（record_id 指向已不存在的 record） */
+    deletedActivities: number;
+}
+
+/**
+ * 清理孤儿数据（root-only 全局清理）。
+ *
+ * 两类孤儿：
+ * - **payload 孤儿**：`storage_record.object_key` 形如 `record/{id}`，但 `record` 表里已无该 id
+ *   （旧版删除只删 record 行、不删原文留下的存量）；
+ * - **activity 孤儿**：`request_activity.record_id` 不在 `record` 表里。
+ *
+ * ⚠️ **必须全局视角**：这两张表都没有 tenant_id，只有「现存 record id 全集合」才能判定孤儿。
+ * 若按某个租户收敛，该租户视角之外的存活 payload 会被当成孤儿删掉。故本函数不做租户过滤，
+ * 由调用方（controller）保证只有 root 能触发。
+ *
+ * 存量清理与「以后不再产生」是两件事：级联删除的修复只保证后者，历史上已经留下的孤儿靠这里清。
+ */
+async function clearOrphans(): Promise<ClearOrphansResult> {
+    const existingRecordIds = await recordManager.listAllIds();
+    const existing = new Set(existingRecordIds);
+
+    // ① payload：key 形如 record/{id}，id 不在现存集合里即孤儿
+    const orphanPayloadKeys: string[] = [];
+    for (const key of await objectStorageService.listKeysByPrefix(RECORD_PAYLOAD_PREFIX)) {
+        const rawId = key.slice(RECORD_PAYLOAD_PREFIX.length);
+        const id = Number(rawId);
+        // 只处理形如 record/<整数> 的 key：前缀下若有别的命名（未来扩展）一律不动，宁可漏删不误删
+        if (!rawId || !Number.isInteger(id) || String(id) !== rawId) {
+            continue;
+        }
+        if (!existing.has(id)) {
+            orphanPayloadKeys.push(key);
+        }
+    }
+    const clearedPayloads = await objectStorageService.deleteMany(orphanPayloadKeys);
+
+    // ② activity：record_id 不在现存集合里即孤儿
+    const deletedActivities = await requestActivityService.clearOrphans(existingRecordIds);
+
+    return { clearedPayloads, deletedActivities };
+}
+
 // 一条用户请求 = 一条 record：进入路由循环前创建，此时还不知道命中的上游
 // 上游信息（vendor_id / vendor_model_name / upstream_format）由后续每次上游尝试 update 覆盖
 async function create(
@@ -287,4 +333,5 @@ export default {
     clearPayloads,
     deleteOne,
     clearAll,
+    clearOrphans,
 };

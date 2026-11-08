@@ -166,6 +166,18 @@ async function listIdsByTenant(tenantId: number): Promise<number[]> {
 
 
 /**
+ * 取全部 record id（不区分租户）。孤儿清理用：判断某条附属数据指向的 record 是否还存在。
+ *
+ * 与 `listIdsByTenant` 分开而不是传 `undefined`：后者没有这个语义分支，混用会让
+ * 「忘了传租户」和「有意全库扫描」变成同一个调用，看不出意图。
+ */
+async function listAllIds(): Promise<number[]> {
+    const rows = await SgRecord.query().select("id").get();
+    return rows.all().map(r => Number(r.id));
+}
+
+
+/**
  * 把 Date 格式化成 record.start_at 的存储格式（本地时区 'YYYY-MM-DD HH:mm:ss'）。
  * start_at 经 model datetime cast（dayjs local）写入该格式；raw query 绑定 Date 会存成 epoch 毫秒，
  * 两者混比会因 SQLite TEXT/NUMERIC 排序规则失真，因此查询必须用同格式字符串比较。
@@ -219,6 +231,7 @@ export default {
     list,
     recent,
     listIdsByTenant,
+    listAllIds,
     deleteById,
     count,
     deleteAll,

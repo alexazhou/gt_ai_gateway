@@ -117,6 +117,17 @@ async function deleteFromTableByPrefix(prefix: string): Promise<number> {
     return Number(deleted || 0);
 }
 
+/**
+ * 列出某前缀下的全部 object_key（**只取 key 列，不加载 data blob**）。
+ * 孤儿清理用：需要先拿到现有 key 才能和 record 表比对，直接 `select("object_key")`
+ * 避免把几十 GB 的 BLOB 读进内存。
+ */
+async function listKeysByPrefix(prefix: string): Promise<string[]> {
+    const pattern = `${prefix}%`;
+    const rows = await SgStorageRecord.query().select("object_key").where("object_key", "like", pattern).get();
+    return rows.all().map(r => String(r.object_key));
+}
+
 export type { StoredObject };
 
 export default {
@@ -124,4 +135,5 @@ export default {
     getFromTable,
     deleteFromTable,
     deleteFromTableByPrefix,
+    listKeysByPrefix,
 };

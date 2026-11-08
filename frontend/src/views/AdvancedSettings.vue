@@ -186,6 +186,19 @@
                                     </a-button>
                                 </div>
                             </div>
+                            <div v-if="authStore.isRoot" class="setting-item">
+                                <div class="setting-info">
+                                    <div class="setting-title">清理悬空数据</div>
+                                    <div class="setting-desc">
+                                        只删除「请求记录已不存在」的请求体原文与活动时间线，不影响现存记录。用于清理旧版本删除不彻底留下的残留
+                                    </div>
+                                </div>
+                                <div class="setting-action">
+                                    <a-button @click="showOrphanModal">
+                                        清理悬空数据
+                                    </a-button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </a-tab-pane>
@@ -273,6 +286,21 @@
                 </a-radio>
             </a-radio-group>
         </a-modal>
+
+        <!-- 清理悬空数据弹窗 -->
+        <a-modal
+            v-model:open="orphanModalVisible"
+            title="清理悬空数据"
+            :confirm-loading="deleting"
+            ok-text="开始清理"
+            @ok="handleOrphanConfirm"
+        >
+            <div style="font-size: 13px; color: var(--text-secondary, #8c8c8c); line-height: 1.7;">
+                将删除「请求记录已不存在」的请求体原文与活动时间线，用于清理旧版本删除不彻底留下的残留。
+                <br />
+                现存记录不受影响；此操作不可恢复。
+            </div>
+        </a-modal>
     </div>
 </template>
 
@@ -281,11 +309,13 @@ import { onMounted, reactive, ref, computed } from 'vue';
 import { message } from 'ant-design-vue/es';
 import { getConfig, updateConfig } from '@/api/config';
 import { checkUpdate } from '@/api/system';
-import { clearPayload, clearAllRecords } from '@/api/record';
+import { clearPayload, clearAllRecords, clearOrphanRecords } from '@/api/record';
 import { useAppStore } from '@/stores/app';
+import { useAuthStore } from '@/stores/auth';
 import { RunMode } from '@/types/system';
 
 const appStore = useAppStore();
+const authStore = useAuthStore();
 
 const currentVersion = computed(() => appStore.version);
 const isWorkerMode = computed(() => appStore.mode === RunMode.WORKER);
@@ -306,6 +336,7 @@ const activeTab = ref('modules');
 const deleteModalVisible = ref(false);
 const deleteMode = ref<'payload' | 'all'>('payload');
 const deleting = ref(false);
+const orphanModalVisible = ref(false);
 type RecordPayloadStorage = 'auto' | 'database' | 'r2';
 
 const originalConfig = reactive({
@@ -469,6 +500,25 @@ async function handleDeleteConfirm() {
         deleteModalVisible.value = false;
     } catch {
         message.error('删除失败');
+    } finally {
+        deleting.value = false;
+    }
+}
+
+function showOrphanModal() {
+    orphanModalVisible.value = true;
+}
+
+async function handleOrphanConfirm() {
+    deleting.value = true;
+    try {
+        const res = await clearOrphanRecords();
+        message.success(
+            `已清理 ${res.cleared_payloads} 条悬空请求体、${res.deleted_activities} 条悬空时间线`,
+        );
+        orphanModalVisible.value = false;
+    } catch {
+        message.error('清理失败');
     } finally {
         deleting.value = false;
     }

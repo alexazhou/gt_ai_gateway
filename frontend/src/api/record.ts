@@ -28,3 +28,10 @@ export function clearPayload(): Promise<{ cleared: number }> {
 export function clearAllRecords(): Promise<{ deleted: number }> {
     return request.delete('/record/clear-all');
 }
+
+/**
+ * 清理悬空数据（record 已不存在的 payload 与 activity）。root 专用，非 root 返回 403。
+ */
+export function clearOrphanRecords(): Promise<{ cleared_payloads: number; deleted_activities: number }> {
+    return request.delete('/record/clear-orphans');
+}
