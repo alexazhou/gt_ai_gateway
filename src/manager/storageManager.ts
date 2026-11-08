@@ -119,10 +119,18 @@ async function countByPrefix(prefix: string): Promise<number> {
     return Number(count || 0);
 }
 
+/**
+ * 删除某前缀下的全部 key，返回删除条数。
+ *
+ * 先 count 再 delete：worker 模式的 D1 方言只取 `run()` 的 `results`，
+ * 丢掉 `meta.changes`，`.delete()` 恒返回 0（详见 `requestActivityManager.deleteByRecordIds`）。
+ * 直接回报影响行数会一直显示「清了 0 条」。
+ */
 async function deleteFromTableByPrefix(prefix: string): Promise<number> {
     const pattern = `${prefix}%`;
-    const deleted = await SgStorageRecord.query().where("object_key", "like", pattern).delete();
-    return Number(deleted || 0);
+    const count = await countByPrefix(prefix);
+    await SgStorageRecord.query().where("object_key", "like", pattern).delete();
+    return count;
 }
 
 /**
@@ -152,7 +160,7 @@ async function listKeysPage(prefix: string, afterKey: string | null | undefined,
  * 而不是每个 key 一次 DELETE：worker 模式下 D1 对单次请求有 1000 条查询上限，
  * 逐条删会把查询预算直接吃光。
  *
- * 返回删除行数。
+ * 返回删除条数。同样先 count 再 delete，理由见 `deleteFromTableByPrefix`。
  */
 async function deleteFromTableByKeys(keys: string[]): Promise<number> {
     if (keys.length === 0) {
@@ -162,8 +170,8 @@ async function deleteFromTableByKeys(keys: string[]): Promise<number> {
     let deleted = 0;
     for (let i = 0; i < keys.length; i += batchSize) {
         const batch = keys.slice(i, i + batchSize);
-        const affected = await SgStorageRecord.query().whereIn("object_key", batch).delete();
-        deleted += Number(affected || 0);
+        deleted += Number(await SgStorageRecord.query().whereIn("object_key", batch).count() || 0);
+        await SgStorageRecord.query().whereIn("object_key", batch).delete();
     }
     return deleted;
 }

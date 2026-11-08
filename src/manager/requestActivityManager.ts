@@ -23,14 +23,20 @@ async function createActivity(recordId: number, activitiesJson: string): Promise
  *
  * request_activity 与 record 只是逻辑关联（无外键级联），删除 record 时必须显式清理，
  * 否则整行 JSON 时间线会永久留在库里。返回实际删除行数（调用方用于回报）。
+ *
+ * **为什么先 count 再 delete**：worker 模式走的是 knex 的 D1 方言，它把
+ * `run()` 的返回值只取 `results`（`knex-cloudflare-d1`：`obj.response = results`），
+ * 而 D1 删改语句的影响行数在 `meta.changes` 里——被丢掉了，于是 `.delete()` 恒返回 0。
+ * 直接拿它回报，界面就会一直显示「已清理 0 条」，而数据其实已经删掉了。
+ * 这里改成删前统计待删行数：多一次 count，换来两种模式下口径一致。
  */
 async function deleteByRecordIds(recordIds: number[]): Promise<number> {
     const batchSize = bindParamBatchSize();
     let deleted = 0;
     for (let i = 0; i < recordIds.length; i += batchSize) {
         const batch = recordIds.slice(i, i + batchSize);
-        const affected = await SgRequestActivity.query().whereIn("record_id", batch).delete();
-        deleted += Number(affected || 0);
+        deleted += Number(await SgRequestActivity.query().whereIn("record_id", batch).count() || 0);
+        await SgRequestActivity.query().whereIn("record_id", batch).delete();
     }
     return deleted;
 }

@@ -10,6 +10,19 @@
  *
  * 做法：先用真实请求造出「有 payload + activity」的记录，再**故意绕过接口**直接删
  * record 行，制造出存量孤儿（旧版本删除留下的那种残留），然后打接口验证。
+ *
+ * ## 两种模式下的分工
+ *
+ * 「孤儿到底删掉了哪几条」只能靠直接读 payload 存储来断言，而这在两种模式下是两套东西：
+ * - node 模式：`storage_record` 表（本进程直连，可查可造）；
+ * - worker 模式：R2（payload 存进了 wrangler dev 起的那份本地 R2，本测试进程**够不到**，
+ *   也没有任何能按 key 枚举的接口）。
+ *
+ * 所以凡是需要直接检查 payload 存储的用例都只在 node 模式跑（`itNodeOnly`），
+ * 它们覆盖的翻页 / 游标 / 不误删逻辑与存储位置无关——服务端代码只有一份。
+ * worker 模式下 R2 侧的分页与删除由 `tests/integration/objectStorageService.node.test.ts`
+ * 用 mock bucket 覆盖（含 R2 单次 list 上限、跨页续取）。
+ * 两种模式都会跑的只有纯 HTTP 契约类用例：鉴权、参数校验、limit 收敛。
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import requestHelper from "../../helpers/requestHelper";
@@ -18,9 +31,17 @@ import { setupAdminUser } from "../../globalSetup";
 import mockHelper from "../../helpers/mockHelper";
 import vendorFixtures from "../../fixtures/vendorFixtures";
 import modelFixtures from "../../fixtures/modelFixtures";
+import config from "../../config";
 
 
 const ROOT_TOKEN = "root-token-123";
+
+const IS_WORKER = config.TEST_MODE === "worker";
+const IS_MYSQL = process.env.DB_DRIVER === "mysql";
+/** 「当前时刻」的 SQL 写法：MySQL 用 NOW()，SQLite / D1 用 datetime('now') */
+const NOW_SQL = IS_MYSQL ? "NOW()" : "datetime('now')";
+/** 需要直接读写 payload 存储的用例：worker 模式够不到 R2，只在 node 模式跑（理由见文件头） */
+const itNodeOnly = it.skipIf(IS_WORKER);
 
 let adminToken: string;
 let testUserToken: string;
@@ -65,9 +86,17 @@ async function activityRecordIds(): Promise<number[]> {
  *
  * 必须直接动库：现在的接口已经级联删干净了，造不出孤儿——而线上那些存量孤儿正是
  * 旧版本「只删 record」留下的，这个函数复现的正是那个现场。
+ *
+ * 用拼字面量而不是参数绑定：worker 模式的测试适配器（`WorkerDBAdapter.run`）
+ * 只把 `exec(sql)` 交给 `wrangler d1 execute`，**参数会被丢掉**；传 id 是数据库返回的整数，
+ * 拼进 SQL 没有注入面。两种模式用同一段 SQL 才能保证造出来的现场一致。
  */
 async function orphanRecord(recordId: number): Promise<void> {
-    await dbHelper.execute("DELETE FROM record WHERE id = ?", [recordId]);
+    const id = Number(recordId);
+    if (!Number.isInteger(id) || id < 0) {
+        throw new Error(`orphanRecord: invalid record id ${recordId}`);
+    }
+    await dbHelper.execute(`DELETE FROM record WHERE id = ${id}`);
 }
 
 
@@ -194,7 +223,7 @@ describe("Record Clear Orphans API", () => {
         expect(badActivity.status).toBe(400);
     });
 
-    it("should report stats matching the actual row counts", async () => {
+    itNodeOnly("should report stats matching the actual row counts", async () => {
         await requestHelper.del("/record/clear-all", adminToken);
         await dbHelper.execute("DELETE FROM storage_record");
         await dbHelper.execute("DELETE FROM request_activity");
@@ -212,7 +241,7 @@ describe("Record Clear Orphans API", () => {
         expect(res.body.page_size).toBeGreaterThan(0);
     });
 
-    it("should clear orphan payload and activity but keep surviving records untouched", async () => {
+    itNodeOnly("should clear orphan payload and activity but keep surviving records untouched", async () => {
         // 前置清场：保证断言看到的是本用例造的数据
         await dbHelper.execute("DELETE FROM storage_record");
         await dbHelper.execute("DELETE FROM request_activity");
@@ -249,7 +278,7 @@ describe("Record Clear Orphans API", () => {
         expect(survivorRes.body.request_data).not.toBeNull();
     });
 
-    it("should report zero when there are no orphans", async () => {
+    itNodeOnly("should report zero when there are no orphans", async () => {
         // 上一轮已清干净，此时不该再有孤儿；再跑一遍必须是 0，不能把存活数据当孤儿删
         const keysBefore = await payloadKeys();
         const activitiesBefore = await activityRecordIds();
@@ -263,7 +292,7 @@ describe("Record Clear Orphans API", () => {
         expect(await activityRecordIds()).toEqual(activitiesBefore);
     });
 
-    it("should clear multiple orphans at once", async () => {
+    itNodeOnly("should clear multiple orphans at once", async () => {
         await requestHelper.del("/record/clear-all", adminToken);
         await dbHelper.execute("DELETE FROM storage_record");
         await dbHelper.execute("DELETE FROM request_activity");
@@ -283,16 +312,16 @@ describe("Record Clear Orphans API", () => {
         expect(await activityRecordIds()).toEqual([Number(survivor.id)]);
     });
 
-    it("should not touch storage keys outside the record/ prefix", async () => {
+    itNodeOnly("should not touch storage keys outside the record/ prefix", async () => {
         // 前缀下若有别的命名（未来扩展），一律不动：宁可漏删，不可误删
         await requestHelper.del("/record/clear-all", adminToken);
         await dbHelper.execute("DELETE FROM storage_record");
         await dbHelper.execute("DELETE FROM request_activity");
         const survivor = await createTestRecord();
 
+        // 同样拼字面量：worker 适配器会丢参数（见 orphanRecord 注释）
         await dbHelper.execute(
-            "INSERT INTO storage_record (object_key, size_bytes, data) VALUES (?, ?, ?)",
-            ["other/keep-me", 3, Buffer.from("abc")],
+            "INSERT INTO storage_record (object_key, size_bytes, data) VALUES ('other/keep-me', 3, 'abc')",
         );
 
         await runSteps(1000);
@@ -301,7 +330,7 @@ describe("Record Clear Orphans API", () => {
         expect(keysAfter).toContain("other/keep-me");
         expect(keysAfter).toContain(`record/${survivor.id}`);
         // 清理干净，避免污染后续用例
-        await dbHelper.execute("DELETE FROM storage_record WHERE object_key = ?", ["other/keep-me"]);
+        await dbHelper.execute("DELETE FROM storage_record WHERE object_key = 'other/keep-me'");
     });
 
     /**
@@ -314,7 +343,7 @@ describe("Record Clear Orphans API", () => {
      * - 用 `LIMIT/OFFSET` 翻页：边扫边删会让后面的行 offset 前移，成片跳过（只剩 1/2~1/3 被删）；
      * - 游标在一段扫完后被重置：先扫完的那段会被无限重扫（用例里有防死循环断言）。
      */
-    it("should clear orphans spanning multiple steps without skipping or over-deleting", async () => {
+    itNodeOnly("should clear orphans spanning multiple steps without skipping or over-deleting", async () => {
         await requestHelper.del("/record/clear-all", adminToken);
         // 直接清空两张附属表，保证下面断言的条数只来自本用例造的数据
         await dbHelper.execute("DELETE FROM storage_record");
@@ -327,7 +356,7 @@ describe("Record Clear Orphans API", () => {
         // 存活记录：record 行真实存在，payload / activity 落在孤儿 id 区间中间
         // tenant_id 落 main 主租户，否则 admin 视角（按租户过滤）查不到这条记录
         await dbHelper.execute(
-            `INSERT INTO record (id, user_id, model_id, status, tenant_id, start_at) VALUES (${SURVIVOR_ID}, 1, NULL, 'success', (SELECT id FROM tenant WHERE name = 'main'), datetime('now'))`,
+            `INSERT INTO record (id, user_id, model_id, status, tenant_id, start_at) VALUES (${SURVIVOR_ID}, 1, NULL, 'success', (SELECT id FROM tenant WHERE name = 'main'), ${NOW_SQL})`,
         );
         await dbHelper.execute(`INSERT INTO storage_record (object_key, size_bytes, data) VALUES ('record/${SURVIVOR_ID}', 1, 'x')`);
         await dbHelper.execute(`INSERT INTO request_activity (record_id, activities) VALUES (${SURVIVOR_ID}, '[]')`);
@@ -387,7 +416,7 @@ describe("Record Clear Orphans API", () => {
      * 只会得到空页，虚高就测不出来。这里让存活 key 排在前面（id 更小），
      * 于是每多走一片 activity，就会把前面这些存活 key 再数一遍。
      */
-    it("should not reset a cursor whose segment finished earlier than the other", async () => {
+    itNodeOnly("should not reset a cursor whose segment finished earlier than the other", async () => {
         await requestHelper.del("/record/clear-all", adminToken);
         await dbHelper.execute("DELETE FROM storage_record");
         await dbHelper.execute("DELETE FROM request_activity");
@@ -402,7 +431,7 @@ describe("Record Clear Orphans API", () => {
         // 存活 payload：record 行真实存在，一段扫完后仍留在库里，重扫时会被再次数到
         for (let i = 0; i < ALIVE_COUNT; i++) {
             await dbHelper.execute(
-                `INSERT INTO record (id, user_id, model_id, status, tenant_id, start_at) VALUES (${ALIVE_BASE + i}, 1, NULL, 'success', (SELECT id FROM tenant WHERE name = 'main'), datetime('now'))`,
+                `INSERT INTO record (id, user_id, model_id, status, tenant_id, start_at) VALUES (${ALIVE_BASE + i}, 1, NULL, 'success', (SELECT id FROM tenant WHERE name = 'main'), ${NOW_SQL})`,
             );
         }
         const aliveValues = Array.from({ length: ALIVE_COUNT }, (_, i) => `('record/${ALIVE_BASE + i}', 1, 'x')`).join(",");
@@ -435,6 +464,48 @@ describe("Record Clear Orphans API", () => {
         await dbHelper.execute("DELETE FROM request_activity");
     });
 
+    /**
+     * 全接口版：不碰任何存储内部结构，只靠 stats 与 step 的回报断言。
+     *
+     * 两种模式都跑，而且对两者一视同仁——node 下 payload 在 `storage_record`，
+     * worker 下在 R2，这条用例不关心它到底存哪儿，只关心「孤儿被清掉、存活的不动」。
+     * worker 模式尤其需要它：R2 那条分支以前从未被端到端跑到，超大 limit 直接把 R2 的
+     * `list()` 上限炸了出来（`MaxKeys params must be positive integer <= 1000`）。
+     */
+    it("should clear an orphan end to end through the API in either storage mode", async () => {
+        await requestHelper.del("/record/clear-all", adminToken);
+
+        const survivor = await createTestRecord();
+        const doomed = await createTestRecord();
+
+        // 制造孤儿：只删 record 行，payload / activity 留着
+        await orphanRecord(doomed.id);
+
+        const before = await requestHelper.get("/record/clear-orphans/stats.json", ROOT_TOKEN);
+        expect(before.status, JSON.stringify(before.body)).toBe(200);
+        // 造出来的两片 payload 都算在分母里（另可能有前序用例残留的孤儿）
+        expect(before.body.payload_total).toBeGreaterThanOrEqual(2);
+
+        const totals = await runSteps(1000);
+        expect(totals.deletedPayloads).toBeGreaterThanOrEqual(1);
+        expect(totals.deletedActivities).toBeGreaterThanOrEqual(1);
+
+        // 只该剩下存活那条：孤儿（含前序残留）全清，说明整轮扫完了
+        const after = await requestHelper.get("/record/clear-orphans/stats.json", ROOT_TOKEN);
+        expect(after.status).toBe(200);
+        expect(after.body.payload_total).toBe(1);
+
+        // 幂等：再跑一轮不该有任何删除
+        const again = await runSteps(1000);
+        expect(again.deletedPayloads).toBe(0);
+        expect(again.deletedActivities).toBe(0);
+
+        // 存活记录的原文还能读出来（不是只留了个 key）
+        const survivorRes = await requestHelper.get(`/record/${survivor.id}`, adminToken);
+        expect(survivorRes.status).toBe(200);
+        expect(survivorRes.body.request_data).not.toBeNull();
+    });
+
     it("should cap limit at the configured maximum", async () => {
         // 超上限的 limit 会被收敛到上限，而不是直接报错：请求方传 1e9 也只搬一页
         const res = await requestHelper.post(
@@ -442,6 +513,6 @@ describe("Record Clear Orphans API", () => {
             { limit: 1_000_000_000 },
             ROOT_TOKEN,
         );
-        expect(res.status).toBe(200);
+        expect(res.status, JSON.stringify(res.body)).toBe(200);
     });
 });

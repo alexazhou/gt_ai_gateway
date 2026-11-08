@@ -6,6 +6,9 @@ import customError from "../customError";
 
 let r2Bucket: R2Bucket | null = null;
 
+/** R2 `list()` 单次最多返回的 key 条数（Cloudflare 硬限制，超过直接报错） */
+const R2_LIST_MAX_KEYS = 1000;
+
 function setR2Bucket(bucket: R2Bucket | null | undefined) {
     r2Bucket = bucket ?? null;
 }
@@ -154,15 +157,47 @@ async function listKeyPageFromLocation(
     limit: number,
 ): Promise<string[]> {
     if (location === RecordPayloadStorage.R2) {
-        const page = await getWorkerBucket().list({
-            prefix,
-            limit,
-            ...(afterKey ? { startAfter: afterKey } : {}),
-        });
-        return page.objects.map(object => object.key);
+        return await listR2KeyPage(getWorkerBucket(), prefix, afterKey, limit);
     }
 
     return storageManager.listKeysPage(prefix, afterKey, limit);
+}
+
+/**
+ * R2 侧的一页：内部按 R2 单次上限（1000）分次取，凑够 limit 条或取空为止。
+ *
+ * R2 `list()` 的 limit 上限是 1000（超过直接报 `MaxKeys params must be positive
+ * integer <= 1000`），而本函数收到的 limit 来自调用方——孤儿清理一片最多 5000。
+ * 所以在 R2 侧必须自己续取，而不是把 limit 直接透传下去。
+ * 对外语义不变：「从 afterKey 之后开始的至多 limit 条、按 key 升序」。
+ */
+async function listR2KeyPage(
+    bucket: R2Bucket,
+    prefix: string,
+    afterKey: string | null | undefined,
+    limit: number,
+): Promise<string[]> {
+    const keys: string[] = [];
+    let cursor: string | undefined = afterKey ?? undefined;
+
+    while (keys.length < limit) {
+        const pageSize = Math.min(R2_LIST_MAX_KEYS, limit - keys.length);
+        const page = await bucket.list({
+            prefix,
+            limit: pageSize,
+            ...(cursor ? { startAfter: cursor } : {}),
+        });
+        const pageKeys = page.objects.map(object => object.key);
+        keys.push(...pageKeys);
+
+        // 本页没取满说明该前缀下已经没有更多 key 了
+        if (pageKeys.length < pageSize) {
+            break;
+        }
+        cursor = pageKeys[pageKeys.length - 1];
+    }
+
+    return keys;
 }
 
 /**

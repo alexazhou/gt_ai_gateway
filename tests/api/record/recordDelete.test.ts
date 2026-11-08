@@ -5,6 +5,11 @@
  * - DELETE /record/:id 删除单条记录
  * - DELETE /record/clear-payload 清除请求记录 payload
  * - DELETE /record/clear-all 删除所有记录
+ *
+ * 关于 worker 模式：payload 在 worker 下存 R2（`storage_record` 表根本不会被写），
+ * 所以「payload 是否随 record 一起清掉」不能靠查 `storage_record` 断言，
+ * 改为走接口读回（`GET /record/:id` 的 request_data / response_data 为 null）。
+ * `request_activity` 在两种模式下都是表数据，断言方式一致。
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import requestHelper from "../../helpers/requestHelper";
@@ -13,6 +18,11 @@ import { setupAdminUser } from "../../globalSetup";
 import mockHelper from "../../helpers/mockHelper";
 import vendorFixtures from "../../fixtures/vendorFixtures";
 import modelFixtures from "../../fixtures/modelFixtures";
+import config from "../../config";
+
+
+/** worker 模式下 payload 落在 R2，`storage_record` 表始终为空，不做行数断言 */
+const PAYLOAD_IN_TABLE = config.TEST_MODE !== "worker";
 
 
 let adminToken: string;
@@ -56,7 +66,9 @@ async function countRows(table: "request_activity" | "storage_record"): Promise<
 
 async function assertCascadeCleared(): Promise<void> {
     expect(await countRows("request_activity")).toBe(0);
-    expect(await countRows("storage_record")).toBe(0);
+    if (PAYLOAD_IN_TABLE) {
+        expect(await countRows("storage_record")).toBe(0);
+    }
 }
 
 
@@ -128,7 +140,9 @@ describe("Record Delete API", () => {
             expect(activityRes.body.activities.length).toBeGreaterThan(0);
 
             expect(await countRows("request_activity")).toBeGreaterThan(0);
-            expect(await countRows("storage_record")).toBeGreaterThan(0);
+            if (PAYLOAD_IN_TABLE) {
+                expect(await countRows("storage_record")).toBeGreaterThan(0);
+            }
 
             const res = await requestHelper.del(`/record/${record.id}`, adminToken);
             expect(res.status).toBe(200);
@@ -184,7 +198,9 @@ describe("Record Delete API", () => {
             await createTestRecord();
 
             // 前置：确有附属数据（否则后面的 0 是假绿）
-            expect(await countRows("storage_record")).toBeGreaterThan(0);
+            if (PAYLOAD_IN_TABLE) {
+                expect(await countRows("storage_record")).toBeGreaterThan(0);
+            }
             expect(await countRows("request_activity")).toBeGreaterThan(0);
 
             const res = await requestHelper.del("/record/clear-all", adminToken);
