@@ -4,6 +4,7 @@ import recordManager, { type RecordUpdateData } from "../manager/recordManager";
 import objectStorageService from "./objectStorageService";
 import configService from "./configService";
 import requestActivityService from "./requestActivityService";
+import requestActivityManager from "../manager/requestActivityManager";
 
 interface RecordPayload {
     request: string | null;
@@ -13,11 +14,18 @@ interface RecordPayload {
 const RECORD_PAYLOAD_PREFIX = "record/";
 
 /**
- * 孤儿清理的分页大小（每页拉取多少条候选 key / record_id）。
- * 1000 只影响「一趟往返搬多少条候选」，不参与任何 SQL 的 `IN (...)` —— 存在性查询会再按
- * `bindParamBatchSize()` 拆批（D1 取 90），所以这个值可以远大于单条语句的绑定参数上限。
+ * 孤儿清理每片处理的条数上限（payload key 与 activity 行**各自**按这个数取一页）。
+ *
+ * 1000 只影响「一跳搬运多少条候选」，不参与任何 SQL 的 `IN (...)` —— 存在性查询与批量删除
+ * 都会再按 `bindParamBatchSize()` 拆批（D1 取 90），所以这个值可以远大于单条语句的绑定参数上限。
+ *
+ * 上限受另一条约束压制：worker 模式下 D1 对**单次请求**限 1000 条查询。一片的查询数约为
+ * `2 × ceil(1000 / 批大小) + 常数`，在 D1 上约 48 条，与库的总条数无关。
  */
 const CLEAR_ORPHANS_PAGE_SIZE = 1000;
+
+/** 调用方可以指定更小的页大小（页大小越大、进度越跳；越小、往返越多） */
+const CLEAR_ORPHANS_MAX_PAGE_SIZE = 5000;
 
 function isLogEnabled(): boolean {
     return process.env.RECORD_LOG_ENABLED === "true";
@@ -133,70 +141,130 @@ async function clearAll(tenantId: number): Promise<ClearRecordsResult> {
     return { deleted, clearedPayloads, deletedActivities };
 }
 
-export interface ClearOrphansResult {
-    /** 删除的 payload 条数（record 已不存在、原文还留在 storage_record / R2 里） */
-    clearedPayloads: number;
-    /** 删除的活动时间线行数（record_id 指向已不存在的 record） */
+export interface OrphanStats {
+    /** 待检查的 payload 总数（`record/` 前缀下的 key 条数） */
+    payloadTotal: number;
+    /** 待检查的活动时间线条数（request_activity 总行数） */
+    activityTotal: number;
+}
+
+export interface OrphanStepInput {
+    /** 上一片返回的 payload 游标；null/undefined 表示从第一片开始 */
+    afterKey: string | null | undefined;
+    /** 上一片返回的 activity 游标；null/undefined 表示从第一片开始 */
+    afterActivityId: number | null | undefined;
+    /** 本片处理的条数上限（不传则用默认页大小） */
+    limit: number;
+}
+
+export interface OrphanStepResult {
+    /** 下一片要传回来的 payload 游标 */
+    nextAfterKey: string | null;
+    /** 下一片要传回来的 activity 游标 */
+    nextAfterActivityId: number | null;
+    /** 本片检查的 payload 条数（增量，调用方自行累加） */
+    scannedPayloads: number;
+    /** 本片删除的 payload 条数（增量） */
+    deletedPayloads: number;
+    /** 本片检查的 activity 条数（增量） */
+    scannedActivities: number;
+    /** 本片删除的 activity 条数（增量） */
     deletedActivities: number;
+    /** 是否已扫完（调用方见到 true 即可停止） */
+    done: boolean;
 }
 
 /**
- * 清理孤儿数据（root-only 全局清理）。
+ * 统计待检查的 payload / activity 总量（孤儿清理进度条的分母）。
+ *
+ * 必须在清理开始**之前**取一次快照：边删边 count 会让分母缩水，进度条会往回跳。
+ * 清理期间新写入的记录落在游标之后仍会被扫到，扫过的条数可能略超快照，调用方按 100% 封顶即可。
+ */
+async function getOrphanStats(): Promise<OrphanStats> {
+    return {
+        payloadTotal: await objectStorageService.countKeys(RECORD_PAYLOAD_PREFIX),
+        activityTotal: await requestActivityManager.countAll(),
+    };
+}
+
+/**
+ * 检查并清理**一片**孤儿数据，把游标吐回给调用方。
  *
  * 两类孤儿：
  * - **payload 孤儿**：`storage_record.object_key` 形如 `record/{id}`，但 `record` 表里已无该 id
  *   （旧版删除只删 record 行、不删原文留下的存量）；
  * - **activity 孤儿**：`request_activity.record_id` 不在 `record` 表里。
  *
- * ⚠️ **必须全局视角**：这两张表都没有 tenant_id，只有「现存 record id 全集合」才能判定孤儿。
+ * ⚠️ **必须全局视角**：这两张表都没有 tenant_id，只能逐条判定指向的 record 是否还存在。
  * 若按某个租户收敛，该租户视角之外的存活 payload 会被当成孤儿删掉。故本函数不做租户过滤，
  * 由调用方（controller）保证只有 root 能触发。
  *
+ * 分片而不是一把跑完，是因为 worker 模式下 D1 对**单次请求**有 1000 条查询硬上限：
+ * 一次调用只处理一页，查询数固定在几十条，与库的总条数无关。服务端不保存任何状态，
+ * 游标由调用方持有并在下一次调用时回传。
+ *
  * 存量清理与「以后不再产生」是两件事：级联删除的修复只保证后者，历史上已经留下的孤儿靠这里清。
  */
-async function clearOrphans(): Promise<ClearOrphansResult> {
+async function clearOrphansStep(input: OrphanStepInput): Promise<OrphanStepResult> {
+    const limit = input.limit;
+
     // ① payload：key 形如 record/{id}，id 在 record 表里不再存在即孤儿
-    let clearedPayloads = 0;
-    let lastKey: string | null = null;
+    const keys = await objectStorageService.listKeyPage(
+        RECORD_PAYLOAD_PREFIX,
+        input.afterKey,
+        limit,
+    );
+    // 游标推进到本页最后一个 key：删除本页孤儿不影响「key 更大」的后续分页。
+    // 本页为空时**保留入参游标**而不是回 null —— 回 null 等于把调用方游标重置成「从头开始」，
+    // 而 payload 与 activity 两段长度不同，一段先扫完时另一段还在继续，重置会让先扫完的那段无限重扫。
+    const nextAfterKey = keys.length > 0 ? keys[keys.length - 1] : (input.afterKey ?? null);
 
-    while (true) {
-        const keys = await objectStorageService.listKeyPage(RECORD_PAYLOAD_PREFIX, lastKey, CLEAR_ORPHANS_PAGE_SIZE);
-        if (keys.length === 0) {
-            break;
-        }
-        // 游标推进到本页最后一个 key：删除本页孤儿不影响「key 更大」的后续分页
-        lastKey = keys[keys.length - 1];
-
-        // 只处理形如 record/<整数> 的 key：前缀下若有别的命名（未来扩展）一律不动，宁可漏删不误删
-        const pageIds: number[] = [];
-        const keyByRecordId = new Map<number, string>();
-        for (const key of keys) {
-            const rawId = key.slice(RECORD_PAYLOAD_PREFIX.length);
-            const id = Number(rawId);
-            if (!rawId || !Number.isInteger(id) || String(id) !== rawId) {
-                continue;
-            }
-            pageIds.push(id);
-            keyByRecordId.set(id, key);
-        }
-        if (pageIds.length === 0) {
+    // 只处理形如 record/<整数> 的 key：前缀下若有别的命名（未来扩展）一律不动，宁可漏删不误删
+    const pageIds: number[] = [];
+    const keyByRecordId = new Map<number, string>();
+    for (const key of keys) {
+        const rawId = key.slice(RECORD_PAYLOAD_PREFIX.length);
+        const id = Number(rawId);
+        if (!rawId || !Number.isInteger(id) || String(id) !== rawId) {
             continue;
         }
+        pageIds.push(id);
+        keyByRecordId.set(id, key);
+    }
 
+    let deletedPayloads = 0;
+    if (pageIds.length > 0) {
         const existing = await recordManager.listExistingIds(pageIds);
         const orphanKeys = pageIds.filter(id => !existing.has(id)).map(id => keyByRecordId.get(id) as string);
         if (orphanKeys.length > 0) {
-            clearedPayloads += await objectStorageService.deleteMany(orphanKeys);
+            deletedPayloads = await objectStorageService.deleteMany(orphanKeys);
         }
     }
 
-    // ② activity：record_id 不在 record 表里即孤儿（同样边遍历边删）
-    const deletedActivities = await requestActivityService.clearOrphans(
-        CLEAR_ORPHANS_PAGE_SIZE,
-        recordIds => recordManager.listExistingIds(recordIds),
-    );
+    // ② activity：record_id 不在 record 表里即孤儿
+    const activityIds = await requestActivityManager.listRecordIdsPage(input.afterActivityId, limit);
+    const nextAfterActivityId = activityIds.length > 0
+        ? activityIds[activityIds.length - 1]
+        : (input.afterActivityId ?? null);
 
-    return { clearedPayloads, deletedActivities };
+    let deletedActivities = 0;
+    if (activityIds.length > 0) {
+        const existing = await recordManager.listExistingIds(activityIds);
+        const orphanIds = activityIds.filter(id => !existing.has(id));
+        if (orphanIds.length > 0) {
+            deletedActivities = await requestActivityManager.deleteByRecordIds(orphanIds);
+        }
+    }
+
+    return {
+        nextAfterKey,
+        nextAfterActivityId,
+        scannedPayloads: keys.length,
+        deletedPayloads,
+        scannedActivities: activityIds.length,
+        deletedActivities,
+        done: keys.length === 0 && activityIds.length === 0,
+    };
 }
 
 // 一条用户请求 = 一条 record：进入路由循环前创建，此时还不知道命中的上游
@@ -360,5 +428,8 @@ export default {
     clearPayloads,
     deleteOne,
     clearAll,
-    clearOrphans,
+    getOrphanStats,
+    clearOrphansStep,
+    CLEAR_ORPHANS_PAGE_SIZE,
+    CLEAR_ORPHANS_MAX_PAGE_SIZE,
 };

@@ -206,8 +206,10 @@ app.post("/record/recover-orphans.json", authMiddleware.requireAdmin, recordCont
 app.get("/record/:id", authMiddleware.requireAdmin, recordController.getRecord);
 app.delete("/record/clear-payload", authMiddleware.requireAdmin, recordController.clearPayload);
 app.delete("/record/clear-all", authMiddleware.requireAdmin, recordController.clearAll);
-// 必须排在 /record/:id 之前，否则会被当成 id="clear-orphans" 命中
-app.delete("/record/clear-orphans", authMiddleware.requireAdmin, recordController.clearOrphans);
+// 必须排在 /record/:id 之前，否则会被当成 id="..."
+// 孤儿清理分两段：先取分母快照，再由前端循环调 step 逐片推进（服务端不保存状态）
+app.get("/record/clear-orphans/stats.json", authMiddleware.requireAdmin, recordController.orphanStats);
+app.post("/record/clear-orphans/step", authMiddleware.requireAdmin, recordController.clearOrphansStep);
 app.delete("/record/:id", authMiddleware.requireAdmin, recordController.deleteRecord);
 
 // Record Activity (需要管理员权限，独立控制器 recordActivityController)

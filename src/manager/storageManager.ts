@@ -1,5 +1,6 @@
 import { SgStorageRecord } from "../model/sgStorageRecord";
 import customError from "../customError";
+import { bindParamBatchSize } from "../util/db/bindParamUtil";
 
 interface StoredObject {
     object_key: string;
@@ -111,6 +112,13 @@ async function deleteFromTable(key: string) {
     await SgStorageRecord.query().where("object_key", key).delete();
 }
 
+/** 统计某前缀下的 key 条数（只 COUNT，不读 BLOB） */
+async function countByPrefix(prefix: string): Promise<number> {
+    const pattern = `${prefix}%`;
+    const count = await SgStorageRecord.query().where("object_key", "like", pattern).count();
+    return Number(count || 0);
+}
+
 async function deleteFromTableByPrefix(prefix: string): Promise<number> {
     const pattern = `${prefix}%`;
     const deleted = await SgStorageRecord.query().where("object_key", "like", pattern).delete();
@@ -137,6 +145,29 @@ async function listKeysPage(prefix: string, afterKey: string | null | undefined,
     return rows.all().map(r => String(r.object_key));
 }
 
+/**
+ * 按 object_key 批量删除一批 key。
+ *
+ * 一批压成一条 `WHERE object_key IN (...)`（内部按 `bindParamBatchSize()` 再拆），
+ * 而不是每个 key 一次 DELETE：worker 模式下 D1 对单次请求有 1000 条查询上限，
+ * 逐条删会把查询预算直接吃光。
+ *
+ * 返回删除行数。
+ */
+async function deleteFromTableByKeys(keys: string[]): Promise<number> {
+    if (keys.length === 0) {
+        return 0;
+    }
+    const batchSize = bindParamBatchSize();
+    let deleted = 0;
+    for (let i = 0; i < keys.length; i += batchSize) {
+        const batch = keys.slice(i, i + batchSize);
+        const affected = await SgStorageRecord.query().whereIn("object_key", batch).delete();
+        deleted += Number(affected || 0);
+    }
+    return deleted;
+}
+
 export type { StoredObject };
 
 export default {
@@ -144,5 +175,7 @@ export default {
     getFromTable,
     deleteFromTable,
     deleteFromTableByPrefix,
+    deleteFromTableByKeys,
+    countByPrefix,
     listKeysPage,
 };

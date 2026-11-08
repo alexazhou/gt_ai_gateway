@@ -146,19 +146,89 @@ function assertRoot(c: Context): void {
 }
 
 /**
- * 清理孤儿数据：record 已不存在、原文（storage_record / R2）与活动时间线还留着的存量。
+ * 孤儿清理的进度分母：待检查的 payload / activity 总量。
  *
- * 为什么 root-only：这两张附属表都没有 tenant_id 列，判定孤儿必须用「现存 record id 全集合」，
+ * 调用方（前端）在开始清理**前**取一次快照作为分母，之后靠累加 step 返回的增量算进度。
+ * 不能边删边重新统计：分母会缩水，进度条会往回跳。
+ *
+ * 为什么 root-only：这两张附属表都没有 tenant_id 列，判定孤儿必须逐条比对全局 record 表，
  * 按某个租户收敛会把其他租户仍存活的 payload 当成孤儿删掉，所以这里不做租户过滤。
  */
-async function clearOrphans(c: Context) {
+async function orphanStats(c: Context) {
     assertRoot(c);
-    const result = await recordService.clearOrphans();
+    const stats = await recordService.getOrphanStats();
     return c.json({
-        success: true,
-        cleared_payloads: result.clearedPayloads,
-        deleted_activities: result.deletedActivities,
+        payload_total: stats.payloadTotal,
+        activity_total: stats.activityTotal,
+        page_size: recordService.CLEAR_ORPHANS_PAGE_SIZE,
+        max_page_size: recordService.CLEAR_ORPHANS_MAX_PAGE_SIZE,
     });
+}
+
+/**
+ * 清理孤儿数据的一片：检查并删除当前游标之后的一页，把新游标返回给调用方。
+ *
+ * 服务端不保存任何状态（无 run_id、无锁、无进度表）：游标由调用方持有并回传，
+ * 计数是**本片增量**，由调用方累加。这样 worker 模式下每个请求都可以落在不同 isolate，
+ * 不需要共享内存或落库；代价是进度只存在于调用方页面里。
+ */
+async function clearOrphansStep(c: Context) {
+    assertRoot(c);
+
+    const body = await c.req.json().catch(() => ({})) as {
+        after_key?: unknown;
+        after_activity_id?: unknown;
+        limit?: unknown;
+    };
+
+    const limit = parseStepLimit(body.limit);
+    const result = await recordService.clearOrphansStep({
+        afterKey: parseAfterKey(body.after_key),
+        afterActivityId: parseAfterActivityId(body.after_activity_id),
+        limit,
+    });
+
+    return c.json({
+        next_after_key: result.nextAfterKey,
+        next_after_activity_id: result.nextAfterActivityId,
+        scanned_payloads: result.scannedPayloads,
+        deleted_payloads: result.deletedPayloads,
+        scanned_activities: result.scannedActivities,
+        deleted_activities: result.deletedActivities,
+        done: result.done,
+    });
+}
+
+function parseStepLimit(value: unknown): number {
+    if (value === undefined || value === null || value === "") {
+        return recordService.CLEAR_ORPHANS_PAGE_SIZE;
+    }
+    const limit = Number(value);
+    if (!Number.isInteger(limit) || limit <= 0) {
+        throw new customError.AppError("limit must be a positive integer", 400);
+    }
+    return Math.min(limit, recordService.CLEAR_ORPHANS_MAX_PAGE_SIZE);
+}
+
+function parseAfterKey(value: unknown): string | null {
+    if (value === undefined || value === null || value === "") {
+        return null;
+    }
+    if (typeof value !== "string") {
+        throw new customError.AppError("after_key must be a string", 400);
+    }
+    return value;
+}
+
+function parseAfterActivityId(value: unknown): number | null {
+    if (value === undefined || value === null || value === "") {
+        return null;
+    }
+    const id = Number(value);
+    if (!Number.isInteger(id) || id < 0) {
+        throw new customError.AppError("after_activity_id must be a non-negative integer", 400);
+    }
+    return id;
 }
 
 export default {
@@ -169,5 +239,6 @@ export default {
     clearPayload,
     clearAll,
     recoverOrphans,
-    clearOrphans,
+    orphanStats,
+    clearOrphansStep,
 };

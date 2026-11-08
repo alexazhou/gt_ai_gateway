@@ -190,12 +190,26 @@
                                 <div class="setting-info">
                                     <div class="setting-title">清理悬空数据</div>
                                     <div class="setting-desc">
-                                        只删除「请求记录已不存在」的请求体原文与活动时间线，不影响现存记录。用于清理旧版本删除不彻底留下的残留
+                                        <template v-if="orphanRunning">
+                                            正在清理：{{ orphanPercent }}% · 已检查 {{ orphanScannedTotal.toLocaleString() }} /
+                                            {{ orphanTotal.toLocaleString() }} 条，已删除
+                                            {{ orphanDeletedTotal.toLocaleString() }} 条
+                                        </template>
+                                        <template v-else>
+                                            只删除「请求记录已不存在」的请求体原文与活动时间线，不影响现存记录。用于清理旧版本删除不彻底留下的残留
+                                        </template>
                                     </div>
+                                    <a-progress
+                                        v-if="orphanRunning"
+                                        :percent="orphanPercent"
+                                        :show-info="false"
+                                        size="small"
+                                        style="max-width: 320px; margin-top: 6px;"
+                                    />
                                 </div>
                                 <div class="setting-action">
                                     <a-button @click="showOrphanModal">
-                                        清理悬空数据
+                                        {{ orphanRunning ? '查看进度' : '清理悬空数据' }}
                                     </a-button>
                                 </div>
                             </div>
@@ -291,14 +305,37 @@
         <a-modal
             v-model:open="orphanModalVisible"
             title="清理悬空数据"
-            :confirm-loading="deleting"
-            ok-text="开始清理"
+            :confirm-loading="orphanRunning"
+            :ok-text="orphanRunning ? '清理中…' : '开始清理'"
+            :ok-button-props="{ disabled: orphanRunning }"
+            :cancel-text="orphanRunning ? '后台继续' : '取消'"
             @ok="handleOrphanConfirm"
         >
-            <div style="font-size: 13px; color: var(--text-secondary, #8c8c8c); line-height: 1.7;">
+            <!-- 运行中：进度条 + 分段计数 + 取消 -->
+            <div v-if="orphanRunning" style="font-size: 13px; line-height: 1.9;">
+                <a-progress :percent="orphanPercent" />
+                <div style="color: var(--text-secondary, #8c8c8c);">
+                    请求体原文：已检查 {{ orphanScannedPayloads.toLocaleString() }} /
+                    {{ orphanStats.payload_total.toLocaleString() }} 条，已删除
+                    {{ orphanDeletedPayloads.toLocaleString() }} 条
+                    <br />
+                    活动时间线：已检查 {{ orphanScannedActivities.toLocaleString() }} /
+                    {{ orphanStats.activity_total.toLocaleString() }} 条，已删除
+                    {{ orphanDeletedActivities.toLocaleString() }} 条
+                </div>
+                <a-button size="small" danger style="margin-top: 12px;" @click="cancelOrphanCleanup">
+                    停止清理
+                </a-button>
+            </div>
+
+            <!-- 空闲：确认文案 -->
+            <div v-else style="font-size: 13px; color: var(--text-secondary, #8c8c8c); line-height: 1.7;">
                 将删除「请求记录已不存在」的请求体原文与活动时间线，用于清理旧版本删除不彻底留下的残留。
                 <br />
                 现存记录不受影响；此操作不可恢复。
+                <br /><br />
+                清理过程分片执行，可以随时停止或关掉页面；已删除的数据不会回滚，下次重新开始会从头扫描
+                （已删的部分重扫为空操作，不影响结果）。
             </div>
         </a-modal>
     </div>
@@ -309,7 +346,7 @@ import { onMounted, reactive, ref, computed } from 'vue';
 import { message } from 'ant-design-vue/es';
 import { getConfig, updateConfig } from '@/api/config';
 import { checkUpdate } from '@/api/system';
-import { clearPayload, clearAllRecords, clearOrphanRecords } from '@/api/record';
+import { clearPayload, clearAllRecords, getOrphanCleanupStats, stepOrphanCleanup } from '@/api/record';
 import { useAppStore } from '@/stores/app';
 import { useAuthStore } from '@/stores/auth';
 import { RunMode } from '@/types/system';
@@ -337,6 +374,45 @@ const deleteModalVisible = ref(false);
 const deleteMode = ref<'payload' | 'all'>('payload');
 const deleting = ref(false);
 const orphanModalVisible = ref(false);
+
+/**
+ * 孤儿清理的前端状态。
+ *
+ * 服务端不保存任何状态：分母（stats）在开始前取一次快照，游标和各段计数由这里持有，
+ * 每调一次 step 就把返回的增量累加上去、把 next_* 存成下一次的游标。
+ */
+const orphanRunning = ref(false);
+const orphanStats = reactive({
+    payload_total: 0,
+    activity_total: 0,
+});
+const orphanCursor = reactive<{ afterKey: string | null; afterActivityId: number | null }>({
+    afterKey: null,
+    afterActivityId: null,
+});
+const orphanScannedPayloads = ref(0);
+const orphanDeletedPayloads = ref(0);
+const orphanScannedActivities = ref(0);
+const orphanDeletedActivities = ref(0);
+// 关弹窗不再等于取消：跑起来之后用一个标志让循环自己停下
+let orphanCancelled = false;
+
+const orphanScannedTotal = computed(() => orphanScannedPayloads.value + orphanScannedActivities.value);
+const orphanTotal = computed(() => orphanStats.payload_total + orphanStats.activity_total);
+const orphanDeletedTotal = computed(() => orphanDeletedPayloads.value + orphanDeletedActivities.value);
+
+/**
+ * 进度百分比。
+ *
+ * 分母是开始前的快照，清理期间新写入的记录落在游标之后仍会被扫到，扫过的条数可能超过快照，
+ * 所以这里封顶 100%（旁边的真实条数照实显示，不跟着截断）。
+ */
+const orphanPercent = computed(() => {
+    if (orphanTotal.value <= 0) {
+        return orphanRunning.value ? 0 : 100;
+    }
+    return Math.min(100, Math.round((orphanScannedTotal.value / orphanTotal.value) * 100));
+});
 type RecordPayloadStorage = 'auto' | 'database' | 'r2';
 
 const originalConfig = reactive({
@@ -509,19 +585,79 @@ function showOrphanModal() {
     orphanModalVisible.value = true;
 }
 
+/** 把累加计数和游标重置到「还没开始」的状态 */
+function resetOrphanProgress() {
+    orphanScannedPayloads.value = 0;
+    orphanDeletedPayloads.value = 0;
+    orphanScannedActivities.value = 0;
+    orphanDeletedActivities.value = 0;
+    orphanCursor.afterKey = null;
+    orphanCursor.afterActivityId = null;
+}
+
+/**
+ * 开始清理：先取分母快照，再一片一片往前推，直到 done。
+ *
+ * 分母只在这里取一次。不能边删边重新统计——分母会缩水，进度条会往回跳。
+ * 循环里每片返回后立刻发下一片（每片几百毫秒），不用定时器。
+ */
 async function handleOrphanConfirm() {
-    deleting.value = true;
-    try {
-        const res = await clearOrphanRecords();
-        message.success(
-            `已清理 ${res.cleared_payloads} 条悬空请求体、${res.deleted_activities} 条悬空时间线`,
-        );
-        orphanModalVisible.value = false;
-    } catch {
-        message.error('清理失败');
-    } finally {
-        deleting.value = false;
+    if (orphanRunning.value) {
+        return;
     }
+
+    orphanRunning.value = true;
+    orphanCancelled = false;
+    resetOrphanProgress();
+
+    try {
+        const stats = await getOrphanCleanupStats();
+        orphanStats.payload_total = stats.payload_total;
+        orphanStats.activity_total = stats.activity_total;
+
+        if (orphanStats.payload_total + orphanStats.activity_total === 0) {
+            message.success('没有需要检查的数据');
+            return;
+        }
+
+        // 服务端无状态：循环条件看 orphanCancelled，中途关弹窗不影响它继续跑
+        while (!orphanCancelled) {
+            const res = await stepOrphanCleanup({
+                after_key: orphanCursor.afterKey,
+                after_activity_id: orphanCursor.afterActivityId,
+            });
+
+            orphanScannedPayloads.value += res.scanned_payloads;
+            orphanDeletedPayloads.value += res.deleted_payloads;
+            orphanScannedActivities.value += res.scanned_activities;
+            orphanDeletedActivities.value += res.deleted_activities;
+
+            if (res.done) {
+                message.success(
+                    `已清理 ${orphanDeletedPayloads.value.toLocaleString()} 条悬空请求体、`
+                    + `${orphanDeletedActivities.value.toLocaleString()} 条悬空时间线`,
+                );
+                break;
+            }
+
+            orphanCursor.afterKey = res.next_after_key;
+            orphanCursor.afterActivityId = res.next_after_activity_id;
+        }
+
+        if (orphanCancelled) {
+            message.info(`已停止清理，本次删除 ${orphanDeletedTotal.value.toLocaleString()} 条`);
+        }
+    } catch {
+        message.error('清理失败，可重新开始（已删除的数据不会回滚）');
+    } finally {
+        orphanRunning.value = false;
+    }
+}
+
+/** 停止：只是让循环不再发下一片，已有进度照实保留 */
+function cancelOrphanCleanup() {
+    orphanCancelled = true;
+    orphanModalVisible.value = false;
 }
 
 async function saveConfig() {

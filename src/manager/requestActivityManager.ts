@@ -52,10 +52,16 @@ async function listRecordIdsPage(afterRecordId: number | null | undefined, limit
     return rows.all().map(r => Number(r.record_id));
 }
 
+/** 统计活动时间线总行数（孤儿清理进度条的分母） */
+async function countAll(): Promise<number> {
+    return Number(await SgRequestActivity.query().count() || 0);
+}
+
 export default {
     findByRecordId,
     updateActivities,
     createActivity,
     deleteByRecordIds,
     listRecordIdsPage,
+    countAll,
 };

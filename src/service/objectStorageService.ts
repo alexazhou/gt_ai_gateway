@@ -270,15 +270,104 @@ async function mergeKeyStreams(
 }
 
 
-/** 按 key 批量删除（孤儿清理用；每个 key 主备两侧都删，与实际存放位置无关） */
+/**
+ * 统计某前缀下的 object_key 条数（主备两侧取并集）。
+ *
+ * 孤儿清理进度条的分母用：只在清理开始前取一次快照，之后不再 count
+ * （边删边 count 分母会缩水，进度条会往回跳）。
+ *
+ * R2 只能靠列表翻页数出来（没有 count 接口）；DATABASE 直接 COUNT。
+ */
+async function countKeys(prefix: string): Promise<number> {
+    assertValidPrefix(prefix);
+
+    const location = await resolveStorageLocation();
+    assertLocationAvailable(location);
+
+    const fallback = alternateStorageLocation(location);
+    if (!isLocationAvailable(fallback)) {
+        return countKeysInLocation(location, prefix);
+    }
+
+    // 两侧可能有同一个 key（切换配置前的残留），并集条数不能简单相加。
+    // 这里按 key 流归并数「不重复的 key 个数」，与 listKeyPage 的口径保持一致。
+    let total = 0;
+    let afterKey: string | null = null;
+    const MERGE_PAGE = 1000;
+    while (true) {
+        const page = await listKeyPage(prefix, afterKey, MERGE_PAGE);
+        if (page.length === 0) {
+            break;
+        }
+        total += page.length;
+        afterKey = page[page.length - 1];
+    }
+    return total;
+}
+
+async function countKeysInLocation(
+    location: RecordPayloadStorage.DATABASE | RecordPayloadStorage.R2,
+    prefix: string,
+): Promise<number> {
+    if (location === RecordPayloadStorage.R2) {
+        const bucket = getWorkerBucket();
+        let cursor: string | undefined;
+        let total = 0;
+        do {
+            const page = await bucket.list({ cursor, limit: 1000, prefix });
+            total += page.objects.length;
+            cursor = page.truncated ? page.cursor : undefined;
+        } while (cursor);
+        return total;
+    }
+
+    return storageManager.countByPrefix(prefix);
+}
+
+/**
+ * 批量删除一批 key（主备两侧都删，与实际存放位置无关）。
+ *
+ * **必须批量**：逐条 `deleteObject` 会让每个 key 至少吃掉一条数据库语句，worker 模式下
+ * D1 对单次请求有 1000 条查询的硬上限，一页上千个 key 逐条删就把预算吃光了。
+ * 这里每批压成一条语句（DATABASE 用 `WHERE object_key IN (...)`，R2 原生支持 key 数组），
+ * 批大小仍按 `bindParamBatchSize()` 取，不受单条语句绑定参数上限影响。
+ *
+ * 返回删除的 key 条数（不是存放份数）。
+ */
 async function deleteMany(keys: string[]): Promise<number> {
-    let deleted = 0;
+    if (keys.length === 0) {
+        return 0;
+    }
     for (const key of keys) {
         assertValidKey(key);
-        await deleteObject(key);
-        deleted += 1;
     }
-    return deleted;
+
+    const location = await resolveStorageLocation();
+    assertLocationAvailable(location);
+    await deleteManyFromLocation(location, keys);
+
+    const fallback = alternateStorageLocation(location);
+    if (isLocationAvailable(fallback)) {
+        await deleteManyFromLocation(fallback, keys);
+    }
+
+    return keys.length;
+}
+
+async function deleteManyFromLocation(
+    location: RecordPayloadStorage.DATABASE | RecordPayloadStorage.R2,
+    keys: string[],
+) {
+    if (location === RecordPayloadStorage.R2) {
+        // R2 单次最多 1000 个 key，超过就分片
+        const R2_DELETE_CHUNK = 1000;
+        for (let i = 0; i < keys.length; i += R2_DELETE_CHUNK) {
+            await getWorkerBucket().delete(keys.slice(i, i + R2_DELETE_CHUNK));
+        }
+        return;
+    }
+
+    await storageManager.deleteFromTableByKeys(keys);
 }
 
 async function put(key: string, data: Uint8Array) {
@@ -366,5 +455,6 @@ export default {
     putText,
     getText,
     listKeyPage,
+    countKeys,
     deleteMany,
 };

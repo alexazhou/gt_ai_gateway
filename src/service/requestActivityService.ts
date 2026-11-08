@@ -82,48 +82,8 @@ async function clearByRecordIds(recordIds: number[]): Promise<number> {
 }
 
 
-/**
- * 找出「指向不存在 record」的活动行（孤儿）并删除，返回删除行数。
- *
- * `request_activity` 无外键、也无 tenant_id：判定孤儿只能靠「record_id 不在 record 表里」。
- * 调用方必须先收敛到全局视角（root-only），否则会误删其他租户数据。
- *
- * 边遍历边删，不做全量求差集：按 record_id keyset 分页，每页只判定并删除本页，
- * 内存占用与总行数无关（全量版会把整列 id 常驻内存，行数一多就打爆 worker）。
- *
- * @param pageSize 每页拉取的 record_id 条数
- * @param findExistingRecordIds 判定一批 record_id 里哪些确实还存在（由调用方注入，
- *        避免本 service 反向依赖 recordManager 造成循环引用）
- */
-async function clearOrphans(
-    pageSize: number,
-    findExistingRecordIds: (recordIds: number[]) => Promise<Set<number>>,
-): Promise<number> {
-    let deleted = 0;
-    let lastRecordId: number | null = null;
-
-    while (true) {
-        const recordIds = await requestActivityManager.listRecordIdsPage(lastRecordId, pageSize);
-        if (recordIds.length === 0) {
-            break;
-        }
-        // 游标推进到本页最后一个 record_id：删除本页孤儿不影响「更大 id」的后续分页
-        lastRecordId = recordIds[recordIds.length - 1];
-
-        const existing = await findExistingRecordIds(recordIds);
-        const orphanIds = recordIds.filter(id => !existing.has(id));
-        if (orphanIds.length > 0) {
-            deleted += await requestActivityManager.deleteByRecordIds(orphanIds);
-        }
-    }
-
-    return deleted;
-}
-
-
 export default {
     append,
     getByRecordId,
     clearByRecordIds,
-    clearOrphans,
 };

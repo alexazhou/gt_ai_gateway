@@ -2,8 +2,10 @@
  * 清理悬空数据 API 测试
  *
  * 验证：
- * - DELETE /record/clear-orphans 清掉「record 已不存在」的 payload 与 activity
+ * - `GET /record/clear-orphans/stats.json` 返回的分母与实际数据一致
+ * - `POST /record/clear-orphans/step` 逐片清掉「record 已不存在」的 payload 与 activity
  * - 现存记录的 payload / activity 一条都不能动（这是本功能最容易做错的地方）
+ * - 分片推进能跨多页清完，且不重扫、不跳过
  * - 非 root 一律 403（这两张附属表没有 tenant_id，只能全局清理，故必须是 root）
  *
  * 做法：先用真实请求造出「有 payload + activity」的记录，再**故意绕过接口**直接删
@@ -69,6 +71,56 @@ async function orphanRecord(recordId: number): Promise<void> {
 }
 
 
+/**
+ * 模拟前端：从第一片开始循环调 step，直到 done。
+ *
+ * 这是接口设计里「服务端无状态、游标由调用方持有」的直接体现——前端要做的就是这件事。
+ * 返回累加后的总数，用例据此断言。
+ *
+ * @param pageSize 每片条数上限，用例里会调小以便用少量数据造出跨多片的效果
+ */
+async function runSteps(pageSize: number): Promise<{
+    scannedPayloads: number;
+    deletedPayloads: number;
+    scannedActivities: number;
+    deletedActivities: number;
+    steps: number;
+}> {
+    let afterKey: string | null = null;
+    let afterActivityId: number | null = null;
+    let scannedPayloads = 0;
+    let deletedPayloads = 0;
+    let scannedActivities = 0;
+    let deletedActivities = 0;
+    let steps = 0;
+
+    while (true) {
+        const res = await requestHelper.post(
+            "/record/clear-orphans/step",
+            { after_key: afterKey, after_activity_id: afterActivityId, limit: pageSize },
+            ROOT_TOKEN,
+        );
+        expect(res.status, JSON.stringify(res.body)).toBe(200);
+        steps += 1;
+
+        scannedPayloads += res.body.scanned_payloads;
+        deletedPayloads += res.body.deleted_payloads;
+        scannedActivities += res.body.scanned_activities;
+        deletedActivities += res.body.deleted_activities;
+
+        if (res.body.done) {
+            return { scannedPayloads, deletedPayloads, scannedActivities, deletedActivities, steps };
+        }
+
+        afterKey = res.body.next_after_key;
+        afterActivityId = res.body.next_after_activity_id;
+
+        // 防死循环：接口若把游标重置回 null，这里会立刻暴露（而不是把测试挂死）
+        expect(steps).toBeLessThan(100);
+    }
+}
+
+
 async function setupModel(): Promise<void> {
     const user = await requestHelper.post(
         "/user/create.json",
@@ -104,18 +156,66 @@ describe("Record Clear Orphans API", () => {
 
     it("should reject non-root with 403", async () => {
         // adminToken 是 admin（不是 root）：这两张表没有 tenant_id，只能全局清理，故必须挡掉
-        const res = await requestHelper.del("/record/clear-orphans", adminToken);
-        expect(res.status).toBe(403);
+        const statsRes = await requestHelper.get("/record/clear-orphans/stats.json", adminToken);
+        expect(statsRes.status).toBe(403);
+
+        const stepRes = await requestHelper.post("/record/clear-orphans/step", {}, adminToken);
+        expect(stepRes.status).toBe(403);
     });
 
     it("should reject unauthenticated request", async () => {
-        const res = await requestHelper.request("/record/clear-orphans", { method: "DELETE" });
-        expect(res.status).toBe(401);
+        const statsRes = await requestHelper.request("/record/clear-orphans/stats.json", { method: "GET" });
+        expect(statsRes.status).toBe(401);
+
+        const stepRes = await requestHelper.request("/record/clear-orphans/step", { method: "POST" });
+        expect(stepRes.status).toBe(401);
+    });
+
+    it("should reject invalid cursor parameters", async () => {
+        const badLimit = await requestHelper.post(
+            "/record/clear-orphans/step",
+            { limit: -5 },
+            ROOT_TOKEN,
+        );
+        expect(badLimit.status).toBe(400);
+
+        const badKey = await requestHelper.post(
+            "/record/clear-orphans/step",
+            { after_key: 123 },
+            ROOT_TOKEN,
+        );
+        expect(badKey.status).toBe(400);
+
+        const badActivity = await requestHelper.post(
+            "/record/clear-orphans/step",
+            { after_activity_id: "abc" },
+            ROOT_TOKEN,
+        );
+        expect(badActivity.status).toBe(400);
+    });
+
+    it("should report stats matching the actual row counts", async () => {
+        await requestHelper.del("/record/clear-all", adminToken);
+        await dbHelper.execute("DELETE FROM storage_record");
+        await dbHelper.execute("DELETE FROM request_activity");
+
+        await createTestRecord();
+        await createTestRecord();
+
+        const res = await requestHelper.get("/record/clear-orphans/stats.json", ROOT_TOKEN);
+        expect(res.status, JSON.stringify(res.body)).toBe(200);
+        // 分母就是两张表的实际条数：进度条的准确性全靠它
+        expect(res.body.payload_total).toBe(await countRows("storage_record"));
+        expect(res.body.activity_total).toBe(await countRows("request_activity"));
+        expect(res.body.payload_total).toBe(2);
+        expect(res.body.activity_total).toBe(2);
+        expect(res.body.page_size).toBeGreaterThan(0);
     });
 
     it("should clear orphan payload and activity but keep surviving records untouched", async () => {
         // 前置清场：保证断言看到的是本用例造的数据
-        await requestHelper.del("/record/clear-all", adminToken);
+        await dbHelper.execute("DELETE FROM storage_record");
+        await dbHelper.execute("DELETE FROM request_activity");
 
         const survivor = await createTestRecord();
         const doomed = await createTestRecord();
@@ -130,12 +230,10 @@ describe("Record Clear Orphans API", () => {
         // 制造孤儿：只删 record 行，payload / activity 留着（旧版本就是这么留的）
         await orphanRecord(doomed.id);
 
-        const res = await requestHelper.del("/record/clear-orphans", ROOT_TOKEN);
-        expect(res.status, JSON.stringify(res.body)).toBe(200);
-        expect(res.body.success).toBe(true);
+        const totals = await runSteps(1000);
         // 恰好清了这一条孤儿，不是 0（假绿）也不是把活的一起清
-        expect(res.body.cleared_payloads).toBe(1);
-        expect(res.body.deleted_activities).toBe(1);
+        expect(totals.deletedPayloads).toBe(1);
+        expect(totals.deletedActivities).toBe(1);
 
         // 孤儿没了
         const keysAfter = await payloadKeys();
@@ -152,14 +250,13 @@ describe("Record Clear Orphans API", () => {
     });
 
     it("should report zero when there are no orphans", async () => {
-        // 上一轮已清干净，此时不该再有孤儿；再调一次必须是 0，不能把存活数据当孤儿删
+        // 上一轮已清干净，此时不该再有孤儿；再跑一遍必须是 0，不能把存活数据当孤儿删
         const keysBefore = await payloadKeys();
         const activitiesBefore = await activityRecordIds();
 
-        const res = await requestHelper.del("/record/clear-orphans", ROOT_TOKEN);
-        expect(res.status).toBe(200);
-        expect(res.body.cleared_payloads).toBe(0);
-        expect(res.body.deleted_activities).toBe(0);
+        const totals = await runSteps(1000);
+        expect(totals.deletedPayloads).toBe(0);
+        expect(totals.deletedActivities).toBe(0);
 
         // 幂等：数据一条不少
         expect(await payloadKeys()).toEqual(keysBefore);
@@ -168,6 +265,8 @@ describe("Record Clear Orphans API", () => {
 
     it("should clear multiple orphans at once", async () => {
         await requestHelper.del("/record/clear-all", adminToken);
+        await dbHelper.execute("DELETE FROM storage_record");
+        await dbHelper.execute("DELETE FROM request_activity");
 
         const survivor = await createTestRecord();
         const doomedA = await createTestRecord();
@@ -175,10 +274,9 @@ describe("Record Clear Orphans API", () => {
         await orphanRecord(doomedA.id);
         await orphanRecord(doomedB.id);
 
-        const res = await requestHelper.del("/record/clear-orphans", ROOT_TOKEN);
-        expect(res.status).toBe(200);
-        expect(res.body.cleared_payloads).toBe(2);
-        expect(res.body.deleted_activities).toBe(2);
+        const totals = await runSteps(1000);
+        expect(totals.deletedPayloads).toBe(2);
+        expect(totals.deletedActivities).toBe(2);
 
         const keysAfter = await payloadKeys();
         expect(keysAfter).toEqual([`record/${survivor.id}`]);
@@ -188,6 +286,8 @@ describe("Record Clear Orphans API", () => {
     it("should not touch storage keys outside the record/ prefix", async () => {
         // 前缀下若有别的命名（未来扩展），一律不动：宁可漏删，不可误删
         await requestHelper.del("/record/clear-all", adminToken);
+        await dbHelper.execute("DELETE FROM storage_record");
+        await dbHelper.execute("DELETE FROM request_activity");
         const survivor = await createTestRecord();
 
         await dbHelper.execute(
@@ -195,8 +295,7 @@ describe("Record Clear Orphans API", () => {
             ["other/keep-me", 3, Buffer.from("abc")],
         );
 
-        const res = await requestHelper.del("/record/clear-orphans", ROOT_TOKEN);
-        expect(res.status).toBe(200);
+        await runSteps(1000);
 
         const keysAfter = await payloadKeys();
         expect(keysAfter).toContain("other/keep-me");
@@ -206,16 +305,16 @@ describe("Record Clear Orphans API", () => {
     });
 
     /**
-     * 跨页用例：孤儿条数超过一页（实现里每页 1000 条），必须一条不落地清掉。
+     * 跨片用例：数据量远超一片，必须一片不落地清掉。
      *
-     * 这组数据专门用来卡住「翻页写错」的两类 bug：
+     * 用 pageSize=100 而不是实现里的默认 1000，是为了用不大的数据量就能覆盖「多片」路径
+     * （否则要造上千条才能跨页）。这里造 2499 条孤儿 + 1 条存活，共 25 片。
+     *
+     * 这组数据专门用来卡住翻页写错的两类 bug：
      * - 用 `LIMIT/OFFSET` 翻页：边扫边删会让后面的行 offset 前移，成片跳过（只剩 1/2~1/3 被删）；
-     * - 存活记录混在孤儿中间：把整页当孤儿删会误删存活 payload。
-     *
-     * 因此这里造 2499 条孤儿，并把一条**存活**记录的 key / activity 落在孤儿 id 区间正中，
-     * 让它在第一页里与大量孤儿相邻 —— 误删与否一眼可见。
+     * - 游标在一段扫完后被重置：先扫完的那段会被无限重扫（用例里有防死循环断言）。
      */
-    it("should clear orphans spanning multiple pages without skipping or over-deleting", async () => {
+    it("should clear orphans spanning multiple steps without skipping or over-deleting", async () => {
         await requestHelper.del("/record/clear-all", adminToken);
         // 直接清空两张附属表，保证下面断言的条数只来自本用例造的数据
         await dbHelper.execute("DELETE FROM storage_record");
@@ -251,14 +350,17 @@ describe("Record Clear Orphans API", () => {
             await dbHelper.execute(`INSERT INTO request_activity (record_id, activities) VALUES ${activityValues}`);
         }
 
-        // 前置：确实是跨页规模（> 2 页），否则这条用例证明不了翻页
+        // 前置：确实是跨片规模，否则这条用例证明不了翻页
         expect(orphanIds.length).toBe(ORPHAN_COUNT - 1);
         expect(await countRows("storage_record")).toBeGreaterThan(2000);
 
-        const res = await requestHelper.del("/record/clear-orphans", ROOT_TOKEN);
-        expect(res.status, JSON.stringify(res.body)).toBe(200);
-        expect(res.body.cleared_payloads).toBe(ORPHAN_COUNT - 1);
-        expect(res.body.deleted_activities).toBe(ORPHAN_COUNT - 1);
+        const totals = await runSteps(100);
+        expect(totals.steps).toBeGreaterThan(20);
+        // 一条不落：每片都以「本片增量」回报，累加后必须等于孤儿数
+        expect(totals.scannedPayloads).toBe(ORPHAN_COUNT);
+        expect(totals.deletedPayloads).toBe(ORPHAN_COUNT - 1);
+        expect(totals.scannedActivities).toBe(ORPHAN_COUNT);
+        expect(totals.deletedActivities).toBe(ORPHAN_COUNT - 1);
 
         // 一条不落：只剩存活的那条
         expect(await payloadKeys()).toEqual([`record/${SURVIVOR_ID}`]);
@@ -272,5 +374,74 @@ describe("Record Clear Orphans API", () => {
         await dbHelper.execute(`DELETE FROM record WHERE id = ${SURVIVOR_ID}`);
         await dbHelper.execute("DELETE FROM storage_record");
         await dbHelper.execute("DELETE FROM request_activity");
+    });
+
+    /**
+     * payload 与 activity 两段长度不对称时，先扫完的那段不能把游标重置成 null。
+     *
+     * 这是最容易漏的一处：两段各自维护游标，一段先扫完时另一段还在继续。若在该片把
+     * `next_after_key` 回成 null，调用方会拿 null 回去、那段就从头重扫——`scanned` 虚高，
+     * 而 `deleted` 看着正常，所以只断言「删了多少」的用例抓不到。
+     *
+     * 关键：payload 段里必须留**存活**的 key。若全是被删的孤儿，重扫时已经查不到东西、
+     * 只会得到空页，虚高就测不出来。这里让存活 key 排在前面（id 更小），
+     * 于是每多走一片 activity，就会把前面这些存活 key 再数一遍。
+     */
+    it("should not reset a cursor whose segment finished earlier than the other", async () => {
+        await requestHelper.del("/record/clear-all", adminToken);
+        await dbHelper.execute("DELETE FROM storage_record");
+        await dbHelper.execute("DELETE FROM request_activity");
+
+        const ALIVE_BASE = 6000001;
+        const ORPHAN_BASE = 6100001;
+        const ALIVE_COUNT = 60;
+        const ORPHAN_PAYLOAD_COUNT = 60;
+        const ACTIVITY_COUNT = 300;
+        const PAYLOAD_COUNT = ALIVE_COUNT + ORPHAN_PAYLOAD_COUNT;
+
+        // 存活 payload：record 行真实存在，一段扫完后仍留在库里，重扫时会被再次数到
+        for (let i = 0; i < ALIVE_COUNT; i++) {
+            await dbHelper.execute(
+                `INSERT INTO record (id, user_id, model_id, status, tenant_id, start_at) VALUES (${ALIVE_BASE + i}, 1, NULL, 'success', (SELECT id FROM tenant WHERE name = 'main'), datetime('now'))`,
+            );
+        }
+        const aliveValues = Array.from({ length: ALIVE_COUNT }, (_, i) => `('record/${ALIVE_BASE + i}', 1, 'x')`).join(",");
+        await dbHelper.execute(`INSERT INTO storage_record (object_key, size_bytes, data) VALUES ${aliveValues}`);
+
+        const orphanValues = Array.from({ length: ORPHAN_PAYLOAD_COUNT }, (_, i) => `('record/${ORPHAN_BASE + i}', 1, 'x')`).join(",");
+        await dbHelper.execute(`INSERT INTO storage_record (object_key, size_bytes, data) VALUES ${orphanValues}`);
+
+        for (let i = 0; i < ACTIVITY_COUNT; i += 500) {
+            const batch = Array.from({ length: Math.min(500, ACTIVITY_COUNT - i) }, (_, j) => `(${ORPHAN_BASE + i + j}, '[]')`);
+            await dbHelper.execute(`INSERT INTO request_activity (record_id, activities) VALUES ${batch.join(",")}`);
+        }
+
+        // 每片 50 条：payload 3 片扫完（120/50），activity 6 片扫完（300/50）
+        const totals = await runSteps(50);
+
+        // 关键断言：payload 只被检查了一遍。若游标被重置，这里会大于 PAYLOAD_COUNT
+        expect(totals.scannedPayloads).toBe(PAYLOAD_COUNT);
+        expect(totals.deletedPayloads).toBe(ORPHAN_PAYLOAD_COUNT);
+        expect(totals.scannedActivities).toBe(ACTIVITY_COUNT);
+        expect(totals.deletedActivities).toBe(ACTIVITY_COUNT);
+
+        // 存活的 key 一条没动，孤儿全清
+        expect(await countRows("storage_record")).toBe(ALIVE_COUNT);
+        expect(await countRows("request_activity")).toBe(0);
+
+        // 清场
+        await dbHelper.execute(`DELETE FROM record WHERE id >= ${ALIVE_BASE} AND id < ${ALIVE_BASE + ALIVE_COUNT}`);
+        await dbHelper.execute("DELETE FROM storage_record");
+        await dbHelper.execute("DELETE FROM request_activity");
+    });
+
+    it("should cap limit at the configured maximum", async () => {
+        // 超上限的 limit 会被收敛到上限，而不是直接报错：请求方传 1e9 也只搬一页
+        const res = await requestHelper.post(
+            "/record/clear-orphans/step",
+            { limit: 1_000_000_000 },
+            ROOT_TOKEN,
+        );
+        expect(res.status).toBe(200);
     });
 });
