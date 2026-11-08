@@ -1,6 +1,6 @@
 {
     "productName": "GT AI Gateway",
-    "version": "1.9.0-beta1",
+    "version": "1.9.0-beta3",
     "identifier": "com.gtcoder.aigateway",
     "build": {
         "frontendDist": "../../frontend/dist",
