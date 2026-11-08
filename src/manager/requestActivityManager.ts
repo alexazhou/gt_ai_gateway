@@ -1,8 +1,5 @@
 import { SgRequestActivity } from "../model/sgRequestActivity";
-
-// whereIn 的分批大小：SQLite 单条语句的绑定变量数有上限（旧版 999），
-// 一次删上万条 record 时必须分批，否则会直接报 too many SQL variables
-const DELETE_BATCH_SIZE = 500;
+import { bindParamBatchSize } from "../util/db/bindParamUtil";
 
 async function findByRecordId(recordId: number): Promise<SgRequestActivity | null> {
     return await SgRequestActivity.query().where("record_id", recordId).first();
@@ -28,9 +25,10 @@ async function createActivity(recordId: number, activitiesJson: string): Promise
  * 否则整行 JSON 时间线会永久留在库里。返回实际删除行数（调用方用于回报）。
  */
 async function deleteByRecordIds(recordIds: number[]): Promise<number> {
+    const batchSize = bindParamBatchSize();
     let deleted = 0;
-    for (let i = 0; i < recordIds.length; i += DELETE_BATCH_SIZE) {
-        const batch = recordIds.slice(i, i + DELETE_BATCH_SIZE);
+    for (let i = 0; i < recordIds.length; i += batchSize) {
+        const batch = recordIds.slice(i, i + batchSize);
         const affected = await SgRequestActivity.query().whereIn("record_id", batch).delete();
         deleted += Number(affected || 0);
     }
@@ -38,11 +36,19 @@ async function deleteByRecordIds(recordIds: number[]): Promise<number> {
 }
 
 /**
- * 列出表中全部 record_id（只取该列，不加载 activities JSON）。
- * 孤儿清理用：与 record 表 id 集合求差集，得到「指向已删记录」的行。
+ * 按 record_id keyset 分页列出（只取该列，不加载 activities JSON）。
+ *
+ * 孤儿清理用：调用方逐页判定「这批 record_id 指向的 record 是否还存在」，不存在的当场删，
+ * 因此这里必须分页而不是全量 —— 全量返回会把整列的 id 常驻内存，条数一多直接打爆 worker。
+ *
+ * @param afterRecordId 上一页最后一个 record_id；null/undefined 表示从第一页开始
  */
-async function listRecordIds(): Promise<number[]> {
-    const rows = await SgRequestActivity.query().select("record_id").get();
+async function listRecordIdsPage(afterRecordId: number | null | undefined, limit: number): Promise<number[]> {
+    const query = SgRequestActivity.query().select("record_id");
+    if (afterRecordId !== null && afterRecordId !== undefined) {
+        query.where("record_id", ">", afterRecordId);
+    }
+    const rows = await query.orderBy("record_id", "asc").limit(limit).get();
     return rows.all().map(r => Number(r.record_id));
 }
 
@@ -51,5 +57,5 @@ export default {
     updateActivities,
     createActivity,
     deleteByRecordIds,
-    listRecordIds,
+    listRecordIdsPage,
 };

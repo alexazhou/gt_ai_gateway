@@ -2,6 +2,7 @@ import { SgRecord, RECORD_SUMMARY_COLUMNS } from "../model/sgRecord";
 import { SgRecordStatus, FailedCode, RequestActivityStage, ActivityLevel } from "../constants";
 import billingUtil from "../util/protocolUtil/billingUtil";
 import requestActivityService from "../service/requestActivityService";
+import { bindParamBatchSize } from "../util/db/bindParamUtil";
 import type { TenantScope } from "../middleware/tenantScopeMiddleware";
 
 interface RecordListOptions {
@@ -166,14 +167,28 @@ async function listIdsByTenant(tenantId: number): Promise<number[]> {
 
 
 /**
- * 取全部 record id（不区分租户）。孤儿清理用：判断某条附属数据指向的 record 是否还存在。
+ * 从给定的 id 集合里挑出「确实存在」的那些，返回 Set 供调用方求差。
  *
- * 与 `listIdsByTenant` 分开而不是传 `undefined`：后者没有这个语义分支，混用会让
- * 「忘了传租户」和「有意全库扫描」变成同一个调用，看不出意图。
+ * 孤儿清理用：调用方逐页拿到一批候选 id，只想知道这一批里哪些还活着，不需要全库 id 集合
+ * （全量集合的常驻内存与总条数成正比，条数一多就打爆 worker）。
+ *
+ * 内部按 `bindParamBatchSize()` 拆批：单条语句的绑定参数上限在 D1 上只有 100（那里取 90），
+ * 页大小（上千）不能直接塞进一个 IN。
  */
-async function listAllIds(): Promise<number[]> {
-    const rows = await SgRecord.query().select("id").get();
-    return rows.all().map(r => Number(r.id));
+async function listExistingIds(ids: number[]): Promise<Set<number>> {
+    const existing = new Set<number>();
+    if (ids.length === 0) {
+        return existing;
+    }
+    const batchSize = bindParamBatchSize();
+    for (let i = 0; i < ids.length; i += batchSize) {
+        const batch = ids.slice(i, i + batchSize);
+        const rows = await SgRecord.query().select("id").whereIn("id", batch).get();
+        for (const row of rows.all()) {
+            existing.add(Number(row.id));
+        }
+    }
+    return existing;
 }
 
 
@@ -231,7 +246,7 @@ export default {
     list,
     recent,
     listIdsByTenant,
-    listAllIds,
+    listExistingIds,
     deleteById,
     count,
     deleteAll,

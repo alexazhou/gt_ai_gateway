@@ -118,13 +118,22 @@ async function deleteFromTableByPrefix(prefix: string): Promise<number> {
 }
 
 /**
- * 列出某前缀下的全部 object_key（**只取 key 列，不加载 data blob**）。
- * 孤儿清理用：需要先拿到现有 key 才能和 record 表比对，直接 `select("object_key")`
- * 避免把几十 GB 的 BLOB 读进内存。
+ * 按 object_key 升序**分页**列出某前缀下的 key（只取 key 列，不加载 data blob）。
+ *
+ * 翻页用 keyset（`object_key > afterKey`）而不是 `LIMIT/OFFSET`：调用方是边扫边删，
+ * 删掉前面的行会让后面所有行的 offset 前移，用 offset 翻页会成片跳过。
+ * `object_key` 是主键，keyset 条件 + `ORDER BY object_key` 走同一棵索引，代价与页码无关。
+ *
+ * @param afterKey 上一页最后一个 key；null/undefined 表示从该前缀的第一页开始
+ * @param limit    本页最多返回多少条
  */
-async function listKeysByPrefix(prefix: string): Promise<string[]> {
+async function listKeysPage(prefix: string, afterKey: string | null | undefined, limit: number): Promise<string[]> {
     const pattern = `${prefix}%`;
-    const rows = await SgStorageRecord.query().select("object_key").where("object_key", "like", pattern).get();
+    const query = SgStorageRecord.query().select("object_key").where("object_key", "like", pattern);
+    if (afterKey) {
+        query.where("object_key", ">", afterKey);
+    }
+    const rows = await query.orderBy("object_key", "asc").limit(limit).get();
     return rows.all().map(r => String(r.object_key));
 }
 
@@ -135,5 +144,5 @@ export default {
     getFromTable,
     deleteFromTable,
     deleteFromTableByPrefix,
-    listKeysByPrefix,
+    listKeysPage,
 };

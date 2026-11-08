@@ -139,51 +139,134 @@ async function deleteByPrefixFromLocation(
 }
 
 /**
- * 列出某存储位置下某前缀的全部 object_key（**不含 data 内容**）。
- * R2 侧按 cursor 翻页；DATABASE 侧只 select key 列，不把 BLOB 读进内存。
+ * 分页列出某存储位置下某前缀的 object_key（**不含 data 内容**）。
+ *
+ * - R2：用 `startAfter` 做 keyset 翻页（不用 cursor，因为调用方边扫边删，
+ *   删过的 key 不该再影响下一页的起点）；
+ * - DATABASE：`object_key` 主键 keyset 翻页，只 select key 列，不把 BLOB 读进内存。
+ *
+ * @param afterKey 上一页最后一个 key；null/undefined 表示从该前缀的第一页开始
  */
-async function listKeysFromLocation(
+async function listKeyPageFromLocation(
     location: RecordPayloadStorage.DATABASE | RecordPayloadStorage.R2,
     prefix: string,
+    afterKey: string | null | undefined,
+    limit: number,
 ): Promise<string[]> {
     if (location === RecordPayloadStorage.R2) {
-        const bucket = getWorkerBucket();
-        const keys: string[] = [];
-        let cursor: string | undefined;
-        do {
-            const page = await bucket.list({ cursor, limit: 1000, prefix });
-            keys.push(...page.objects.map(object => object.key));
-            cursor = page.truncated ? page.cursor : undefined;
-        } while (cursor);
-        return keys;
+        const page = await getWorkerBucket().list({
+            prefix,
+            limit,
+            ...(afterKey ? { startAfter: afterKey } : {}),
+        });
+        return page.objects.map(object => object.key);
     }
 
-    return storageManager.listKeysByPrefix(prefix);
+    return storageManager.listKeysPage(prefix, afterKey, limit);
 }
 
 /**
- * 列出某前缀下的全部 object_key（主存储 + 备用存储，**去重后返回 key 列表**）。
+ * 分页列出某前缀下的 object_key（主存储 + 备用存储合并去重，按 key 升序）。
  *
- * 两侧都列：payload 可能因历史切换配置而残留在另一侧，只扫当前存储位置会漏掉孤儿。
- * 去重是为了让调用方拿到的「条数」等于 payload 条数，而不是「存放份数」；
- * 真正的删除走 `deleteMany` → `deleteObject`，它本来就会把主备两侧一起删。
+ * 两侧都扫：payload 可能因历史切换配置而残留在另一侧，只扫当前存储位置会漏掉孤儿。
+ * 合并方式是「两个有序流归并」，不需要把任一侧全量读进内存：
+ * 每侧各自维护 keyset 游标，反复取两侧当前最小 key 产出，同 key 只产出一次。
+ * 真正删除走 `deleteObject`，它本来就把主备两侧一起删。
+ *
+ * 返回值语义：只保证「按 key 升序、不重复、覆盖主备两侧」，条数即 payload 条数（不是存放份数）。
  */
-async function listKeysByPrefix(prefix: string): Promise<string[]> {
+async function listKeyPage(
+    prefix: string,
+    afterKey: string | null | undefined,
+    limit: number,
+): Promise<string[]> {
     assertValidPrefix(prefix);
 
     const location = await resolveStorageLocation();
     assertLocationAvailable(location);
 
-    const keys = new Set(await listKeysFromLocation(location, prefix));
-
     const fallback = alternateStorageLocation(location);
-    if (isLocationAvailable(fallback)) {
-        for (const key of await listKeysFromLocation(fallback, prefix)) {
-            keys.add(key);
-        }
+    if (!isLocationAvailable(fallback)) {
+        return await listKeyPageFromLocation(location, prefix, afterKey, limit);
     }
 
-    return [...keys];
+    return await mergeKeyStreams(
+        cursor => listKeyPageFromLocation(location, prefix, cursor, limit),
+        cursor => listKeyPageFromLocation(fallback, prefix, cursor, limit),
+        afterKey,
+        limit,
+    );
+}
+
+
+/**
+ * 把两个「按 key 升序分页」的流归并成一条升序去重流，只取前 limit 条。
+ *
+ * 两侧各缓存一页（每页 limit 条），每次吐出当前最小的 key 并推进该侧游标；
+ * 某一侧耗尽后直接抽另一侧。内存上限 ≈ 2×limit，与总条数无关。
+ *
+ * 去重按「相同 key 连续出现只吐一次」实现：两流都升序，同一个 key 在两流里必然相邻产出。
+ */
+async function mergeKeyStreams(
+    fetchPrimary: (afterKey: string | null) => Promise<string[]>,
+    fetchFallback: (afterKey: string | null) => Promise<string[]>,
+    afterKey: string | null | undefined,
+    limit: number,
+): Promise<string[]> {
+    const state = {
+        primary: { buffer: [] as string[], cursor: afterKey ?? null, done: false },
+        fallback: { buffer: [] as string[], cursor: afterKey ?? null, done: false },
+    };
+
+    const refill = async (side: typeof state.primary, fetch: (afterKey: string | null) => Promise<string[]>) => {
+        if (side.buffer.length > 0 || side.done) {
+            return;
+        }
+        const page = await fetch(side.cursor);
+        side.buffer = page;
+        if (page.length === 0) {
+            side.done = true;
+            return;
+        }
+        side.cursor = page[page.length - 1];
+    };
+
+    const out: string[] = [];
+    let lastEmitted: string | null = null;
+
+    while (out.length < limit) {
+        await refill(state.primary, fetchPrimary);
+        await refill(state.fallback, fetchFallback);
+
+        const headPrimary = state.primary.buffer[0];
+        const headFallback = state.fallback.buffer[0];
+
+        if (headPrimary === undefined && headFallback === undefined) {
+            break;
+        }
+
+        let next: string;
+        if (headPrimary === undefined) {
+            next = state.fallback.buffer.shift() as string;
+        } else if (headFallback === undefined) {
+            next = state.primary.buffer.shift() as string;
+        } else if (headPrimary <= headFallback) {
+            next = state.primary.buffer.shift() as string;
+            if (headPrimary === headFallback) {
+                state.fallback.buffer.shift();
+            }
+        } else {
+            next = state.fallback.buffer.shift() as string;
+        }
+
+        if (next === lastEmitted) {
+            continue;
+        }
+        lastEmitted = next;
+        out.push(next);
+    }
+
+    return out;
 }
 
 
@@ -282,6 +365,6 @@ export default {
     deleteByPrefix,
     putText,
     getText,
-    listKeysByPrefix,
+    listKeyPage,
     deleteMany,
 };

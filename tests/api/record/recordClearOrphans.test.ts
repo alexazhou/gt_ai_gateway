@@ -204,4 +204,73 @@ describe("Record Clear Orphans API", () => {
         // 清理干净，避免污染后续用例
         await dbHelper.execute("DELETE FROM storage_record WHERE object_key = ?", ["other/keep-me"]);
     });
+
+    /**
+     * 跨页用例：孤儿条数超过一页（实现里每页 1000 条），必须一条不落地清掉。
+     *
+     * 这组数据专门用来卡住「翻页写错」的两类 bug：
+     * - 用 `LIMIT/OFFSET` 翻页：边扫边删会让后面的行 offset 前移，成片跳过（只剩 1/2~1/3 被删）；
+     * - 存活记录混在孤儿中间：把整页当孤儿删会误删存活 payload。
+     *
+     * 因此这里造 2499 条孤儿，并把一条**存活**记录的 key / activity 落在孤儿 id 区间正中，
+     * 让它在第一页里与大量孤儿相邻 —— 误删与否一眼可见。
+     */
+    it("should clear orphans spanning multiple pages without skipping or over-deleting", async () => {
+        await requestHelper.del("/record/clear-all", adminToken);
+        // 直接清空两张附属表，保证下面断言的条数只来自本用例造的数据
+        await dbHelper.execute("DELETE FROM storage_record");
+        await dbHelper.execute("DELETE FROM request_activity");
+
+        const SURVIVOR_ID = 5000100;
+        const ORPHAN_BASE = 5000001;
+        const ORPHAN_COUNT = 2500;
+
+        // 存活记录：record 行真实存在，payload / activity 落在孤儿 id 区间中间
+        // tenant_id 落 main 主租户，否则 admin 视角（按租户过滤）查不到这条记录
+        await dbHelper.execute(
+            `INSERT INTO record (id, user_id, model_id, status, tenant_id, start_at) VALUES (${SURVIVOR_ID}, 1, NULL, 'success', (SELECT id FROM tenant WHERE name = 'main'), datetime('now'))`,
+        );
+        await dbHelper.execute(`INSERT INTO storage_record (object_key, size_bytes, data) VALUES ('record/${SURVIVOR_ID}', 1, 'x')`);
+        await dbHelper.execute(`INSERT INTO request_activity (record_id, activities) VALUES (${SURVIVOR_ID}, '[]')`);
+
+        const orphanIds: number[] = [];
+        for (let i = 0; i < ORPHAN_COUNT; i++) {
+            const id = ORPHAN_BASE + i;
+            if (id !== SURVIVOR_ID) {
+                orphanIds.push(id);
+            }
+        }
+
+        // 分批插入，避免单条语句过大（值全部是数字字面量，无注入面）
+        const INSERT_BATCH = 500;
+        for (let i = 0; i < orphanIds.length; i += INSERT_BATCH) {
+            const batch = orphanIds.slice(i, i + INSERT_BATCH);
+            const payloadValues = batch.map(id => `('record/${id}', 1, 'x')`).join(",");
+            await dbHelper.execute(`INSERT INTO storage_record (object_key, size_bytes, data) VALUES ${payloadValues}`);
+            const activityValues = batch.map(id => `(${id}, '[]')`).join(",");
+            await dbHelper.execute(`INSERT INTO request_activity (record_id, activities) VALUES ${activityValues}`);
+        }
+
+        // 前置：确实是跨页规模（> 2 页），否则这条用例证明不了翻页
+        expect(orphanIds.length).toBe(ORPHAN_COUNT - 1);
+        expect(await countRows("storage_record")).toBeGreaterThan(2000);
+
+        const res = await requestHelper.del("/record/clear-orphans", ROOT_TOKEN);
+        expect(res.status, JSON.stringify(res.body)).toBe(200);
+        expect(res.body.cleared_payloads).toBe(ORPHAN_COUNT - 1);
+        expect(res.body.deleted_activities).toBe(ORPHAN_COUNT - 1);
+
+        // 一条不落：只剩存活的那条
+        expect(await payloadKeys()).toEqual([`record/${SURVIVOR_ID}`]);
+        expect(await activityRecordIds()).toEqual([SURVIVOR_ID]);
+
+        // 活着的记录连原文都还能读出来（不是只留了个 key）
+        const survivorRes = await requestHelper.get(`/record/${SURVIVOR_ID}`, adminToken);
+        expect(survivorRes.status).toBe(200);
+
+        // 清场：把这条手工插入的记录删掉，避免污染其他测试文件
+        await dbHelper.execute(`DELETE FROM record WHERE id = ${SURVIVOR_ID}`);
+        await dbHelper.execute("DELETE FROM storage_record");
+        await dbHelper.execute("DELETE FROM request_activity");
+    });
 });

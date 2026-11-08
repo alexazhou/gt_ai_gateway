@@ -12,6 +12,13 @@ interface RecordPayload {
 
 const RECORD_PAYLOAD_PREFIX = "record/";
 
+/**
+ * 孤儿清理的分页大小（每页拉取多少条候选 key / record_id）。
+ * 1000 只影响「一趟往返搬多少条候选」，不参与任何 SQL 的 `IN (...)` —— 存在性查询会再按
+ * `bindParamBatchSize()` 拆批（D1 取 90），所以这个值可以远大于单条语句的绑定参数上限。
+ */
+const CLEAR_ORPHANS_PAGE_SIZE = 1000;
+
 function isLogEnabled(): boolean {
     return process.env.RECORD_LOG_ENABLED === "true";
 }
@@ -148,26 +155,46 @@ export interface ClearOrphansResult {
  * 存量清理与「以后不再产生」是两件事：级联删除的修复只保证后者，历史上已经留下的孤儿靠这里清。
  */
 async function clearOrphans(): Promise<ClearOrphansResult> {
-    const existingRecordIds = await recordManager.listAllIds();
-    const existing = new Set(existingRecordIds);
+    // ① payload：key 形如 record/{id}，id 在 record 表里不再存在即孤儿
+    let clearedPayloads = 0;
+    let lastKey: string | null = null;
 
-    // ① payload：key 形如 record/{id}，id 不在现存集合里即孤儿
-    const orphanPayloadKeys: string[] = [];
-    for (const key of await objectStorageService.listKeysByPrefix(RECORD_PAYLOAD_PREFIX)) {
-        const rawId = key.slice(RECORD_PAYLOAD_PREFIX.length);
-        const id = Number(rawId);
+    while (true) {
+        const keys = await objectStorageService.listKeyPage(RECORD_PAYLOAD_PREFIX, lastKey, CLEAR_ORPHANS_PAGE_SIZE);
+        if (keys.length === 0) {
+            break;
+        }
+        // 游标推进到本页最后一个 key：删除本页孤儿不影响「key 更大」的后续分页
+        lastKey = keys[keys.length - 1];
+
         // 只处理形如 record/<整数> 的 key：前缀下若有别的命名（未来扩展）一律不动，宁可漏删不误删
-        if (!rawId || !Number.isInteger(id) || String(id) !== rawId) {
+        const pageIds: number[] = [];
+        const keyByRecordId = new Map<number, string>();
+        for (const key of keys) {
+            const rawId = key.slice(RECORD_PAYLOAD_PREFIX.length);
+            const id = Number(rawId);
+            if (!rawId || !Number.isInteger(id) || String(id) !== rawId) {
+                continue;
+            }
+            pageIds.push(id);
+            keyByRecordId.set(id, key);
+        }
+        if (pageIds.length === 0) {
             continue;
         }
-        if (!existing.has(id)) {
-            orphanPayloadKeys.push(key);
+
+        const existing = await recordManager.listExistingIds(pageIds);
+        const orphanKeys = pageIds.filter(id => !existing.has(id)).map(id => keyByRecordId.get(id) as string);
+        if (orphanKeys.length > 0) {
+            clearedPayloads += await objectStorageService.deleteMany(orphanKeys);
         }
     }
-    const clearedPayloads = await objectStorageService.deleteMany(orphanPayloadKeys);
 
-    // ② activity：record_id 不在现存集合里即孤儿
-    const deletedActivities = await requestActivityService.clearOrphans(existingRecordIds);
+    // ② activity：record_id 不在 record 表里即孤儿（同样边遍历边删）
+    const deletedActivities = await requestActivityService.clearOrphans(
+        CLEAR_ORPHANS_PAGE_SIZE,
+        recordIds => recordManager.listExistingIds(recordIds),
+    );
 
     return { clearedPayloads, deletedActivities };
 }
