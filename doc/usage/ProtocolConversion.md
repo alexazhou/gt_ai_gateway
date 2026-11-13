@@ -138,3 +138,32 @@ for chunk in response:
 - OpenAI `tool` 结果后紧跟 user 内容时，转换到 Anthropic 会合并到同一条 user 消息，不再产生连续 user turn
 - Anthropic `image` 块缺少有效 `source` / `data` / `url` 时，转换为 OpenAI / Responses 会明确返回 400
 - 少数供应商对内容块顺序或字段有额外要求，如遇问题请保留实际请求体用于排查
+
+## 协议转换文档索引
+
+三种协议的原始请求与响应格式分别见 [Chat Completions](../protocol/OpenAiProtocol.md)、[Responses](../protocol/OpenAiResponsesProtocol.md)和 [Anthropic Messages](../protocol/AnthropicProtocol.md)。转换文档集中在 `doc/protocol/conversion/`，每份只描述一对协议的双向关系：
+
+| 协议组合 | 转换文档 |
+|---|---|
+| Chat Completions ↔ Anthropic | [ChatCompletionsAnthropicConversion.md](../protocol/conversion/ChatCompletionsAnthropicConversion.md) |
+| Chat Completions ↔ Responses | [ChatCompletionsResponsesConversion.md](../protocol/conversion/ChatCompletionsResponsesConversion.md) |
+| Responses ↔ Anthropic | [ResponsesAnthropicConversion.md](../protocol/conversion/ResponsesAnthropicConversion.md) |
+
+每份文档按相同结构说明转换入口、两个方向的请求、非流式响应、流式事件、实现限制和代码位置。表格记录的是当前网关行为，字段能映射不等于协议的全部能力都能无损往返。
+
+## 响应处理与记录
+
+`senderService` 根据客户端协议（clientFormat）和上游协议（upstreamFormat）调用 `ConverterFactory.create()`。协议一致时返回 null，沿用透传路径；协议不同时，用转换器将客户端请求体转为上游请求体。上游为 Chat Completions 且请求启用流式时，转发层还会注入 `stream_options: {include_usage: true}`。
+
+转换器类名表示请求方向，例如 `OpenAIToAnthropicConverter`：其 `convertRequest` 将 Chat Completions 请求转为 Anthropic，而 `convertResponse` / `convertStreamEvent` 将 Anthropic 响应转回 Chat Completions。
+
+```text
+请求：客户端协议 → convertRequestBody → 上游协议
+响应：上游协议   → convertResponse / convertStreamEvent → 客户端协议
+```
+
+流式路径先将上游事件转换为客户端协议事件，再返回客户端，并交给客户端协议对应的 Accumulator 累积，用于请求记录和计费：Chat Completions 使用 OpenAIChatAccumulator，Anthropic 使用 AnthropicAccumulator，Responses 使用 ResponsesAccumulator。Accumulator 不负责跨协议转换，也不会将其累积结果作为新的流式事件返回客户端。
+
+非流式路径将转换后的客户端响应体返回并落库，usage 则从上游原始响应按 upstreamFormat 解析。因此，转换后响应中的 usage 字段与计费使用的原始 usage 应分别看待；各方向未完整映射的缓存 / 推理明细见对应转换文档。
+
+相关实现见 [senderService.ts](../../src/service/senderService.ts)、[responseHandlerService.ts](../../src/service/responseHandlerService.ts)和 [ConverterFactory.ts](../../src/util/protocolConverter/ConverterFactory.ts)。[ProtocolConversionIntegration.md](../protocol/ProtocolConversionIntegration.md) 保留初次集成时的历史方案，其中旧的累积器与转换范围描述不代表当前行为。

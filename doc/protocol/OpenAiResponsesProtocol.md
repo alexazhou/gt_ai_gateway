@@ -1,5 +1,7 @@
 # OpenAI Responses API 协议文档
 
+网关的跨协议转换见 [Chat Completions ↔ Responses](./conversion/ChatCompletionsResponsesConversion.md)和 [Responses ↔ Anthropic](./conversion/ResponsesAnthropicConversion.md)。
+
 本文档描述 OpenAI Responses API 的请求和响应格式，包括非流式和流式两种模式。
 
 ---

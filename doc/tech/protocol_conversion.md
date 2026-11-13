@@ -1,5 +1,7 @@
 # 协议转换功能说明
 
+各协议组合的字段与流式事件映射见 [Chat Completions ↔ Anthropic](../protocol/conversion/ChatCompletionsAnthropicConversion.md)、[Chat Completions ↔ Responses](../protocol/conversion/ChatCompletionsResponsesConversion.md)和 [Responses ↔ Anthropic](../protocol/conversion/ResponsesAnthropicConversion.md)。
+
 ## 背景
 
 网关同时支持多种客户端协议和多种上游协议。客户端请求的协议不一定和上游模型服务支持的协议一致，因此发送请求前需要按模型和供应商配置选择上游协议，并在必要时执行协议转换。

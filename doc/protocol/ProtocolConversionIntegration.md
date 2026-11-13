@@ -1,6 +1,6 @@
 # 协议转换集成设计文档
 
-> **历史设计稿**：本文记录初次引入协议转换时的集成方案，其中部分内容（如“Responses API 不参与转换”“图片只做占位处理”“仅支持 OpenAI ↔ Anthropic”“累积器按上游格式累积”）已被后续实现取代。当前转换行为请以 [MessageFormatConversion.md](./MessageFormatConversion.md)、[ResponsesAPIConversion.md](./ResponsesAPIConversion.md) 和 [ProtocolConversion.md](../usage/ProtocolConversion.md) 为准。
+> **历史设计稿**：本文记录初次引入协议转换时的集成方案，其中部分内容（如“Responses API 不参与转换”“图片只做占位处理”“仅支持 OpenAI ↔ Anthropic”“累积器按上游格式累积”）已被后续实现取代。当前转换行为请以 [Chat Completions ↔ Anthropic](./conversion/ChatCompletionsAnthropicConversion.md)、[Chat Completions ↔ Responses](./conversion/ChatCompletionsResponsesConversion.md)、[Responses ↔ Anthropic](./conversion/ResponsesAnthropicConversion.md) 和[自动协议转换](../usage/ProtocolConversion.md)为准。
 
 本文档描述将 `protocolConverter.ts` 集成到网关转发流程中的完整方案。在开发代码之前，需以此文档为准对齐实现逻辑。
 
@@ -300,7 +300,7 @@ class OpenAIToAnthropicStreamConverter {
 
 ### 6.4 流式转换的 SSE 累积（Accumulator）
 
-> **已过时（2026-10-21）**：当前 Accumulator 按**客户端协议**累积，跨格式时消费的是 `convertStreamEvent` 转换后的事件；本节“按上游格式累积”的表述仅反映当时设计，现状见 [MessageFormatConversion.md](./MessageFormatConversion.md) 第 5 / 10 节。
+> **已过时（2026-10-21）**：当前 Accumulator 按**客户端协议**累积，跨格式时消费的是 `convertStreamEvent` 转换后的事件；本节“按上游格式累积”的表述仅反映当时设计，现状见[自动协议转换：响应处理与记录](../usage/ProtocolConversion.md#响应处理与记录)。
 
 流式转换模式下，`SSEAccumulator` 仍然需要按**上游格式**累积，用于记录和计费：
 
@@ -647,7 +647,7 @@ async function handleNonStreamResponse(c, upstreamRes, record, modelConfig, user
 ## 15. 已知限制与后续优化
 
 1. **image 内容块转换不完整**：当前 Anthropic 的 `image` 块转 OpenAI 时只做了占位处理，完整 `image_url` 格式支持需后续补齐
-2. **thinking 的 signature 字段**：非流式转换中已保留，流式 `signature_delta` 在 Anthropic→OpenAI 方向暂不映射（OpenAI 无对应字段）
+2. **thinking 的 signature 字段**：当时设计记为非流式保留、流式暂不映射；当前 Chat Completions 转换路径无法保留签名。现状与多轮回传影响见 [Chat Completions ↔ Anthropic：转换限制](./conversion/ChatCompletionsAnthropicConversion.md#5-转换限制)。
 3. **模型名称**：客户端需自行使用上游支持的模型名，网关不自动映射模型名
 4. **Responses API 不参与转换**：若 `upstream_format` 或 `clientFormat` 为 `responses`，直接透传
 5. **只支持 OpenAI ↔ Anthropic 双向转换**：Google 等其他格式暂不支持

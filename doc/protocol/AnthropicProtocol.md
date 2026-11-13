@@ -1,5 +1,7 @@
 # Anthropic Messages API 协议文档
 
+网关的跨协议转换见 [Chat Completions ↔ Anthropic](./conversion/ChatCompletionsAnthropicConversion.md)和 [Responses ↔ Anthropic](./conversion/ResponsesAnthropicConversion.md)。
+
 本文档描述 Anthropic Messages API 的请求 and 响应格式，特别是流式响应（SSE）的事件类型 Fluency。
 
 ---

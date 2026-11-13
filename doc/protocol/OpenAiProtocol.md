@@ -1,5 +1,7 @@
 # OpenAI Chat Completions API 协议文档
 
+网关的跨协议转换见 [Chat Completions ↔ Anthropic](./conversion/ChatCompletionsAnthropicConversion.md)和 [Chat Completions ↔ Responses](./conversion/ChatCompletionsResponsesConversion.md)。
+
 本文档描述 OpenAI Chat Completions API 的请求和响应格式，特别是流式响应（SSE）的实现细节。
 
 ---

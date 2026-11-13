@@ -17,6 +17,9 @@
 | **doc/protocol/OpenAiProtocol.md** | OpenAI Chat Completions 协议说明文档 |
 | **doc/protocol/OpenAiResponsesProtocol.md** | OpenAI Responses API 协议说明文档 |
 | **doc/protocol/AnthropicProtocol.md** | Anthropic 协议说明文档 |
+| **doc/protocol/conversion/ChatCompletionsAnthropicConversion.md** | Chat Completions ↔ Anthropic 的请求、非流式响应与流式事件转换 |
+| **doc/protocol/conversion/ChatCompletionsResponsesConversion.md** | Chat Completions ↔ Responses 的请求、非流式响应与流式事件转换 |
+| **doc/protocol/conversion/ResponsesAnthropicConversion.md** | Responses ↔ Anthropic 的请求、非流式响应与流式事件转换 |
 | **doc/StreamLogging.md** | 流式日志相关说明 |
 | **doc/design/设计文档规范.md** | 设计文档规范：目录组织、文档命名规范、新增功能流程 |
 | **doc/design/ROADMAP.md** | 实施路线图，按发布版本（前两位）概述各版本里程碑能力 |
