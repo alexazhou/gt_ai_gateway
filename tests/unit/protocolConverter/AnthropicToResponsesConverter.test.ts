@@ -14,6 +14,7 @@ import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterF
 import { ReasoningEffort } from "../../../src/util/protocol/commonTypes";
 import { ApiFormat } from "../../../src/constants";
 import anthropicAccumulator from "../../../src/util/accumulator/anthropicAccumulator";
+import protocolConverterUtil from "../../../src/util/protocolConverter/protocolConverterUtil";
 import type {
     AnthropicContentBlock,
     AnthropicRequest,
@@ -320,6 +321,11 @@ describe("AnthropicToResponsesConverter - convertRequest", () => {
     });
 
     it("should convert thinking block to reasoning item", () => {
+        const sealedSig = protocolConverterUtil.sealThinkingSignature(
+            "responses",
+            "sig_abc",
+            { model: "claude-3-sonnet-20240229", thinking: "Let me reason..." },
+        );
         const req: AnthropicRequest = {
             model: "claude-3-sonnet-20240229",
             max_tokens: 1024,
@@ -327,7 +333,7 @@ describe("AnthropicToResponsesConverter - convertRequest", () => {
                 {
                     role: "assistant",
                     content: [
-                        { type: "thinking", thinking: "Let me reason...", signature: "sig_abc" },
+                        { type: "thinking", thinking: "Let me reason...", signature: sealedSig },
                         { type: "text", text: "Here's the answer." },
                     ],
                 },
@@ -610,7 +616,11 @@ describe("AnthropicToResponsesConverter - convertResponse", () => {
         expect(result.content[0]).toEqual({
             type: "thinking",
             thinking: "Let me think...",
-            signature: "enc_abc",
+            signature: protocolConverterUtil.sealThinkingSignature(
+                "responses",
+                "enc_abc",
+                { model: "gpt-4.1", thinking: "Let me think..." },
+            ),
         });
         expect(result.content[1]).toEqual({ type: "text", text: "Here's my answer." });
     });

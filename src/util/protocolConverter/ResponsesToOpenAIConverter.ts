@@ -21,7 +21,7 @@ import {
     buildThinkingConfigFromOpenAIResponses,
     thinkingConfigToOpenAI,
 } from "./thinkingConfig";
-import protocolConverterUtil from "./protocolConverterUtil";
+import protocolConverterUtil, { type RawOpenAIUsage } from "./protocolConverterUtil";
 
 /**
  * Responses API → OpenAI Chat Completions 转换器
@@ -36,17 +36,21 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
     private messageOpen = false;
     private contentPartOpen = false;
     private textBuf = "";
-    private inputTokens = 0;
-    private outputTokens = 0;
-    private cacheReadTokens = 0;
+    private rawUsage: RawOpenAIUsage = {};
     private reasoningActive = false;
     private reasoningItemId = "";
     private reasoningBuf = "";
-    private reasoningIndex = 0;
+    private reasoningOutputIndex = -1;
+    private messageOutputIndex = -1;
+    private nextOutputIndex = 0;
+    private outputOrder: Array<{ kind: "reasoning" } | { kind: "message" } | { kind: "function_call"; toolIndex: number }> = [];
     private funcArgsBuf: Record<number, string> = {};
     private funcNames: Record<number, string> = {};
     private funcCallIds: Record<number, string> = {};
+    private funcOutputIndices: Record<number, number> = {};
+    private closedFuncIndices = new Set<number>();
     private createdEmitted = false;
+    private terminalEmitted = false;
     private finishReason: string | null = null;
 
     // ─── 请求转换 ───
@@ -351,34 +355,28 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
         }
 
         const finishReason = upstreamRes.choices?.[0]?.finish_reason;
-        const status = (finishReason === "stop" || finishReason === "tool_calls" || finishReason === "length" || finishReason === "content_filter")
-            ? "completed"
-            : "completed"; // OpenAI 没有显式 failed finish_reason
+        const { status, incompleteDetails } = this.mapFinishReason(finishReason);
 
         return {
             id: responseId,
             object: "response",
             created_at: Math.floor(Date.now() / 1000),
             status,
+            ...(incompleteDetails ? { incomplete_details: incompleteDetails } : {}),
             model: upstreamRes.model,
             output,
-            usage: {
-                input_tokens: upstreamRes.usage?.prompt_tokens || 0,
-                output_tokens: upstreamRes.usage?.completion_tokens || 0,
-                total_tokens: upstreamRes.usage?.total_tokens || 0,
-                input_tokens_details: upstreamRes.usage?.prompt_tokens_details?.cached_tokens
-                    ? { cached_tokens: upstreamRes.usage.prompt_tokens_details.cached_tokens }
-                    : undefined,
-                output_tokens_details: upstreamRes.usage?.completion_tokens_details?.reasoning_tokens
-                    ? { reasoning_tokens: upstreamRes.usage.completion_tokens_details.reasoning_tokens }
-                    : undefined,
-            },
+            usage: protocolConverterUtil.openAIUsageToResponses(
+                protocolConverterUtil.mergeOpenAIUsage({}, upstreamRes.usage),
+            ),
         };
     }
 
     // ─── 流式响应转换：OpenAI SSE → Responses SSE ───
 
     protected doConvertStreamEvent(data: Record<string, unknown>, rawDataStr: string): ProtocolStreamEvent[] {
+        if (this.terminalEmitted) {
+            return [];
+        }
         const out: ProtocolStreamEvent[] = [];
         const chunk = data as unknown as OpenAIChunk;
 
@@ -438,15 +436,16 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
             if (delta?.reasoning_content) {
                 if (!this.reasoningActive) {
                     this.reasoningActive = true;
-                    this.reasoningItemId = `rs_${this.responseId}_0`;
+                    this.reasoningOutputIndex = this.nextOutputIndex++;
+                    this.outputOrder.push({ kind: "reasoning" });
+                    this.reasoningItemId = `rs_${this.responseId}_${this.reasoningOutputIndex}`;
                     this.reasoningBuf = "";
-                    this.reasoningIndex = 0;
 
                     out.push({
                         data: JSON.stringify({
                             type: "response.output_item.added",
                             sequence_number: this.nextSeq(),
-                            output_index: 0,
+                            output_index: this.reasoningOutputIndex,
                             item: {
                                 id: this.reasoningItemId,
                                 type: "reasoning",
@@ -460,7 +459,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                             type: "response.reasoning_summary_part.added",
                             sequence_number: this.nextSeq(),
                             item_id: this.reasoningItemId,
-                            output_index: 0,
+                            output_index: this.reasoningOutputIndex,
                             summary_index: 0,
                             part: { type: "summary_text", text: "" },
                         }),
@@ -473,7 +472,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                         type: "response.reasoning_summary_text.delta",
                         sequence_number: this.nextSeq(),
                         item_id: this.reasoningItemId,
-                        output_index: 0,
+                        output_index: this.reasoningOutputIndex,
                         summary_index: 0,
                         delta: delta.reasoning_content,
                     }),
@@ -483,12 +482,14 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
             // delta.content → message
             if (delta?.content) {
                 if (!this.messageOpen) {
-                    this.currentMsgId = `msg_${this.responseId}_0`;
+                    this.messageOutputIndex = this.nextOutputIndex++;
+                    this.outputOrder.push({ kind: "message" });
+                    this.currentMsgId = `msg_${this.responseId}_${this.messageOutputIndex}`;
                     out.push({
                         data: JSON.stringify({
                             type: "response.output_item.added",
                             sequence_number: this.nextSeq(),
-                            output_index: 0,
+                            output_index: this.messageOutputIndex,
                             item: {
                                 id: this.currentMsgId,
                                 type: "message",
@@ -507,7 +508,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                             type: "response.content_part.added",
                             sequence_number: this.nextSeq(),
                             item_id: this.currentMsgId,
-                            output_index: 0,
+                            output_index: this.messageOutputIndex,
                             content_index: 0,
                             part: { type: "output_text", text: "" },
                         }),
@@ -521,7 +522,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                         type: "response.output_text.delta",
                         sequence_number: this.nextSeq(),
                         item_id: this.currentMsgId,
-                        output_index: 0,
+                        output_index: this.messageOutputIndex,
                         content_index: 0,
                         delta: delta.content,
                     }),
@@ -535,6 +536,9 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
 
                     if (tc.id && !this.funcCallIds[idx]) {
                         // 新的 tool call
+                        const outIdx = this.nextOutputIndex++;
+                        this.funcOutputIndices[idx] = outIdx;
+                        this.outputOrder.push({ kind: "function_call", toolIndex: idx });
                         this.funcCallIds[idx] = tc.id;
                         this.funcNames[idx] = tc.function?.name || "";
                         this.funcArgsBuf[idx] = "";
@@ -543,7 +547,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                             data: JSON.stringify({
                                 type: "response.output_item.added",
                                 sequence_number: this.nextSeq(),
-                                output_index: idx,
+                                output_index: outIdx,
                                 item: {
                                     id: `fc_${tc.id}`,
                                     type: "function_call",
@@ -557,13 +561,14 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                     }
 
                     if (tc.function?.arguments) {
+                        const outIdx = this.funcOutputIndices[idx] ?? idx;
                         this.funcArgsBuf[idx] = (this.funcArgsBuf[idx] || "") + tc.function.arguments;
                         out.push({
                             data: JSON.stringify({
                                 type: "response.function_call_arguments.delta",
                                 sequence_number: this.nextSeq(),
                                 item_id: `fc_${this.funcCallIds[idx]}`,
-                                output_index: idx,
+                                output_index: outIdx,
                                 delta: tc.function.arguments,
                             }),
                         });
@@ -582,7 +587,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                             type: "response.reasoning_summary_text.done",
                             sequence_number: this.nextSeq(),
                             item_id: this.reasoningItemId,
-                            output_index: 0,
+                            output_index: this.reasoningOutputIndex,
                             summary_index: 0,
                             text: this.reasoningBuf,
                         }),
@@ -592,7 +597,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                             type: "response.reasoning_summary_part.done",
                             sequence_number: this.nextSeq(),
                             item_id: this.reasoningItemId,
-                            output_index: 0,
+                            output_index: this.reasoningOutputIndex,
                             summary_index: 0,
                             part: { type: "summary_text", text: this.reasoningBuf },
                         }),
@@ -601,7 +606,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                         data: JSON.stringify({
                             type: "response.output_item.done",
                             sequence_number: this.nextSeq(),
-                            output_index: 0,
+                            output_index: this.reasoningOutputIndex,
                             item: {
                                 id: this.reasoningItemId,
                                 type: "reasoning",
@@ -619,7 +624,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                             type: "response.output_text.done",
                             sequence_number: this.nextSeq(),
                             item_id: this.currentMsgId,
-                            output_index: 0,
+                            output_index: this.messageOutputIndex,
                             content_index: 0,
                             text: this.textBuf,
                         }),
@@ -629,7 +634,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                             type: "response.content_part.done",
                             sequence_number: this.nextSeq(),
                             item_id: this.currentMsgId,
-                            output_index: 0,
+                            output_index: this.messageOutputIndex,
                             content_index: 0,
                             part: { type: "output_text", text: this.textBuf },
                         }),
@@ -638,7 +643,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                         data: JSON.stringify({
                             type: "response.output_item.done",
                             sequence_number: this.nextSeq(),
-                            output_index: 0,
+                            output_index: this.messageOutputIndex,
                             item: {
                                 id: this.currentMsgId,
                                 type: "message",
@@ -655,12 +660,15 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                 // 收尾 function_calls
                 const indices = Object.keys(this.funcCallIds).map(Number).sort((a, b) => a - b);
                 for (const i of indices) {
+                    if (this.closedFuncIndices.has(i)) continue;
+                    this.closedFuncIndices.add(i);
+                    const outIdx = this.funcOutputIndices[i] ?? i;
                     out.push({
                         data: JSON.stringify({
                             type: "response.function_call_arguments.done",
                             sequence_number: this.nextSeq(),
                             item_id: `fc_${this.funcCallIds[i]}`,
-                            output_index: i,
+                            output_index: outIdx,
                             arguments: this.funcArgsBuf[i] || "{}",
                         }),
                     });
@@ -668,7 +676,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                         data: JSON.stringify({
                             type: "response.output_item.done",
                             sequence_number: this.nextSeq(),
-                            output_index: i,
+                            output_index: outIdx,
                             item: {
                                 id: `fc_${this.funcCallIds[i]}`,
                                 type: "function_call",
@@ -683,91 +691,39 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
             }
         }
 
-        // usage 帧 → response.completed
+        // usage 帧仅累积原始字段，不提前结束流（等待 [DONE] 或干净 EOF 统一收尾）
         if (chunk.usage) {
-            this.inputTokens = chunk.usage.prompt_tokens ?? this.inputTokens;
-            this.outputTokens = chunk.usage.completion_tokens ?? this.outputTokens;
-            const cachedTokens = chunk.usage.prompt_tokens_details?.cached_tokens;
-            if (cachedTokens !== undefined) {
-                this.cacheReadTokens = cachedTokens;
-            }
-
-            const outputArr: ResponsesOutputItem[] = [];
-            if (this.textBuf) {
-                outputArr.push({
-                    id: this.currentMsgId,
-                    type: "message",
-                    status: "completed",
-                    content: [{ type: "output_text", text: this.textBuf }],
-                    role: "assistant",
-                });
-            }
-            if (this.reasoningBuf) {
-                outputArr.push({
-                    id: this.reasoningItemId,
-                    type: "reasoning",
-                    summary: [{ type: "summary_text", text: this.reasoningBuf }],
-                });
-            }
-            const funcIndices = Object.keys(this.funcCallIds).map(Number).sort((a, b) => a - b);
-            for (const i of funcIndices) {
-                outputArr.push({
-                    id: `fc_${this.funcCallIds[i]}`,
-                    type: "function_call",
-                    status: "completed",
-                    arguments: this.funcArgsBuf[i] || "{}",
-                    call_id: this.funcCallIds[i],
-                    name: this.funcNames[i] || "",
-                });
-            }
-
-            const status = (this.finishReason === "stop" || this.finishReason === "tool_calls" || this.finishReason === "length" || this.finishReason === "content_filter")
-                ? "completed"
-                : "completed";
-
-            out.push({
-                data: JSON.stringify({
-                    type: "response.completed",
-                    sequence_number: this.nextSeq(),
-                    response: {
-                        id: this.responseId,
-                        object: "response",
-                        created_at: Math.floor(Date.now() / 1000),
-                        status,
-                        model: this.requestModel,
-                        output: outputArr,
-                        usage: {
-                            input_tokens: this.inputTokens,
-                            input_tokens_details: this.cacheReadTokens ? {
-                                cached_tokens: this.cacheReadTokens,
-                            } : undefined,
-                            output_tokens: this.outputTokens,
-                            total_tokens: this.inputTokens + this.cacheReadTokens + this.outputTokens,
-                        },
-                    },
-                }),
-            });
-
-            // reset state
-            this.resetState();
+            protocolConverterUtil.mergeOpenAIUsage(this.rawUsage, chunk.usage);
         }
 
         return out;
     }
 
     public override onUpstreamEnd(): ProtocolStreamEvent[] {
-        // 上游给过 finish_reason 却没收尾：补发 response.completed。
-        // 正常收尾（usage 帧已发 response.completed）时 resetState 已把 finishReason 清空 →
-        // 这里返回空，不重复补发。
-        return this.finishReason !== null ? this.handleDoneEvent() : [];
+        // 上游给过 finish_reason 却没发 [DONE]：补发终止事件；已发过终止事件则幂等返回空
+        return (this.finishReason !== null && !this.terminalEmitted) ? this.handleDoneEvent() : [];
+    }
+
+
+    private mapFinishReason(finishReason: string | null | undefined): {
+        status: "completed" | "incomplete";
+        incompleteDetails?: { reason: "max_output_tokens" | "content_filter" };
+    } {
+        if (finishReason === "length") {
+            return { status: "incomplete", incompleteDetails: { reason: "max_output_tokens" } };
+        }
+        if (finishReason === "content_filter") {
+            return { status: "incomplete", incompleteDetails: { reason: "content_filter" } };
+        }
+        return { status: "completed" };
     }
 
 
     protected override handleDoneEvent(): ProtocolStreamEvent[] {
         const out: ProtocolStreamEvent[] = [];
 
-        // 如果还没有生成 response.completed，在 [DONE] 时兜底生成
-        if (this.createdEmitted) {
+        // 如果还没有生成终止事件，在 [DONE]（或带 finish_reason 的干净 EOF）时统一收尾
+        if (this.createdEmitted && !this.terminalEmitted) {
             // 收尾未关闭的 block
             if (this.reasoningActive) {
                 out.push({
@@ -775,7 +731,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                         type: "response.reasoning_summary_text.done",
                         sequence_number: this.nextSeq(),
                         item_id: this.reasoningItemId,
-                        output_index: 0,
+                        output_index: this.reasoningOutputIndex,
                         summary_index: 0,
                         text: this.reasoningBuf,
                     }),
@@ -785,7 +741,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                         type: "response.reasoning_summary_part.done",
                         sequence_number: this.nextSeq(),
                         item_id: this.reasoningItemId,
-                        output_index: 0,
+                        output_index: this.reasoningOutputIndex,
                         summary_index: 0,
                         part: { type: "summary_text", text: this.reasoningBuf },
                     }),
@@ -794,7 +750,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                     data: JSON.stringify({
                         type: "response.output_item.done",
                         sequence_number: this.nextSeq(),
-                        output_index: 0,
+                        output_index: this.reasoningOutputIndex,
                         item: {
                             id: this.reasoningItemId,
                             type: "reasoning",
@@ -811,7 +767,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                         type: "response.output_text.done",
                         sequence_number: this.nextSeq(),
                         item_id: this.currentMsgId,
-                        output_index: 0,
+                        output_index: this.messageOutputIndex,
                         content_index: 0,
                         text: this.textBuf,
                     }),
@@ -821,7 +777,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                         type: "response.content_part.done",
                         sequence_number: this.nextSeq(),
                         item_id: this.currentMsgId,
-                        output_index: 0,
+                        output_index: this.messageOutputIndex,
                         content_index: 0,
                         part: { type: "output_text", text: this.textBuf },
                     }),
@@ -830,7 +786,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                     data: JSON.stringify({
                         type: "response.output_item.done",
                         sequence_number: this.nextSeq(),
-                        output_index: 0,
+                        output_index: this.messageOutputIndex,
                         item: {
                             id: this.currentMsgId,
                             type: "message",
@@ -846,89 +802,88 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
 
             const funcIndices = Object.keys(this.funcCallIds).map(Number).sort((a, b) => a - b);
             for (const i of funcIndices) {
-                out.push({
-                    data: JSON.stringify({
-                        type: "response.function_call_arguments.done",
-                        sequence_number: this.nextSeq(),
-                        item_id: `fc_${this.funcCallIds[i]}`,
-                        output_index: i,
-                        arguments: this.funcArgsBuf[i] || "{}",
-                    }),
-                });
-                out.push({
-                    data: JSON.stringify({
-                        type: "response.output_item.done",
-                        sequence_number: this.nextSeq(),
-                        output_index: i,
-                        item: {
-                            id: `fc_${this.funcCallIds[i]}`,
-                            type: "function_call",
-                            status: "completed",
+                if (!this.closedFuncIndices.has(i)) {
+                    this.closedFuncIndices.add(i);
+                    const outIdx = this.funcOutputIndices[i] ?? i;
+                    out.push({
+                        data: JSON.stringify({
+                            type: "response.function_call_arguments.done",
+                            sequence_number: this.nextSeq(),
+                            item_id: `fc_${this.funcCallIds[i]}`,
+                            output_index: outIdx,
                             arguments: this.funcArgsBuf[i] || "{}",
-                            call_id: this.funcCallIds[i],
-                            name: this.funcNames[i] || "",
-                        },
-                    }),
-                });
+                        }),
+                    });
+                    out.push({
+                        data: JSON.stringify({
+                            type: "response.output_item.done",
+                            sequence_number: this.nextSeq(),
+                            output_index: outIdx,
+                            item: {
+                                id: `fc_${this.funcCallIds[i]}`,
+                                type: "function_call",
+                                status: "completed",
+                                arguments: this.funcArgsBuf[i] || "{}",
+                                call_id: this.funcCallIds[i],
+                                name: this.funcNames[i] || "",
+                            },
+                        }),
+                    });
+                }
             }
 
-            // 生成 response.completed
+            // 生成终止事件（response.completed 或 response.incomplete），保持与已发出事件一致的顺序
             const outputArr: ResponsesOutputItem[] = [];
-            if (this.textBuf) {
-                outputArr.push({
-                    id: this.currentMsgId,
-                    type: "message",
-                    status: "completed",
-                    content: [{ type: "output_text", text: this.textBuf }],
-                    role: "assistant",
-                });
-            }
-            if (this.reasoningBuf) {
-                outputArr.push({
-                    id: this.reasoningItemId,
-                    type: "reasoning",
-                    summary: [{ type: "summary_text", text: this.reasoningBuf }],
-                });
-            }
-            for (const i of funcIndices) {
-                outputArr.push({
-                    id: `fc_${this.funcCallIds[i]}`,
-                    type: "function_call",
-                    status: "completed",
-                    arguments: this.funcArgsBuf[i] || "{}",
-                    call_id: this.funcCallIds[i],
-                    name: this.funcNames[i] || "",
-                });
+            for (const entry of this.outputOrder) {
+                if (entry.kind === "reasoning" && this.reasoningBuf) {
+                    outputArr.push({
+                        id: this.reasoningItemId,
+                        type: "reasoning",
+                        summary: [{ type: "summary_text", text: this.reasoningBuf }],
+                    });
+                } else if (entry.kind === "message" && this.textBuf) {
+                    outputArr.push({
+                        id: this.currentMsgId,
+                        type: "message",
+                        status: "completed",
+                        content: [{ type: "output_text", text: this.textBuf }],
+                        role: "assistant",
+                    });
+                } else if (entry.kind === "function_call") {
+                    const i = entry.toolIndex;
+                    outputArr.push({
+                        id: `fc_${this.funcCallIds[i]}`,
+                        type: "function_call",
+                        status: "completed",
+                        arguments: this.funcArgsBuf[i] || "{}",
+                        call_id: this.funcCallIds[i],
+                        name: this.funcNames[i] || "",
+                    });
+                }
             }
 
-            const status = (this.finishReason === "stop" || this.finishReason === "tool_calls" || this.finishReason === "length" || this.finishReason === "content_filter")
-                ? "completed"
-                : "completed";
+            const { status, incompleteDetails } = this.mapFinishReason(this.finishReason);
+            const terminalType = status === "incomplete" ? "response.incomplete" : "response.completed";
 
             out.push({
                 data: JSON.stringify({
-                    type: "response.completed",
+                    type: terminalType,
                     sequence_number: this.nextSeq(),
                     response: {
                         id: this.responseId,
                         object: "response",
                         created_at: Math.floor(Date.now() / 1000),
                         status,
+                        ...(incompleteDetails ? { incomplete_details: incompleteDetails } : {}),
                         model: this.requestModel,
                         output: outputArr,
-                        usage: {
-                            input_tokens: this.inputTokens,
-                            input_tokens_details: this.cacheReadTokens ? {
-                                cached_tokens: this.cacheReadTokens,
-                            } : undefined,
-                            output_tokens: this.outputTokens,
-                            total_tokens: this.inputTokens + this.cacheReadTokens + this.outputTokens,
-                        },
+                        usage: protocolConverterUtil.openAIUsageToResponses(this.rawUsage),
                     },
                 }),
             });
 
-            this.resetState();
+            this.terminalEmitted = true;
+            this.finishReason = null;
         }
 
         return out;
@@ -940,17 +895,21 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
         this.messageOpen = false;
         this.contentPartOpen = false;
         this.textBuf = "";
-        this.inputTokens = 0;
-        this.outputTokens = 0;
-        this.cacheReadTokens = 0;
+        this.rawUsage = {};
         this.reasoningActive = false;
         this.reasoningItemId = "";
         this.reasoningBuf = "";
-        this.reasoningIndex = 0;
+        this.reasoningOutputIndex = -1;
+        this.messageOutputIndex = -1;
+        this.nextOutputIndex = 0;
+        this.outputOrder = [];
         this.funcArgsBuf = {};
         this.funcNames = {};
         this.funcCallIds = {};
+        this.funcOutputIndices = {};
+        this.closedFuncIndices.clear();
         this.createdEmitted = false;
+        this.terminalEmitted = false;
         this.finishReason = null;
     }
 }

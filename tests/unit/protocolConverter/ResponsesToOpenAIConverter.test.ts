@@ -798,6 +798,7 @@ describe("ResponsesToOpenAIConverter", () => {
                 },
             };
             events.push(...streamConverter.convertStreamEvent(JSON.stringify(chunk4)));
+            events.push(...streamConverter.convertStreamEvent("[DONE]"));
 
             // 验证事件
             const eventTypes = events.map((e) => JSON.parse(e.data).type);
@@ -894,6 +895,7 @@ describe("ResponsesToOpenAIConverter", () => {
                 }],
             };
             events.push(...streamConverter.convertStreamEvent(JSON.stringify(chunk4)));
+            events.push(...streamConverter.convertStreamEvent("[DONE]"));
 
             // usage 帧
             const chunk5: OpenAIChunk = {
@@ -909,6 +911,7 @@ describe("ResponsesToOpenAIConverter", () => {
                 },
             };
             events.push(...streamConverter.convertStreamEvent(JSON.stringify(chunk5)));
+            events.push(...streamConverter.convertStreamEvent("[DONE]"));
 
             // 验证 response.completed 的内容
             const completedEvent = events.find((e) => JSON.parse(e.data).type === "response.completed");
@@ -979,15 +982,16 @@ describe("ResponsesToOpenAIConverter", () => {
                 },
             };
             events.push(...streamConverter.convertStreamEvent(JSON.stringify(chunk4)));
+            events.push(...streamConverter.convertStreamEvent("[DONE]"));
 
             // 验证 response.completed 的内容
             const completedEvent = events.find((e) => JSON.parse(e.data).type === "response.completed");
             const completedData = JSON.parse(completedEvent.data);
             expect(completedData.response.output).toHaveLength(2);
-            expect(completedData.response.output[0].type).toBe("message");
-            expect(completedData.response.output[0].content[0].text).toBe("The answer is 42.");
-            expect(completedData.response.output[1].type).toBe("reasoning");
-            expect(completedData.response.output[1].summary[0].text).toBe("Let me think...");
+            expect(completedData.response.output[0].type).toBe("reasoning");
+            expect(completedData.response.output[0].summary[0].text).toBe("Let me think...");
+            expect(completedData.response.output[1].type).toBe("message");
+            expect(completedData.response.output[1].content[0].text).toBe("The answer is 42.");
         });
 
         it("should generate response.completed on [DONE] when no usage frame received", () => {
@@ -1053,7 +1057,7 @@ describe("ResponsesToOpenAIConverter", () => {
             expect(completedData.response.output[0].content[0].text).toBe("Hi");
         });
 
-        it("should generate response.completed when usage is combined with finish_reason frame", () => {
+        it("should allow trailing cache usage after finish + usage frame and complete on [DONE]", () => {
             const streamConverter = new ResponsesToOpenAIConverter("gpt-4");
             const events: any[] = [];
 
@@ -1083,14 +1087,30 @@ describe("ResponsesToOpenAIConverter", () => {
                     finish_reason: "stop",
                 }],
                 usage: {
-                    prompt_tokens: 10,
+                    prompt_tokens: 100,
                     completion_tokens: 5,
-                    total_tokens: 15,
+                    total_tokens: 105,
                 },
             };
             events.push(...streamConverter.convertStreamEvent(JSON.stringify(chunk2)));
 
-            // 应该已经有 response.completed（不需要 [DONE]）
+            // 此时尚未收到 [DONE] 或 EOF，不应提前关闭流，以便继续接收尾随缓存明细
+            expect(events.some((e) => JSON.parse(e.data).type === "response.completed")).toBe(false);
+
+            // 尾随缓存明细 chunk
+            const chunk3: OpenAIChunk = {
+                id: "chatcmpl-123",
+                object: "chat.completion.chunk",
+                created: 1234567890,
+                model: "gpt-4",
+                choices: [],
+                usage: {
+                    prompt_tokens_details: { cached_tokens: 90 },
+                } as any,
+            };
+            events.push(...streamConverter.convertStreamEvent(JSON.stringify(chunk3)));
+            events.push(...streamConverter.convertStreamEvent("[DONE]"));
+
             const eventTypes = events.map((e) => {
                 try {
                     return JSON.parse(e.data).type;
@@ -1112,8 +1132,10 @@ describe("ResponsesToOpenAIConverter", () => {
             expect(completedData.response.output).toHaveLength(1);
             expect(completedData.response.output[0].type).toBe("message");
             expect(completedData.response.output[0].content[0].text).toBe("Hello!");
-            expect(completedData.response.usage.input_tokens).toBe(10);
+            expect(completedData.response.usage.input_tokens).toBe(100);
+            expect(completedData.response.usage.input_tokens_details.cached_tokens).toBe(90);
             expect(completedData.response.usage.output_tokens).toBe(5);
+            expect(completedData.response.usage.total_tokens).toBe(105);
         });
     });
 

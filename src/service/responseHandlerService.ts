@@ -31,6 +31,7 @@ import customError from "../customError";
 
 interface StreamRunResult {
     accumulator: AccumulatorBase;
+    upstreamUsage: Dict | null;
     failedCode: string | null;
     /** 失败的可读文案（abort 检出的时刻与失败码一并确定；非 abort 类失败为 null） */
     errorMessage: string | null;
@@ -40,6 +41,7 @@ interface StreamRunResult {
 interface RunSSELoopOptions {
     accumulator: AccumulatorBase;
     converter: BaseConverter | null;
+    upstreamUsageCollector: InstanceType<typeof usageUtils.UpstreamUsageCollector>;
 }
 
 // 流式读循环日志前缀（runSSELoop 只被 handleStreamResponse 一处调用，直接固化）
@@ -158,6 +160,8 @@ async function runSSELoop(
                     continue;
                 }
 
+                opts.upstreamUsageCollector.addEvent(upstreamEvent.data);
+
                 const clientEvents = opts.converter
                     ? opts.converter.convertStreamEvent(upstreamEvent.data, upstreamEvent.event, upstreamEvent.id)
                     : [upstreamEvent];
@@ -190,7 +194,12 @@ async function runSSELoop(
     }
 
     unsubscribeClientAbort();
-    return { accumulator, failedCode, errorMessage };
+    return {
+        accumulator,
+        upstreamUsage: opts.upstreamUsageCollector.getUsage(),
+        failedCode,
+        errorMessage,
+    };
 }
 
 
@@ -203,16 +212,19 @@ function finalizeStreamResult(
     record: SgRecord,
     model: SgModel,
     user: SgUser,
+    upstreamFormat: ApiFormat,
     state: StreamRunResult,
 ): void {
-    let { accumulator, failedCode, errorMessage } = state;
+    let { accumulator, upstreamUsage, failedCode, errorMessage } = state;
 
     runInBackgroundUtil.runInBackground(c, async () => {
         // 已完整接收即视为成功：即使随后连接断开，也可能只是客户端拿到完整结果后提前关闭
         // （客户端断开 / 上游超时不置 errored，不该覆盖成功）；标志语义见 AccumulatorBase
         if (accumulator.isCompleted()) {
             const fullResponse = accumulator.getResponse();
-            const normalizedUsage = usageUtils.normalizeUsage(ApiFormat.OPENAI, accumulator.getUsage() as Dict | null);
+            const rawUsage = upstreamUsage ?? (accumulator.getUsage() as Dict | null);
+            const usageFormat = upstreamUsage ? upstreamFormat : ApiFormat.OPENAI;
+            const normalizedUsage = usageUtils.normalizeUsage(usageFormat, rawUsage);
             const usageJson = usageUtils.serializeStoredUsage(normalizedUsage?.recordUsage ?? null);
             const cost = normalizedUsage
                 ? usageUtils.calculateCost(model, normalizedUsage.promptTokens, normalizedUsage.outputTokens, normalizedUsage.cacheReadTokens)
@@ -444,13 +456,16 @@ export async function handleStreamResponse(
         accumulator = new openaiChatAccumulator.OpenAIChatAccumulator();
     }
 
+    const upstreamUsageCollector = new usageUtils.UpstreamUsageCollector(upstreamFormat);
+
     return streamSSE(c, async (stream: SSEStreamingApi) => {
         const state = await runSSELoop(c, upstreamRes, stream, logStream, {
             accumulator,
             converter,
+            upstreamUsageCollector,
         });
         console.log(`[responseHandlerService] Stream ended, completed: ${state.accumulator.isCompleted()}, failedCode: ${state.failedCode}`);
-        finalizeStreamResult(c, record, model, user, state);
+        finalizeStreamResult(c, record, model, user, upstreamFormat, state);
         logStream?.end();
     });
 }

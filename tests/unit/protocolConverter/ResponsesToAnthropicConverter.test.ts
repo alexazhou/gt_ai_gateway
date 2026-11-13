@@ -333,14 +333,30 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         ]);
     });
 
-    it("should convert reasoning item to thinking block", () => {
+    it("should round-trip verified sealed reasoning encrypted_content and reject unverified foreign encrypted_content", () => {
+        const upstreamRes: AnthropicResponse = {
+            id: "msg_think_rt",
+            type: "message",
+            role: "assistant",
+            model: "claude-sonnet-4-20250514",
+            content: [
+                { type: "thinking", thinking: "Let me think...", signature: "sig_anthropic_real" },
+                { type: "text", text: "Here's my answer." },
+            ],
+            stop_reason: "end_turn",
+            usage: { input_tokens: 10, output_tokens: 5 },
+        };
+        const wrapped = converter.convertResponse(upstreamRes);
+        const reasoningItem = wrapped.output.find((o) => o.type === "reasoning") as any;
+        expect(reasoningItem.encrypted_content).toMatch(/^gw_sig_v1\./);
+
         const req: ResponsesRequest = {
-            model: "gpt-4.1",
+            model: "claude-sonnet-4-20250514",
             input: [
                 {
                     type: "reasoning",
                     summary: [{ type: "summary_text", text: "Let me think..." }],
-                    encrypted_content: "enc_abc",
+                    encrypted_content: reasoningItem.encrypted_content,
                 },
                 {
                     type: "message",
@@ -351,14 +367,26 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         };
 
         const result = converter.convertRequest(req);
-
         const thinkingMsg = result.messages.find(
             (m) => Array.isArray(m.content) && m.content.some((b: any) => b.type === "thinking"),
         );
         expect(thinkingMsg).toBeDefined();
         const thinkingBlock = (thinkingMsg!.content as AnthropicContentBlock[]).find((b) => b.type === "thinking")!;
         expect(thinkingBlock.thinking).toBe("Let me think...");
-        expect(thinkingBlock.signature).toBe("enc_abc");
+        expect(thinkingBlock.signature).toBe("sig_anthropic_real");
+
+        // 原生跨供应商或篡改密文必须被拒绝
+        const foreignReq: ResponsesRequest = {
+            model: "claude-sonnet-4-20250514",
+            input: [
+                {
+                    type: "reasoning",
+                    summary: [{ type: "summary_text", text: "Let me think..." }],
+                    encrypted_content: "openai_ciphertext",
+                },
+            ],
+        };
+        expect(() => converter.convertRequest(foreignReq)).toThrow(/Incompatible or unverified/);
     });
 
     it("should convert tools from Responses format to Anthropic format", () => {
@@ -444,7 +472,7 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         expect(result.tool_choice).toEqual({ type: "any" });
     });
 
-    it("should not set tool_choice when none", () => {
+    it("should set tool_choice to none when none", () => {
         const req: ResponsesRequest = {
             model: "gpt-4.1",
             input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Hello" }] }],
@@ -452,7 +480,7 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         };
 
         const result = converter.convertRequest(req);
-        expect(result.tool_choice).toBeUndefined();
+        expect(result.tool_choice).toEqual({ type: "none" });
     });
 
     it("should convert named function tool_choice", () => {
@@ -707,7 +735,7 @@ describe("ResponsesToAnthropicConverter - convertResponse", () => {
         const reasoning = result.output.find((o) => o.type === "reasoning") as any;
         expect(reasoning).toBeDefined();
         expect(reasoning.summary[0].text).toBe("Let me reason about this...");
-        expect(reasoning.encrypted_content).toBe("sig_abc");
+        expect(reasoning.encrypted_content).toMatch(/^gw_sig_v1\./);
 
         const msg = result.output.find((o) => o.type === "message") as any;
         expect(msg.content[0].text).toBe("Here's my answer.");
@@ -1048,7 +1076,7 @@ describe("ResponsesToAnthropicConverter - convertStreamEvent (Anthropic SSE → 
         expect(completedEvent).toBeDefined();
         const completedData = JSON.parse(completedEvent!.data);
         const usage = completedData.response.usage;
-        expect(usage.input_tokens).toBe(10);
+        expect(usage.input_tokens).toBe(15);
         expect(usage.input_tokens_details.cached_tokens).toBe(5);
         expect(usage.output_tokens).toBe(20);
         expect(usage.total_tokens).toBe(35);
