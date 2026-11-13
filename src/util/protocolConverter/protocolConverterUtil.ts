@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import customError from "../../customError";
 import objectUtil from "../objectUtil";
 import type {
@@ -315,12 +315,26 @@ function anthropicImageSourceFromUrl(url: string): NonNullable<AnthropicContentB
 }
 
 const THINKING_SIG_PREFIX = "gw_sig_v1";
-const RUNTIME_THINKING_SIG_SECRET = randomBytes(32).toString("hex");
+
+/**
+ * 封装 thinking 凭据用的固定密钥。
+ *
+ * 为什么是固定值而不是随机生成：
+ * 1. 随机密钥是 per-isolate 的 —— 第一轮由 isolate A 签发、第二轮打到 isolate B（或 isolate 重启）就验签失败，
+ *    跨协议 + thinking 的多轮对话会直接 400。要做成随机就必须引入稳定存储（config 表 / wrangler secret），
+ *    而 config 表要异步读，转换层是同步的（convertRequest / convertResponse / convertStreamEvent 全是同步签名），
+ *    为此把整条转换链路改成 async 不值得。
+ * 2. 这层 HMAC 的实际职责是「网关自己重打包时绑定来源协议 / 模型，并发现无意间的篡改」，
+ *    而不是对外提供认证能力：源码里的常量等于公开，能改源码的人本来就能改任何行为。
+ *    真正兜底的是上游自己 —— Anthropic 会校验 signature 与 thinking 明文是否匹配，
+ *    客户端伪造的凭据送到上游只会 400，不会污染上下文。
+ *
+ * 需要更强保证时，用 `THINKING_SIGNATURE_SECRET`（wrangler secret / .dev.vars）覆盖，无需改代码。
+ */
+const DEFAULT_THINKING_SIG_SECRET = "9f1c815f2860a5897f7ed916822eeb062b2e3211fc1c5f635c6d4b056902293a";
 
 function getThinkingSignatureSecret(): string {
-    return process.env.THINKING_SIGNATURE_SECRET
-        || process.env.JWT_SECRET
-        || RUNTIME_THINKING_SIG_SECRET;
+    return process.env.THINKING_SIGNATURE_SECRET || DEFAULT_THINKING_SIG_SECRET;
 }
 
 
