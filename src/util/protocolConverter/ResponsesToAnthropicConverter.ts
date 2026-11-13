@@ -22,7 +22,12 @@ import {
     buildThinkingConfigFromOpenAIResponses,
     thinkingConfigToAnthropic,
 } from "./thinkingConfig";
-import protocolConverterUtil from "./protocolConverterUtil";
+import protocolConverterUtil, { type RawAnthropicUsage } from "./protocolConverterUtil";
+
+type AnthropicToResponsesOutputItem =
+    | { kind: "message"; outputIndex: number; id: string; text: string; closed: boolean }
+    | { kind: "reasoning"; outputIndex: number; id: string; thinking: string; signature: string; closed: boolean }
+    | { kind: "function_call"; outputIndex: number; id: string; callId: string; name: string; args: string; closed: boolean };
 
 /**
  * Responses API → Anthropic 转换器
@@ -33,41 +38,26 @@ import protocolConverterUtil from "./protocolConverterUtil";
  * 3. convertStreamEvent: Anthropic 流式 SSE → Responses 流式 SSE
  */
 export class ResponsesToAnthropicConverter extends BaseConverter {
-    private currentMsgId = "";
-    private currentFcId = "";
-    private inTextBlock = false;
-    private inFuncBlock = false;
-    private messageOpen = false;
-    private contentPartOpen = false;
-    private textBuf = "";
-    private funcArgsBuf: Record<number, string> = {};
-    private funcNames: Record<number, string> = {};
-    private funcCallIds: Record<number, string> = {};
-    private reasoningActive = false;
-    private reasoningItemId = "";
-    private reasoningBuf = "";
-    private reasoningSignature = "";
-    private reasoningIndex = 0;
-    private inputTokens = 0;
-    private outputTokens = 0;
-    private cacheReadTokens = 0;
-    private currentToolCallIndex = -1;
+    private outputItems: AnthropicToResponsesOutputItem[] = [];
+    private blockToItem = new Map<number, AnthropicToResponsesOutputItem>();
+    private rawUsage: RawAnthropicUsage = {};
+    private stopReason: string | null = null;
 
     // ─── 请求转换 ───
 
     public convertRequest(req: ResponsesRequest): AnthropicRequest {
         const messages: AnthropicRequest["messages"] = [];
-        let systemText = "";
+        const systemParts: string[] = [];
 
         // instructions → system
         if (req.instructions) {
-            systemText = req.instructions;
+            systemParts.push(req.instructions);
         }
 
         if (typeof req.input === "string") {
             messages.push({ role: "user", content: req.input });
         } else {
-            // 合并连续的 function_call 和 function_call_output
+            // 只合并同一轮内连续的 function_call 或连续的 function_call_output，跨阶段时立即 flush 保留轮次
             let pendingToolUses: AnthropicContentBlock[] = [];
             let pendingToolResults: AnthropicContentBlock[] = [];
 
@@ -87,7 +77,8 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
 
             for (const item of req.input) {
                 if ("type" in item && item.type === "function_call") {
-                    // 收集 function_call
+                    flushToolResults();
+                    // 收集同一轮连续的 function_call
                     pendingToolUses.push({
                         type: "tool_use",
                         id: item.call_id || `toolu_${Date.now()}`,
@@ -95,7 +86,8 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                         input: protocolConverterUtil.parseToolArguments(item.arguments),
                     });
                 } else if ("type" in item && item.type === "function_call_output") {
-                    // 收集 function_call_output
+                    flushToolUses();
+                    // 收集同一轮连续的 function_call_output
                     pendingToolResults.push({
                         type: "tool_result",
                         tool_use_id: item.call_id,
@@ -105,7 +97,9 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                     // 遇到其他类型，先 flush 之前收集的内容
                     flushToolUses();
                     flushToolResults();
-                    this.convertInputItem(item, messages, systemText ? undefined : (t) => { systemText = t; });
+                    this.convertInputItem(item, messages, (t) => {
+                        if (t) systemParts.push(t);
+                    }, req.model);
                 }
             }
 
@@ -114,15 +108,22 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             flushToolResults();
         }
 
+        const rawMaxTokens = req.max_output_tokens;
+        if (rawMaxTokens !== undefined) {
+            if (typeof rawMaxTokens !== "number" || !Number.isFinite(rawMaxTokens) || rawMaxTokens <= 0) {
+                throw new customError.AppError("max_output_tokens must be a positive number", 400);
+            }
+        }
+
         const anthropicReq: AnthropicRequest = {
             model: req.model,
-            max_tokens: req.max_output_tokens || 32768,
+            max_tokens: rawMaxTokens ?? 32768,
             messages,
             stream: req.stream,
         };
 
-        if (systemText) {
-            anthropicReq.system = systemText;
+        if (systemParts.length > 0) {
+            anthropicReq.system = systemParts.join("\n\n");
         }
 
         if (req.temperature !== undefined) {
@@ -150,7 +151,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             } else if (req.tool_choice === "required") {
                 anthropicReq.tool_choice = { type: "any" };
             } else if (req.tool_choice === "none") {
-                // 不设置 tool_choice
+                anthropicReq.tool_choice = { type: "none" };
             } else if (typeof req.tool_choice === "object" && req.tool_choice.type === "function") {
                 anthropicReq.tool_choice = { type: "tool", name: req.tool_choice.name };
             }
@@ -175,6 +176,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
         item: ResponsesInputItem,
         messages: AnthropicRequest["messages"],
         setSystem?: (text: string) => void,
+        targetModel?: string,
     ): void {
         if ("type" in item && item.type === "function_call") {
             // function_call → assistant message with tool_use
@@ -200,12 +202,30 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
         }
 
         if ("type" in item && item.type === "reasoning") {
-            // reasoning → skip or convert to thinking block (if present)
-            if (item.summary && item.summary.length > 0) {
+            let signature = "";
+            let thinkingText = item.summary?.map((s) => s.text).join("\n") || "";
+            if (item.encrypted_content) {
+                const unsealed = protocolConverterUtil.unsealThinkingSignature(
+                    item.encrypted_content,
+                    "anthropic",
+                    targetModel,
+                );
+                if (!unsealed) {
+                    throw new customError.AppError(
+                        "Incompatible or unverified reasoning encrypted_content cannot be converted to Anthropic thinking signature",
+                        400,
+                    );
+                }
+                signature = unsealed.signature;
+                if (unsealed.thinking !== undefined) {
+                    thinkingText = unsealed.thinking;
+                }
+            }
+            if (signature && thinkingText) {
                 const thinkingBlock: AnthropicContentBlock = {
                     type: "thinking",
-                    thinking: item.summary.map((s) => s.text).join("\n"),
-                    signature: item.encrypted_content || "",
+                    thinking: thinkingText,
+                    signature,
                 };
                 // 附加到上一个 assistant 消息，或创建新的
                 const lastMsg = messages[messages.length - 1];
@@ -312,10 +332,11 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
         const responseId = requestId || upstreamRes.id || `resp_${Date.now()}`;
 
         for (const block of upstreamRes.content) {
+            const itemIndex = output.length;
             if (block.type === "text") {
                 output.push({
                     type: "message",
-                    id: `msg_${responseId}_0`,
+                    id: `msg_${responseId}_${itemIndex}`,
                     role: "assistant",
                     status: "completed",
                     content: [{ type: "output_text", text: block.text || "" }],
@@ -323,8 +344,8 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             } else if (block.type === "tool_use") {
                 output.push({
                     type: "function_call",
-                    id: `fc_${block.id || Date.now()}`,
-                    call_id: block.id || `call_${Date.now()}`,
+                    id: `fc_${block.id || `${responseId}_${itemIndex}`}`,
+                    call_id: block.id || `call_${responseId}_${itemIndex}`,
                     name: block.name || "",
                     arguments: JSON.stringify(block.input || {}),
                     status: "completed",
@@ -332,8 +353,12 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             } else if (block.type === "thinking") {
                 output.push({
                     type: "reasoning",
-                    id: `rs_${responseId}_0`,
-                    encrypted_content: block.signature || "",
+                    id: `rs_${responseId}_${itemIndex}`,
+                    encrypted_content: protocolConverterUtil.sealThinkingSignature(
+                        "anthropic",
+                        block.signature || "",
+                        { model: upstreamRes.model, thinking: block.thinking },
+                    ),
                     summary: block.thinking ? [{ type: "summary_text", text: block.thinking }] : [],
                 });
             }
@@ -343,14 +368,15 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             id: responseId,
             object: "response",
             created_at: Math.floor(Date.now() / 1000),
-            status: "completed",
+            status: upstreamRes.stop_reason === "max_tokens" ? "incomplete" : "completed",
+            ...(upstreamRes.stop_reason === "max_tokens"
+                ? { incomplete_details: { reason: "max_output_tokens" } }
+                : {}),
             model: upstreamRes.model,
             output,
-            usage: {
-                input_tokens: upstreamRes.usage?.input_tokens || 0,
-                output_tokens: upstreamRes.usage?.output_tokens || 0,
-                total_tokens: (upstreamRes.usage?.input_tokens || 0) + (upstreamRes.usage?.output_tokens || 0),
-            },
+            usage: protocolConverterUtil.anthropicUsageToResponses(
+                protocolConverterUtil.mergeAnthropicUsage({}, upstreamRes.usage),
+            ),
         };
     }
 
@@ -375,19 +401,12 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                 if (msg?.id) {
                     this.responseId = msg.id.startsWith("resp_") ? msg.id : `resp_${msg.id.replace("msg_", "")}`;
                 }
-                this.inputTokens = msg?.usage?.input_tokens ?? 0;
-                this.cacheReadTokens = msg?.usage?.cache_read_input_tokens ?? 0;
+                this.rawUsage = {};
+                protocolConverterUtil.mergeAnthropicUsage(this.rawUsage, msg?.usage);
+                this.stopReason = null;
                 this.seq = 0;
-                this.textBuf = "";
-                this.messageOpen = false;
-                this.contentPartOpen = false;
-                this.funcArgsBuf = {};
-                this.funcNames = {};
-                this.funcCallIds = {};
-                this.reasoningActive = false;
-                this.reasoningBuf = "";
-                this.reasoningSignature = "";
-                this.outputTokens = 0;
+                this.outputItems = [];
+                this.blockToItem.clear();
 
                 // response.created
                 out.push({
@@ -418,80 +437,94 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                 const block = data.content_block as AnthropicStreamContentBlock | undefined;
                 if (!block) break;
                 const idx = (data.index as number | undefined) ?? 0;
+                const outputIndex = this.outputItems.length;
 
                 if (block.type === "text") {
-                    this.inTextBlock = true;
-                    this.currentMsgId = this.currentMsgId || `msg_${this.responseId}_0`;
-
-                    if (!this.messageOpen) {
-                        out.push({
-                            data: JSON.stringify({
-                                type: "response.output_item.added",
-                                sequence_number: this.nextSeq(),
-                                output_index: idx,
-                                item: {
-                                    id: this.currentMsgId,
-                                    type: "message",
-                                    status: "in_progress",
-                                    content: [],
-                                    role: "assistant",
-                                },
-                            }),
-                        });
-                        this.messageOpen = true;
-                    }
-                    if (!this.contentPartOpen) {
-                        out.push({
-                            data: JSON.stringify({
-                                type: "response.content_part.added",
-                                sequence_number: this.nextSeq(),
-                                item_id: this.currentMsgId,
-                                output_index: idx,
-                                content_index: 0,
-                                part: { type: "output_text", text: "" },
-                            }),
-                        });
-                        this.contentPartOpen = true;
-                    }
-                } else if (block.type === "tool_use") {
-                    this.inFuncBlock = true;
-                    this.currentFcId = block.id || "";
-                    this.funcCallIds[idx] = this.currentFcId;
-                    this.funcNames[idx] = block.name || "";
+                    const item: AnthropicToResponsesOutputItem = {
+                        kind: "message",
+                        outputIndex,
+                        id: `msg_${this.responseId}_${outputIndex}`,
+                        text: "",
+                        closed: false,
+                    };
+                    this.outputItems.push(item);
+                    this.blockToItem.set(idx, item);
 
                     out.push({
                         data: JSON.stringify({
                             type: "response.output_item.added",
                             sequence_number: this.nextSeq(),
-                            output_index: idx,
+                            output_index: outputIndex,
                             item: {
-                                id: `fc_${this.currentFcId}`,
-                                type: "function_call",
+                                id: item.id,
+                                type: "message",
                                 status: "in_progress",
-                                arguments: "",
-                                call_id: this.currentFcId,
-                                name: block.name || "",
+                                content: [],
+                                role: "assistant",
                             },
                         }),
                     });
-                    this.funcArgsBuf[idx] = "";
-                } else if (block.type === "thinking") {
-                    this.reasoningActive = true;
-                    this.reasoningIndex = idx;
-                    this.reasoningBuf = "";
-                    this.reasoningSignature = block.signature || "";
-                    this.reasoningItemId = `rs_${this.responseId}_${idx}`;
+                    out.push({
+                        data: JSON.stringify({
+                            type: "response.content_part.added",
+                            sequence_number: this.nextSeq(),
+                            item_id: item.id,
+                            output_index: outputIndex,
+                            content_index: 0,
+                            part: { type: "output_text", text: "" },
+                        }),
+                    });
+                } else if (block.type === "tool_use") {
+                    const callId = block.id || `call_${this.responseId}_${outputIndex}`;
+                    const item: AnthropicToResponsesOutputItem = {
+                        kind: "function_call",
+                        outputIndex,
+                        id: `fc_${callId}`,
+                        callId,
+                        name: block.name || "",
+                        args: "",
+                        closed: false,
+                    };
+                    this.outputItems.push(item);
+                    this.blockToItem.set(idx, item);
 
                     out.push({
                         data: JSON.stringify({
                             type: "response.output_item.added",
                             sequence_number: this.nextSeq(),
-                            output_index: idx,
+                            output_index: outputIndex,
                             item: {
-                                id: this.reasoningItemId,
+                                id: item.id,
+                                type: "function_call",
+                                status: "in_progress",
+                                arguments: "",
+                                call_id: item.callId,
+                                name: item.name,
+                            },
+                        }),
+                    });
+                } else if (block.type === "thinking") {
+                    const item: AnthropicToResponsesOutputItem = {
+                        kind: "reasoning",
+                        outputIndex,
+                        id: `rs_${this.responseId}_${outputIndex}`,
+                        thinking: "",
+                        signature: block.signature || "",
+                        closed: false,
+                    };
+                    this.outputItems.push(item);
+                    this.blockToItem.set(idx, item);
+
+                    out.push({
+                        data: JSON.stringify({
+                            type: "response.output_item.added",
+                            sequence_number: this.nextSeq(),
+                            output_index: outputIndex,
+                            item: {
+                                id: item.id,
                                 type: "reasoning",
                                 status: "in_progress",
-                                encrypted_content: this.reasoningSignature,
+                                encrypted_content: item.signature,
                                 summary: [],
                             },
                         }),
@@ -500,8 +533,8 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                         data: JSON.stringify({
                             type: "response.reasoning_summary_part.added",
                             sequence_number: this.nextSeq(),
-                            item_id: this.reasoningItemId,
-                            output_index: idx,
+                            item_id: item.id,
+                            output_index: outputIndex,
                             summary_index: 0,
                             part: { type: "summary_text", text: "" },
                         }),
@@ -513,257 +546,221 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             case "content_block_delta": {
                 const delta = data.delta as AnthropicStreamDelta | undefined;
                 if (!delta) break;
+                const idx = (data.index as number | undefined) ?? 0;
+                const item = this.blockToItem.get(idx);
+                if (!item) break;
 
-                if (delta.type === "text_delta") {
+                if (delta.type === "text_delta" && item.kind === "message") {
+                    item.text += delta.text || "";
                     out.push({
                         data: JSON.stringify({
                             type: "response.output_text.delta",
                             sequence_number: this.nextSeq(),
-                            item_id: this.currentMsgId,
-                            output_index: 0,
+                            item_id: item.id,
+                            output_index: item.outputIndex,
                             content_index: 0,
                             delta: delta.text || "",
                         }),
                     });
-                    this.textBuf += delta.text || "";
-                } else if (delta.type === "input_json_delta") {
-                    const idx = (data.index as number | undefined) ?? 0;
-                    this.funcArgsBuf[idx] = (this.funcArgsBuf[idx] || "") + (delta.partial_json || "");
+                } else if (delta.type === "input_json_delta" && item.kind === "function_call") {
+                    item.args += delta.partial_json || "";
                     out.push({
                         data: JSON.stringify({
                             type: "response.function_call_arguments.delta",
                             sequence_number: this.nextSeq(),
-                            item_id: `fc_${this.funcCallIds[idx] || this.currentFcId}`,
-                            output_index: idx,
+                            item_id: item.id,
+                            output_index: item.outputIndex,
                             delta: delta.partial_json || "",
                         }),
                     });
-                } else if (delta.type === "thinking_delta") {
-                    if (this.reasoningActive) {
-                        this.reasoningBuf += delta.thinking || "";
-                        out.push({
-                            data: JSON.stringify({
-                                type: "response.reasoning_summary_text.delta",
-                                sequence_number: this.nextSeq(),
-                                item_id: this.reasoningItemId,
-                                output_index: this.reasoningIndex,
-                                summary_index: 0,
-                                delta: delta.thinking || "",
-                            }),
-                        });
-                    }
-                } else if (delta.type === "signature_delta") {
-                    if (this.reasoningActive) {
-                        this.reasoningSignature = delta.signature || this.reasoningSignature;
-                    }
+                } else if (delta.type === "thinking_delta" && item.kind === "reasoning") {
+                    item.thinking += delta.thinking || "";
+                    out.push({
+                        data: JSON.stringify({
+                            type: "response.reasoning_summary_text.delta",
+                            sequence_number: this.nextSeq(),
+                            item_id: item.id,
+                            output_index: item.outputIndex,
+                            summary_index: 0,
+                            delta: delta.thinking || "",
+                        }),
+                    });
+                } else if (delta.type === "signature_delta" && item.kind === "reasoning") {
+                    item.signature = delta.signature || item.signature;
                 }
                 break;
             }
 
             case "content_block_stop": {
                 const idx = (data.index as number | undefined) ?? 0;
-
-                if (this.inTextBlock) {
-                    // finalize text
-                    out.push({
-                        data: JSON.stringify({
-                            type: "response.output_text.done",
-                            sequence_number: this.nextSeq(),
-                            item_id: this.currentMsgId,
-                            output_index: 0,
-                            content_index: 0,
-                            text: this.textBuf,
-                        }),
-                    });
-                    out.push({
-                        data: JSON.stringify({
-                            type: "response.content_part.done",
-                            sequence_number: this.nextSeq(),
-                            item_id: this.currentMsgId,
-                            output_index: 0,
-                            content_index: 0,
-                            part: { type: "output_text", text: this.textBuf },
-                        }),
-                    });
-                    this.inTextBlock = false;
-                } else if (this.inFuncBlock) {
-                    const args = this.funcArgsBuf[idx] || "{}";
-                    out.push({
-                        data: JSON.stringify({
-                            type: "response.function_call_arguments.done",
-                            sequence_number: this.nextSeq(),
-                            item_id: `fc_${this.funcCallIds[idx] || this.currentFcId}`,
-                            output_index: idx,
-                            arguments: args,
-                        }),
-                    });
-                    out.push({
-                        data: JSON.stringify({
-                            type: "response.output_item.done",
-                            sequence_number: this.nextSeq(),
-                            output_index: idx,
-                            item: {
-                                id: `fc_${this.funcCallIds[idx] || this.currentFcId}`,
-                                type: "function_call",
-                                status: "completed",
-                                arguments: args,
-                                call_id: this.funcCallIds[idx] || this.currentFcId,
-                                name: this.funcNames[idx] || "",
-                            },
-                        }),
-                    });
-                    this.inFuncBlock = false;
-                } else if (this.reasoningActive) {
-                    const fullText = this.reasoningBuf;
-                    out.push({
-                        data: JSON.stringify({
-                            type: "response.reasoning_summary_text.done",
-                            sequence_number: this.nextSeq(),
-                            item_id: this.reasoningItemId,
-                            output_index: this.reasoningIndex,
-                            summary_index: 0,
-                            text: fullText,
-                        }),
-                    });
-                    out.push({
-                        data: JSON.stringify({
-                            type: "response.reasoning_summary_part.done",
-                            sequence_number: this.nextSeq(),
-                            item_id: this.reasoningItemId,
-                            output_index: this.reasoningIndex,
-                            summary_index: 0,
-                            part: { type: "summary_text", text: fullText },
-                        }),
-                    });
-                    out.push({
-                        data: JSON.stringify({
-                            type: "response.output_item.done",
-                            sequence_number: this.nextSeq(),
-                            output_index: this.reasoningIndex,
-                            item: {
-                                id: this.reasoningItemId,
-                                type: "reasoning",
-                                encrypted_content: this.reasoningSignature,
-                                summary: fullText ? [{ type: "summary_text", text: fullText }] : [],
-                            },
-                        }),
-                    });
-                    this.reasoningActive = false;
+                const item = this.blockToItem.get(idx);
+                if (item) {
+                    this.closeOutputItem(item, out);
                 }
                 break;
             }
 
             case "message_delta": {
+                const delta = data.delta as AnthropicStreamDelta | undefined;
+                if (delta?.stop_reason !== undefined) {
+                    this.stopReason = delta.stop_reason;
+                }
                 const usage = data.usage as AnthropicStreamUsage | undefined;
                 if (usage) {
-                    this.outputTokens = usage.output_tokens ?? this.outputTokens;
-                    this.inputTokens = usage.input_tokens ?? this.inputTokens;
-                    if (usage.cache_read_input_tokens !== undefined) {
-                        this.cacheReadTokens = usage.cache_read_input_tokens;
-                    }
+                    protocolConverterUtil.mergeAnthropicUsage(this.rawUsage, usage);
                 }
                 break;
             }
 
             case "message_stop": {
-                // finalize assistant message if open
-                if (this.messageOpen) {
-                    out.push({
-                        data: JSON.stringify({
-                            type: "response.output_text.done",
-                            sequence_number: this.nextSeq(),
-                            item_id: this.currentMsgId,
-                            output_index: 0,
-                            content_index: 0,
-                            text: this.textBuf,
-                        }),
-                    });
-                    out.push({
-                        data: JSON.stringify({
-                            type: "response.content_part.done",
-                            sequence_number: this.nextSeq(),
-                            item_id: this.currentMsgId,
-                            output_index: 0,
-                            content_index: 0,
-                            part: { type: "output_text", text: this.textBuf },
-                        }),
-                    });
-                    out.push({
-                        data: JSON.stringify({
-                            type: "response.output_item.done",
-                            sequence_number: this.nextSeq(),
-                            output_index: 0,
-                            item: {
-                                id: this.currentMsgId,
-                                type: "message",
-                                status: "completed",
-                                content: [{ type: "output_text", text: this.textBuf }],
-                                role: "assistant",
-                            },
-                        }),
-                    });
-                    this.messageOpen = false;
-                    this.contentPartOpen = false;
+                for (const item of this.outputItems) {
+                    this.closeOutputItem(item, out);
                 }
 
-                // build output array for response.completed
-                const outputArr: ResponsesOutputItem[] = [];
-                if (this.textBuf) {
-                    outputArr.push({
-                        id: this.currentMsgId,
-                        type: "message",
-                        status: "completed",
-                        content: [{ type: "output_text", text: this.textBuf }],
-                        role: "assistant",
-                    });
-                }
-                // function calls
-                const indices = Object.keys(this.funcArgsBuf).map(Number).sort((a, b) => a - b);
-                for (const i of indices) {
-                    outputArr.push({
-                        id: `fc_${this.funcCallIds[i] || this.currentFcId}`,
-                        type: "function_call",
-                        status: "completed",
-                        arguments: this.funcArgsBuf[i] || "{}",
-                        call_id: this.funcCallIds[i] || this.currentFcId,
-                        name: this.funcNames[i] || "",
-                    });
-                }
+                const outputArr: ResponsesOutputItem[] = this.outputItems.map((item) => this.toFinalOutputItem(item));
 
+                const isIncomplete = this.stopReason === "max_tokens";
                 out.push({
                     data: JSON.stringify({
-                        type: "response.completed",
+                        type: isIncomplete ? "response.incomplete" : "response.completed",
                         sequence_number: this.nextSeq(),
                         response: {
                             id: this.responseId,
                             object: "response",
                             created_at: Math.floor(Date.now() / 1000),
-                            status: "completed",
+                            status: isIncomplete ? "incomplete" : "completed",
+                            ...(isIncomplete ? { incomplete_details: { reason: "max_output_tokens" } } : {}),
                             model: this.requestModel,
                             output: outputArr,
-                            usage: {
-                                input_tokens: this.inputTokens,
-                                input_tokens_details: this.cacheReadTokens ? {
-                                    cached_tokens: this.cacheReadTokens,
-                                } : undefined,
-                                output_tokens: this.outputTokens,
-                                total_tokens: this.inputTokens + this.cacheReadTokens + this.outputTokens,
-                            },
+                            usage: protocolConverterUtil.anthropicUsageToResponses(this.rawUsage),
                         },
                     }),
                 });
 
-                // reset state for next message
-                this.textBuf = "";
-                this.currentMsgId = "";
-                this.currentFcId = "";
-                this.funcArgsBuf = {};
-                this.funcNames = {};
-                this.funcCallIds = {};
+                this.outputItems = [];
+                this.blockToItem.clear();
                 break;
             }
         }
 
         return out;
+    }
+
+
+    private toFinalOutputItem(item: AnthropicToResponsesOutputItem): ResponsesOutputItem {
+        if (item.kind === "message") {
+            return {
+                id: item.id,
+                type: "message",
+                status: "completed",
+                content: [{ type: "output_text", text: item.text }],
+                role: "assistant",
+            };
+        }
+        if (item.kind === "reasoning") {
+            return {
+                id: item.id,
+                type: "reasoning",
+                encrypted_content: protocolConverterUtil.sealThinkingSignature(
+                    "anthropic",
+                    item.signature,
+                    { model: this.requestModel, thinking: item.thinking },
+                ),
+                summary: item.thinking ? [{ type: "summary_text", text: item.thinking }] : [],
+            };
+        }
+        return {
+            id: item.id,
+            type: "function_call",
+            status: "completed",
+            arguments: item.args || "{}",
+            call_id: item.callId,
+            name: item.name,
+        };
+    }
+
+
+    private closeOutputItem(item: AnthropicToResponsesOutputItem, out: ProtocolStreamEvent[]): void {
+        if (item.closed) return;
+        item.closed = true;
+
+        if (item.kind === "message") {
+            out.push({
+                data: JSON.stringify({
+                    type: "response.output_text.done",
+                    sequence_number: this.nextSeq(),
+                    item_id: item.id,
+                    output_index: item.outputIndex,
+                    content_index: 0,
+                    text: item.text,
+                }),
+            });
+            out.push({
+                data: JSON.stringify({
+                    type: "response.content_part.done",
+                    sequence_number: this.nextSeq(),
+                    item_id: item.id,
+                    output_index: item.outputIndex,
+                    content_index: 0,
+                    part: { type: "output_text", text: item.text },
+                }),
+            });
+            out.push({
+                data: JSON.stringify({
+                    type: "response.output_item.done",
+                    sequence_number: this.nextSeq(),
+                    output_index: item.outputIndex,
+                    item: this.toFinalOutputItem(item),
+                }),
+            });
+        } else if (item.kind === "function_call") {
+            const args = item.args || "{}";
+            out.push({
+                data: JSON.stringify({
+                    type: "response.function_call_arguments.done",
+                    sequence_number: this.nextSeq(),
+                    item_id: item.id,
+                    output_index: item.outputIndex,
+                    arguments: args,
+                }),
+            });
+            out.push({
+                data: JSON.stringify({
+                    type: "response.output_item.done",
+                    sequence_number: this.nextSeq(),
+                    output_index: item.outputIndex,
+                    item: this.toFinalOutputItem(item),
+                }),
+            });
+        } else if (item.kind === "reasoning") {
+            out.push({
+                data: JSON.stringify({
+                    type: "response.reasoning_summary_text.done",
+                    sequence_number: this.nextSeq(),
+                    item_id: item.id,
+                    output_index: item.outputIndex,
+                    summary_index: 0,
+                    text: item.thinking,
+                }),
+            });
+            out.push({
+                data: JSON.stringify({
+                    type: "response.reasoning_summary_part.done",
+                    sequence_number: this.nextSeq(),
+                    item_id: item.id,
+                    output_index: item.outputIndex,
+                    summary_index: 0,
+                    part: { type: "summary_text", text: item.thinking },
+                }),
+            });
+            out.push({
+                data: JSON.stringify({
+                    type: "response.output_item.done",
+                    sequence_number: this.nextSeq(),
+                    output_index: item.outputIndex,
+                    item: this.toFinalOutputItem(item),
+                }),
+            });
+        }
     }
 }

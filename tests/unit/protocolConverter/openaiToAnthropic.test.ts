@@ -361,7 +361,7 @@ describe("OpenAIToAnthropicConverter - convertRequest", () => {
 
         expect(converter.convertRequest({ ...baseReq, tool_choice: "auto" }).tool_choice).toEqual({ type: "auto" });
         expect(converter.convertRequest({ ...baseReq, tool_choice: "required" }).tool_choice).toEqual({ type: "any" });
-        expect(converter.convertRequest({ ...baseReq, tool_choice: "none" }).tool_choice).toBeUndefined();
+        expect(converter.convertRequest({ ...baseReq, tool_choice: "none" }).tool_choice).toEqual({ type: "none" });
         expect(converter.convertRequest({
             ...baseReq,
             tool_choice: { type: "function", function: { name: "get_weather" } },

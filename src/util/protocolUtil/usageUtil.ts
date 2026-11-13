@@ -41,7 +41,9 @@ export function normalizeUsage(format: ApiFormat, usage: Dict | null | undefined
             ?? (usage.cache_read_tokens as number | undefined)
             ?? null;
         // accumulator 归一化后 Anthropic 的 cache 写入以 cache_write_tokens 出现，统一键名落库
-        cacheWriteRaw = (usage.cache_write_tokens as number | undefined) ?? null;
+        cacheWriteRaw = ((usage.prompt_tokens_details as Dict | undefined)?.cache_write_tokens as number | undefined)
+            ?? (usage.cache_write_tokens as number | undefined)
+            ?? null;
     }
 
     if (format === ApiFormat.ANTHROPIC) {
@@ -97,8 +99,81 @@ export function serializeStoredUsage(recordUsage: SgRecordUsage | null | undefin
     return JSON.stringify(recordUsage.toStorageJSON());
 }
 
+export class UpstreamUsageCollector {
+    private format: ApiFormat;
+    private hasUsage = false;
+    private rawUsage: Dict = {};
+
+    constructor(format: ApiFormat) {
+        this.format = format;
+    }
+
+
+    addEvent(dataStr: string): void {
+        if (!dataStr || dataStr === "[DONE]") return;
+        let parsed: Dict;
+        try {
+            const obj: unknown = JSON.parse(dataStr);
+            if (!obj || typeof obj !== "object") return;
+            parsed = obj as Dict;
+        } catch {
+            return;
+        }
+
+        if (this.format === ApiFormat.OPENAI) {
+            const usage = parsed.usage as Dict | undefined;
+            if (!usage || typeof usage !== "object") return;
+            this.hasUsage = true;
+            if (usage.prompt_tokens != null) this.rawUsage.prompt_tokens = usage.prompt_tokens;
+            if (usage.completion_tokens != null) this.rawUsage.completion_tokens = usage.completion_tokens;
+            const details = usage.prompt_tokens_details as Dict | undefined;
+            if (details && typeof details === "object") {
+                const prevDetails = (this.rawUsage.prompt_tokens_details as Dict | undefined) ?? {};
+                if (details.cached_tokens != null) prevDetails.cached_tokens = details.cached_tokens;
+                if (details.cache_write_tokens != null) prevDetails.cache_write_tokens = details.cache_write_tokens;
+                this.rawUsage.prompt_tokens_details = prevDetails;
+            }
+            return;
+        }
+
+        if (this.format === ApiFormat.ANTHROPIC) {
+            const msg = parsed.message as Dict | undefined;
+            const usage = (parsed.usage ?? msg?.usage) as Dict | undefined;
+            if (!usage || typeof usage !== "object") return;
+            this.hasUsage = true;
+            if (usage.input_tokens != null) this.rawUsage.input_tokens = usage.input_tokens;
+            if (usage.output_tokens != null) this.rawUsage.output_tokens = usage.output_tokens;
+            if (usage.cache_read_input_tokens != null) this.rawUsage.cache_read_input_tokens = usage.cache_read_input_tokens;
+            if (usage.cache_creation_input_tokens != null) this.rawUsage.cache_creation_input_tokens = usage.cache_creation_input_tokens;
+            return;
+        }
+
+        if (this.format === ApiFormat.RESPONSES) {
+            const resp = parsed.response as Dict | undefined;
+            const usage = resp?.usage as Dict | undefined;
+            if (!usage || typeof usage !== "object") return;
+            this.hasUsage = true;
+            if (usage.input_tokens != null) this.rawUsage.input_tokens = usage.input_tokens;
+            if (usage.output_tokens != null) this.rawUsage.output_tokens = usage.output_tokens;
+            const details = usage.input_tokens_details as Dict | undefined;
+            if (details && typeof details === "object") {
+                const prevDetails = (this.rawUsage.input_tokens_details as Dict | undefined) ?? {};
+                if (details.cached_tokens != null) prevDetails.cached_tokens = details.cached_tokens;
+                this.rawUsage.input_tokens_details = prevDetails;
+            }
+        }
+    }
+
+
+    getUsage(): Dict | null {
+        return this.hasUsage ? this.rawUsage : null;
+    }
+}
+
+
 export default {
     calculateCost,
     normalizeUsage,
     serializeStoredUsage,
+    UpstreamUsageCollector,
 };

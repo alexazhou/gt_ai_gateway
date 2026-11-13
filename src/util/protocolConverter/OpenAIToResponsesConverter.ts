@@ -21,6 +21,7 @@ import {
     buildThinkingConfigFromOpenAI,
     thinkingConfigToOpenAIResponses,
 } from "./thinkingConfig";
+import protocolConverterUtil from "./protocolConverterUtil";
 
 /**
  * OpenAI Chat Completions → Responses API 转换器
@@ -44,9 +45,18 @@ export class OpenAIToResponsesConverter extends BaseConverter {
         for (const msg of req.messages) {
             if (msg.role === "system") {
                 // system message → instructions
-                if (typeof msg.content === "string") {
-                    instructions = instructions ? `${instructions}\n${msg.content}` : msg.content;
+                const sysText = this.extractMessageText(msg.content);
+                if (sysText) {
+                    instructions = instructions ? `${instructions}\n${sysText}` : sysText;
                 }
+            } else if (msg.role === "developer") {
+                // developer message → 保留原生 developer 角色与相对顺序
+                const devText = this.extractMessageText(msg.content);
+                input.push({
+                    type: "message",
+                    role: "developer",
+                    content: [{ type: "input_text", text: devText }],
+                });
             } else if (msg.role === "user") {
                 if (typeof msg.content === "string") {
                     input.push({
@@ -126,8 +136,12 @@ export class OpenAIToResponsesConverter extends BaseConverter {
         if (instructions) {
             responsesReq.instructions = instructions;
         }
-        if (req.max_tokens !== undefined) {
-            responsesReq.max_output_tokens = req.max_tokens;
+        const rawMaxTokens = req.max_completion_tokens ?? req.max_tokens;
+        if (rawMaxTokens !== undefined) {
+            if (typeof rawMaxTokens !== "number" || !Number.isFinite(rawMaxTokens) || rawMaxTokens <= 0) {
+                throw new customError.AppError("max_tokens / max_completion_tokens must be a positive number", 400);
+            }
+            responsesReq.max_output_tokens = rawMaxTokens;
         }
         if (req.temperature !== undefined) {
             responsesReq.temperature = req.temperature;
@@ -180,17 +194,18 @@ export class OpenAIToResponsesConverter extends BaseConverter {
     // ─── 非流式响应转换 ───
 
     public convertResponse(upstreamRes: ResponsesNonStreamResponse, requestId?: string): OpenAIResponse {
-        let content: string | null = null;
-        let reasoningContent: string | null = null;
+        const messageTexts: string[] = [];
+        const reasoningTexts: string[] = [];
         const toolCalls: OpenAIResponse["choices"][0]["message"]["tool_calls"] = [];
         let finishReason: OpenAIResponse["choices"][0]["finish_reason"] = "stop";
 
         for (const item of upstreamRes.output) {
             if (item.type === "message") {
-                for (const part of item.content) {
-                    if (part.type === "output_text") {
-                        content = part.text;
-                    }
+                const partTexts = item.content
+                    .filter((part) => part.type === "output_text" && part.text !== undefined)
+                    .map((part) => part.text);
+                if (partTexts.length > 0) {
+                    messageTexts.push(partTexts.join(""));
                 }
             } else if (item.type === "function_call") {
                 toolCalls.push({
@@ -203,34 +218,28 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                 });
                 finishReason = "tool_calls";
             } else if (item.type === "reasoning") {
-                const thinkingText = item.summary?.map((s) => s.text).join("\n") || "";
+                const thinkingText = item.summary?.map((s) => s.text).filter(Boolean).join("\n") || "";
                 if (thinkingText) {
-                    reasoningContent = thinkingText;
+                    reasoningTexts.push(thinkingText);
                 }
             }
+        }
+
+        const content: string | null = messageTexts.length > 0 ? messageTexts.join("\n") : null;
+        const reasoningContent: string | null = reasoningTexts.length > 0 ? reasoningTexts.join("\n") : null;
+
+        if (upstreamRes.status === "incomplete") {
+            finishReason = upstreamRes.incomplete_details?.reason === "content_filter"
+                ? "content_filter"
+                : "length";
         }
 
         const finalId = requestId || upstreamRes.id;
         const responseId = finalId.startsWith("chatcmpl-") ? finalId : `chatcmpl-${finalId.replace("resp_", "")}`;
 
-        const inputTokens = upstreamRes.usage?.input_tokens || 0;
-        const outputTokens = upstreamRes.usage?.output_tokens || 0;
-        const totalTokens = upstreamRes.usage?.total_tokens || (inputTokens + outputTokens);
-        const cachedTokens = upstreamRes.usage?.input_tokens_details?.cached_tokens;
-        const reasoningTokens = upstreamRes.usage?.output_tokens_details?.reasoning_tokens;
-
-        const usage: OpenAIResponse["usage"] = {
-            prompt_tokens: inputTokens,
-            completion_tokens: outputTokens,
-            total_tokens: totalTokens,
-        };
-
-        if (cachedTokens !== undefined) {
-            usage.prompt_tokens_details = { cached_tokens: cachedTokens };
-        }
-        if (reasoningTokens !== undefined) {
-            usage.completion_tokens_details = { reasoning_tokens: reasoningTokens };
-        }
+        const usage = protocolConverterUtil.responsesUsageToOpenAI(
+            protocolConverterUtil.mergeResponsesUsage({}, upstreamRes.usage),
+        );
 
         const message: OpenAIResponse["choices"][0]["message"] = {
             role: "assistant",
@@ -266,18 +275,17 @@ export class OpenAIToResponsesConverter extends BaseConverter {
 
         switch (eventType) {
             case "response.created": {
-                // 发送首个 chunk（包含 role）
+                // 发送首个 chunk（包含 role）并持久化上游 id/model
                 const response = data.response as ResponsesStreamResponse | undefined;
-                const model = response?.model || this.requestModel;
-                const id = response?.id || this.responseId;
-                const chatId = id.startsWith("chatcmpl-") ? id : `chatcmpl-${id.replace("resp_", "")}`;
+                if (response?.model) this.updateModel(response.model);
+                if (response?.id) this.updateResponseId(response.id);
 
                 out.push({
                     data: JSON.stringify({
-                        id: chatId,
+                        id: this.getChatId(),
                         object: "chat.completion.chunk",
                         created: Math.floor(Date.now() / 1000),
-                        model,
+                        model: this.requestModel,
                         choices: [{
                             index: 0,
                             delta: { role: "assistant", content: "" },
@@ -392,12 +400,20 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                 break;
             }
 
-            case "response.completed": {
+            case "response.completed":
+            case "response.incomplete": {
                 const response = data.response as ResponsesStreamResponse | undefined;
                 const usage = response?.usage;
 
                 // 发送 finish_reason
-                const finishReason = this.hasToolCalls ? "tool_calls" : "stop";
+                let finishReason: string;
+                if (eventType === "response.incomplete" || response?.status === "incomplete") {
+                    finishReason = response?.incomplete_details?.reason === "content_filter"
+                        ? "content_filter"
+                        : "length";
+                } else {
+                    finishReason = this.hasToolCalls ? "tool_calls" : "stop";
+                }
                 out.push({
                     data: JSON.stringify({
                         id: this.getChatId(),
@@ -414,24 +430,9 @@ export class OpenAIToResponsesConverter extends BaseConverter {
 
                 // 发送 usage（单独的 chunk）
                 if (usage) {
-                    const inputTokens = usage.input_tokens || 0;
-                    const outputTokens = usage.output_tokens || 0;
-                    const totalTokens = usage.total_tokens || (inputTokens + outputTokens);
-                    const cachedTokens = usage.input_tokens_details?.cached_tokens;
-                    const reasoningTokens = usage.output_tokens_details?.reasoning_tokens;
-
-                    const usageData: OpenAIUsage = {
-                        prompt_tokens: inputTokens,
-                        completion_tokens: outputTokens,
-                        total_tokens: totalTokens,
-                    };
-
-                    if (cachedTokens !== undefined) {
-                        usageData.prompt_tokens_details = { cached_tokens: cachedTokens };
-                    }
-                    if (reasoningTokens !== undefined) {
-                        usageData.completion_tokens_details = { reasoning_tokens: reasoningTokens };
-                    }
+                    const usageData = protocolConverterUtil.responsesUsageToOpenAI(
+                        protocolConverterUtil.mergeResponsesUsage({}, usage),
+                    );
 
                     out.push({
                         data: JSON.stringify({
@@ -449,7 +450,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                 this.hasToolCalls = false;
                 this.isFirstChunk = true;
 
-                // OpenAI 客户端的终止标记：Responses 上游用 response.completed 收尾，不带 [DONE]
+                // OpenAI 客户端的终止标记：Responses 上游用 response.completed / response.incomplete 收尾，不带 [DONE]
                 out.push({ data: "[DONE]" });
                 break;
             }
@@ -477,6 +478,15 @@ export class OpenAIToResponsesConverter extends BaseConverter {
         }
 
         return out;
+    }
+
+    private extractMessageText(content: OpenAIMessage["content"]): string {
+        if (typeof content === "string") return content;
+        if (!Array.isArray(content)) return "";
+        return content
+            .filter((part): part is { type: "text"; text: string } => part.type === "text")
+            .map((part) => part.text)
+            .join("\n");
     }
 
     private getChatId(): string {

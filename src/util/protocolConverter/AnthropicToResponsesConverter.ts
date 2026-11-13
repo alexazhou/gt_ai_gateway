@@ -1,3 +1,4 @@
+import customError from "../../customError";
 import { BaseConverter } from "./BaseConverter";
 import type {
     AnthropicContentBlock,
@@ -21,12 +22,21 @@ import {
     buildThinkingConfigFromAnthropic,
     thinkingConfigToOpenAIResponses,
 } from "./thinkingConfig";
-import protocolConverterUtil from "./protocolConverterUtil";
+import protocolConverterUtil, { type RawResponsesUsage } from "./protocolConverterUtil";
 
 const STOP_REASON_MAP: Record<string, string> = {
     completed: "end_turn",
     failed: "end_turn",
 };
+
+interface AnthropicStreamBlockState {
+    blockIndex: number;
+    outputIndex: number;
+    subIndex: number;
+    itemId?: string;
+    type: "text" | "tool_use" | "thinking";
+    closed: boolean;
+}
 
 /**
  * Anthropic → Responses API 转换器
@@ -37,10 +47,11 @@ const STOP_REASON_MAP: Record<string, string> = {
  * 3. convertStreamEvent: Responses 流式 SSE → Anthropic 流式 SSE
  */
 export class AnthropicToResponsesConverter extends BaseConverter {
-    private currentToolCallIndex = -1;
-    private currentContentBlockIndex = -1;
-    private inputTokens = 0;
-    private inReasoning = false;
+    private nextBlockIndex = 0;
+    private blocksByKey = new Map<string, AnthropicStreamBlockState>();
+    private blockByItemId = new Map<string, AnthropicStreamBlockState>();
+    private itemTypesByOutputIndex = new Map<number, string>();
+    private rawUsage: RawResponsesUsage = {};
 
     // ─── 请求转换 ───
 
@@ -115,11 +126,32 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                                 content: [{ type: "output_text", text: block.text || "" }],
                             });
                         } else if (block.type === "thinking") {
-                            input.push({
-                                type: "reasoning",
-                                summary: block.thinking ? [{ type: "summary_text", text: block.thinking }] : [],
-                                encrypted_content: block.signature || "",
-                            });
+                            let encryptedContent: string | undefined;
+                            let thinkingText = block.thinking || "";
+                            if (block.signature) {
+                                const unsealed = protocolConverterUtil.unsealThinkingSignature(
+                                    block.signature,
+                                    "responses",
+                                    req.model,
+                                );
+                                if (!unsealed) {
+                                    throw new customError.AppError(
+                                        "Incompatible or unverified thinking signature cannot be converted to Responses encrypted_content",
+                                        400,
+                                    );
+                                }
+                                encryptedContent = unsealed.signature;
+                                if (unsealed.thinking !== undefined) {
+                                    thinkingText = unsealed.thinking;
+                                }
+                            }
+                            if (encryptedContent || thinkingText) {
+                                input.push({
+                                    type: "reasoning",
+                                    summary: thinkingText ? [{ type: "summary_text", text: thinkingText }] : [],
+                                    ...(encryptedContent ? { encrypted_content: encryptedContent } : {}),
+                                });
+                            }
                         } else if (block.type === "tool_use") {
                             input.push({
                                 type: "function_call",
@@ -169,6 +201,9 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                     break;
                 case "any":
                     responsesReq.tool_choice = "required";
+                    break;
+                case "none":
+                    responsesReq.tool_choice = "none";
                     break;
                 case "tool":
                     responsesReq.tool_choice = { type: "function", name: req.tool_choice.name || "" };
@@ -241,7 +276,11 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                     content.push({
                         type: "thinking",
                         thinking: thinkingText,
-                        signature: item.encrypted_content || "",
+                        signature: protocolConverterUtil.sealThinkingSignature(
+                            "responses",
+                            item.encrypted_content || "",
+                            { model: upstreamRes.model, thinking: thinkingText },
+                        ),
                     });
                 }
             }
@@ -250,13 +289,13 @@ export class AnthropicToResponsesConverter extends BaseConverter {
         // Determine stop_reason
         let stopReason: AnthropicResponse["stop_reason"] = "end_turn";
         const hasToolUse = content.some((b) => b.type === "tool_use");
-        if (hasToolUse) stopReason = "tool_use";
+        if (upstreamRes.status === "incomplete" && upstreamRes.incomplete_details?.reason === "max_output_tokens") {
+            stopReason = "max_tokens";
+        } else if (hasToolUse) {
+            stopReason = "tool_use";
+        }
 
         const finalId = requestId || upstreamRes.id;
-
-        const inputTokens = upstreamRes.usage?.input_tokens || 0;
-        const cacheReadTokens = upstreamRes.usage?.input_tokens_details?.cached_tokens;
-        const nonCachedInputTokens = Math.max(0, inputTokens - (cacheReadTokens ?? 0));
 
         return {
             id: finalId.startsWith("msg_") ? finalId : `msg_${finalId.replace("resp_", "")}`,
@@ -265,11 +304,9 @@ export class AnthropicToResponsesConverter extends BaseConverter {
             content,
             model: upstreamRes.model,
             stop_reason: stopReason,
-            usage: {
-                input_tokens: nonCachedInputTokens,
-                output_tokens: upstreamRes.usage?.output_tokens || 0,
-                ...(cacheReadTokens !== undefined ? { cache_read_input_tokens: cacheReadTokens } : {}),
-            },
+            usage: protocolConverterUtil.responsesUsageToAnthropic(
+                protocolConverterUtil.mergeResponsesUsage({}, upstreamRes.usage),
+            ),
         };
     }
 
@@ -305,12 +342,13 @@ export class AnthropicToResponsesConverter extends BaseConverter {
             case "response.created": {
                 const resp = data.response as ResponsesStreamResponse | undefined;
                 this.responseId = resp?.id || this.responseId;
-                const inputTokens = resp?.usage?.input_tokens ?? 0;
-                const cacheReadTokens = resp?.usage?.input_tokens_details?.cached_tokens;
-                this.inputTokens = Math.max(0, inputTokens - (cacheReadTokens ?? 0));
-                this.currentToolCallIndex = -1;
-                this.currentContentBlockIndex = -1;
-                this.inReasoning = false;
+                this.rawUsage = {};
+                protocolConverterUtil.mergeResponsesUsage(this.rawUsage, resp?.usage);
+                const startUsage = protocolConverterUtil.responsesUsageToAnthropic(this.rawUsage);
+                this.nextBlockIndex = 0;
+                this.blocksByKey.clear();
+                this.blockByItemId.clear();
+                this.itemTypesByOutputIndex.clear();
 
                 // message_start
                 out.push({
@@ -324,9 +362,8 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                             model: this.requestModel,
                             stop_reason: null,
                             usage: {
-                                input_tokens: this.inputTokens,
+                                ...startUsage,
                                 output_tokens: 0,
-                                ...(cacheReadTokens !== undefined ? { cache_read_input_tokens: cacheReadTokens } : {}),
                             },
                         },
                     }),
@@ -338,25 +375,27 @@ export class AnthropicToResponsesConverter extends BaseConverter {
             case "response.output_item.added": {
                 const item = data.item as ResponsesStreamItem | undefined;
                 if (!item) break;
+                const outputIndex = (data.output_index as number | undefined) ?? 0;
+                if (item.type) {
+                    this.itemTypesByOutputIndex.set(outputIndex, item.type);
+                }
 
                 if (item.type === "message") {
-                    // text block start
-                    this.currentContentBlockIndex++;
+                    const block = this.openBlock(outputIndex, 0, "text", item.id);
                     out.push({
                         data: JSON.stringify({
                             type: "content_block_start",
-                            index: this.currentContentBlockIndex,
+                            index: block.blockIndex,
                             content_block: { type: "text", text: "" },
                         }),
                         event: "content_block_start",
                     });
                 } else if (item.type === "function_call") {
-                    this.currentContentBlockIndex++;
-                    this.currentToolCallIndex++;
+                    const block = this.openBlock(outputIndex, 0, "tool_use", item.id);
                     out.push({
                         data: JSON.stringify({
                             type: "content_block_start",
-                            index: this.currentContentBlockIndex,
+                            index: block.blockIndex,
                             content_block: {
                                 type: "tool_use",
                                 id: item.call_id || item.id,
@@ -367,12 +406,11 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                         event: "content_block_start",
                     });
                 } else if (item.type === "reasoning") {
-                    this.currentContentBlockIndex++;
-                    this.inReasoning = true;
+                    const block = this.openBlock(outputIndex, 0, "thinking", item.id);
                     out.push({
                         data: JSON.stringify({
                             type: "content_block_start",
-                            index: this.currentContentBlockIndex,
+                            index: block.blockIndex,
                             content_block: {
                                 type: "thinking",
                                 thinking: "",
@@ -384,11 +422,53 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                 break;
             }
 
+            case "response.content_part.added": {
+                const outputIndex = (data.output_index as number | undefined) ?? 0;
+                const contentIndex = (data.content_index as number | undefined) ?? 0;
+                const itemId = data.item_id as string | undefined;
+                if (!this.blocksByKey.has(`${outputIndex}:${contentIndex}`)) {
+                    const block = this.openBlock(outputIndex, contentIndex, "text", itemId);
+                    out.push({
+                        data: JSON.stringify({
+                            type: "content_block_start",
+                            index: block.blockIndex,
+                            content_block: { type: "text", text: "" },
+                        }),
+                        event: "content_block_start",
+                    });
+                }
+                break;
+            }
+
+            case "response.reasoning_summary_part.added": {
+                const outputIndex = (data.output_index as number | undefined) ?? 0;
+                const summaryIndex = (data.summary_index as number | undefined) ?? 0;
+                const itemId = data.item_id as string | undefined;
+                if (!this.blocksByKey.has(`${outputIndex}:${summaryIndex}`)) {
+                    const block = this.openBlock(outputIndex, summaryIndex, "thinking", itemId);
+                    out.push({
+                        data: JSON.stringify({
+                            type: "content_block_start",
+                            index: block.blockIndex,
+                            content_block: { type: "thinking", thinking: "" },
+                        }),
+                        event: "content_block_start",
+                    });
+                }
+                break;
+            }
+
             case "response.output_text.delta": {
+                const block = this.resolveBlock(
+                    (data.output_index as number | undefined) ?? 0,
+                    (data.content_index as number | undefined) ?? 0,
+                    data.item_id as string | undefined,
+                );
+                if (!block) break;
                 out.push({
                     data: JSON.stringify({
                         type: "content_block_delta",
-                        index: this.currentContentBlockIndex,
+                        index: block.blockIndex,
                         delta: { type: "text_delta", text: (data.delta as string | undefined) || "" },
                     }),
                     event: "content_block_delta",
@@ -397,10 +477,16 @@ export class AnthropicToResponsesConverter extends BaseConverter {
             }
 
             case "response.function_call_arguments.delta": {
+                const block = this.resolveBlock(
+                    (data.output_index as number | undefined) ?? 0,
+                    0,
+                    data.item_id as string | undefined,
+                );
+                if (!block) break;
                 out.push({
                     data: JSON.stringify({
                         type: "content_block_delta",
-                        index: this.currentContentBlockIndex,
+                        index: block.blockIndex,
                         delta: { type: "input_json_delta", partial_json: (data.delta as string | undefined) || "" },
                     }),
                     event: "content_block_delta",
@@ -409,10 +495,16 @@ export class AnthropicToResponsesConverter extends BaseConverter {
             }
 
             case "response.reasoning_summary_text.delta": {
+                const block = this.resolveBlock(
+                    (data.output_index as number | undefined) ?? 0,
+                    (data.summary_index as number | undefined) ?? 0,
+                    data.item_id as string | undefined,
+                );
+                if (!block) break;
                 out.push({
                     data: JSON.stringify({
                         type: "content_block_delta",
-                        index: this.currentContentBlockIndex,
+                        index: block.blockIndex,
                         delta: { type: "thinking_delta", thinking: (data.delta as string | undefined) || "" },
                     }),
                     event: "content_block_delta",
@@ -422,58 +514,61 @@ export class AnthropicToResponsesConverter extends BaseConverter {
 
             case "response.output_text.done":
             case "response.content_part.done":
-                // 不需要特别处理，content_block_stop 会收尾
+                // 不需要特别处理，output_item.done 会统一收尾未关闭的块
                 break;
 
             case "response.function_call_arguments.done": {
-                // function call done → content_block_stop
-                out.push({
-                    data: JSON.stringify({
-                        type: "content_block_stop",
-                        index: this.currentContentBlockIndex,
-                    }),
-                    event: "content_block_stop",
-                });
+                const block = this.resolveBlock(
+                    (data.output_index as number | undefined) ?? 0,
+                    0,
+                    data.item_id as string | undefined,
+                );
+                if (block && !block.closed) {
+                    block.closed = true;
+                    out.push({
+                        data: JSON.stringify({
+                            type: "content_block_stop",
+                            index: block.blockIndex,
+                        }),
+                        event: "content_block_stop",
+                    });
+                }
                 break;
             }
 
             case "response.output_item.done": {
                 const item = data.item as ResponsesStreamItem | undefined;
                 if (!item) break;
+                const outputIndex = (data.output_index as number | undefined) ?? 0;
 
-                if (item.type === "message") {
-                    out.push({
-                        data: JSON.stringify({
-                            type: "content_block_stop",
-                            index: this.currentContentBlockIndex,
-                        }),
-                        event: "content_block_stop",
-                    });
-                } else if (item.type === "function_call") {
-                    // 已经在 arguments.done 里处理了 content_block_stop
-                } else if (item.type === "reasoning") {
-                    out.push({
-                        data: JSON.stringify({
-                            type: "content_block_stop",
-                            index: this.currentContentBlockIndex,
-                        }),
-                        event: "content_block_stop",
-                    });
-                    this.inReasoning = false;
+                for (const block of this.blocksByKey.values()) {
+                    if (block.outputIndex === outputIndex && !block.closed) {
+                        block.closed = true;
+                        out.push({
+                            data: JSON.stringify({
+                                type: "content_block_stop",
+                                index: block.blockIndex,
+                            }),
+                            event: "content_block_stop",
+                        });
+                    }
                 }
                 break;
             }
 
-            case "response.completed": {
+            case "response.completed":
+            case "response.incomplete": {
                 const resp = data.response as ResponsesStreamResponse | undefined;
-                const outputTokens = resp?.usage?.output_tokens || 0;
-                const inputTokensVal = resp?.usage?.input_tokens ?? this.inputTokens;
-                const cacheReadTokens = resp?.usage?.input_tokens_details?.cached_tokens;
-                const nonCachedInputTokens = Math.max(0, inputTokensVal - (cacheReadTokens ?? 0));
+                protocolConverterUtil.mergeResponsesUsage(this.rawUsage, resp?.usage);
+                const finalUsage = protocolConverterUtil.responsesUsageToAnthropic(this.rawUsage);
 
                 // 判断 stop_reason
                 let stopReason = "end_turn";
-                if (resp?.output) {
+                if (eventType === "response.incomplete" || resp?.status === "incomplete") {
+                    if (resp?.incomplete_details?.reason !== "content_filter") {
+                        stopReason = "max_tokens";
+                    }
+                } else if (resp?.output) {
                     const hasToolUse = resp.output.some((o) => o.type === "function_call");
                     if (hasToolUse) stopReason = "tool_use";
                 }
@@ -483,11 +578,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                     data: JSON.stringify({
                         type: "message_delta",
                         delta: { stop_reason: stopReason },
-                        usage: {
-                            output_tokens: outputTokens,
-                            input_tokens: nonCachedInputTokens,
-                            ...(cacheReadTokens !== undefined ? { cache_read_input_tokens: cacheReadTokens } : {}),
-                        },
+                        usage: finalUsage,
                     }),
                     event: "message_delta",
                 });
@@ -500,5 +591,47 @@ export class AnthropicToResponsesConverter extends BaseConverter {
         }
 
         return out;
+    }
+
+
+    private openBlock(
+        outputIndex: number,
+        subIndex: number,
+        type: AnthropicStreamBlockState["type"],
+        itemId?: string,
+    ): AnthropicStreamBlockState {
+        const key = `${outputIndex}:${subIndex}`;
+        const existing = this.blocksByKey.get(key);
+        if (existing) return existing;
+
+        const block: AnthropicStreamBlockState = {
+            blockIndex: this.nextBlockIndex++,
+            outputIndex,
+            subIndex,
+            itemId,
+            type,
+            closed: false,
+        };
+        this.blocksByKey.set(key, block);
+        if (itemId && !this.blockByItemId.has(itemId)) {
+            this.blockByItemId.set(itemId, block);
+        }
+        return block;
+    }
+
+
+    private resolveBlock(
+        outputIndex: number,
+        subIndex: number,
+        itemId?: string,
+    ): AnthropicStreamBlockState | undefined {
+        const byKey = this.blocksByKey.get(`${outputIndex}:${subIndex}`);
+        if (byKey && (!itemId || !byKey.itemId || byKey.itemId === itemId)) {
+            return byKey;
+        }
+        if (itemId) {
+            return this.blockByItemId.get(itemId);
+        }
+        return byKey;
     }
 }

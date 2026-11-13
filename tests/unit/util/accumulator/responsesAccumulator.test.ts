@@ -53,8 +53,8 @@ describe("ResponsesAccumulator", () => {
             expect(response.output).toHaveLength(1);
             expect(response.output[0].role).toBe("assistant");
             expect(response.output[0].content).toHaveLength(1);
-            expect(response.output[0].content[0].type).toBe("output_text");
-            expect(response.output[0].content[0].text).toBe("Hello! How can I help you?");
+            expect(response.output[0].content?.[0].type).toBe("output_text");
+            expect(response.output[0].content?.[0].text).toBe("Hello! How can I help you?");
         });
 
         it("parses usage tokens (normalized to canonical keys)", () => {
@@ -96,7 +96,7 @@ describe("ResponsesAccumulator", () => {
             // done 事件携带权威完整文本
             acc.addEvent({ data: JSON.stringify({ type: "response.output_text.done", output_index: 0, content_index: 0, text: "partial" }) });
 
-            expect(acc.getResponse().output[0].content[0].text).toBe("partial");
+            expect(acc.getResponse().output[0].content?.[0].text).toBe("partial");
         });
     });
 

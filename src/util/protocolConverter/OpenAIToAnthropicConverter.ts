@@ -21,7 +21,7 @@ import {
     buildThinkingConfigFromOpenAI,
     thinkingConfigToAnthropic,
 } from "./thinkingConfig";
-import protocolConverterUtil from "./protocolConverterUtil";
+import protocolConverterUtil, { type RawAnthropicUsage } from "./protocolConverterUtil";
 
 const ANTHROPIC_TO_OPENAI_STOP_REASON: Record<string, string> = {
     end_turn: "stop",
@@ -32,7 +32,7 @@ const ANTHROPIC_TO_OPENAI_STOP_REASON: Record<string, string> = {
 
 export class OpenAIToAnthropicConverter extends BaseConverter {
     private currentToolCallIndex = -1;
-    private inputTokens = 0;
+    private rawUsage: RawAnthropicUsage = {};
 
 
     public convertRequest(clientReq: OpenAIRequest): AnthropicRequest {
@@ -40,8 +40,11 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
         const messages: AnthropicRequest["messages"] = [];
 
         for (const msg of clientReq.messages) {
-            if (msg.role === "system") {
-                systemPrompt = (systemPrompt ? systemPrompt + "\n\n" : "") + this.contentToText(msg.content);
+            if (msg.role === "system" || msg.role === "developer") {
+                const sysText = this.contentToText(msg.content);
+                if (sysText) {
+                    systemPrompt = (systemPrompt ? systemPrompt + "\n\n" : "") + sysText;
+                }
                 continue;
             }
 
@@ -113,6 +116,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                         anthropicToolChoice = { type: "any" };
                         break;
                     case "none":
+                        anthropicToolChoice = { type: "none" };
                         break;
                 }
             } else if (typeof clientReq.tool_choice === "object") {
@@ -123,9 +127,16 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
             }
         }
 
+        const rawMaxTokens = clientReq.max_completion_tokens ?? clientReq.max_tokens;
+        if (rawMaxTokens !== undefined) {
+            if (typeof rawMaxTokens !== "number" || !Number.isFinite(rawMaxTokens) || rawMaxTokens <= 0) {
+                throw new customError.AppError("max_tokens / max_completion_tokens must be a positive number", 400);
+            }
+        }
+
         const anthropicReq: AnthropicRequest = {
             model: clientReq.model,
-            max_tokens: clientReq.max_tokens || clientReq.max_completion_tokens || 32768,
+            max_tokens: rawMaxTokens ?? 32768,
             messages,
             stream: clientReq.stream,
             temperature: clientReq.temperature,
@@ -260,11 +271,9 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                     finish_reason: finishReason as "stop" | "length" | "tool_calls" | "content_filter" | null,
                 },
             ],
-            usage: {
-                prompt_tokens: upstreamRes.usage?.input_tokens || 0,
-                completion_tokens: upstreamRes.usage?.output_tokens || 0,
-                total_tokens: (upstreamRes.usage?.input_tokens || 0) + (upstreamRes.usage?.output_tokens || 0),
-            },
+            usage: protocolConverterUtil.anthropicUsageToOpenAI(
+                protocolConverterUtil.mergeAnthropicUsage({}, upstreamRes.usage),
+            ),
         };
     }
 
@@ -282,7 +291,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
             if (message?.id) {
                 this.updateResponseId(message.id.startsWith("chatcmpl-") ? message.id : `chatcmpl-${message.id.replace("msg_", "")}`);
             }
-            this.inputTokens = message?.usage?.input_tokens ?? this.inputTokens;
+            protocolConverterUtil.mergeAnthropicUsage(this.rawUsage, message?.usage);
 
             const chunk: OpenAIChunk = {
                 id: this.responseId,
@@ -432,17 +441,8 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
             };
 
             if (usage) {
-                const cacheReadTokens = usage.cache_read_input_tokens ?? 0;
-                const promptTokensBase = usage.input_tokens ?? this.inputTokens;
-                // OpenAI 口径：prompt_tokens 为含缓存命中总量，缓存部分单独经 prompt_tokens_details 透传
-                const promptTokens = promptTokensBase + cacheReadTokens;
-                const completionTokens = usage.output_tokens || 0;
-                chunk.usage = {
-                    prompt_tokens: promptTokens,
-                    completion_tokens: completionTokens,
-                    total_tokens: promptTokens + completionTokens,
-                    prompt_tokens_details: { cached_tokens: cacheReadTokens },
-                };
+                protocolConverterUtil.mergeAnthropicUsage(this.rawUsage, usage);
+                chunk.usage = protocolConverterUtil.anthropicUsageToOpenAI(this.rawUsage);
             }
             return [{ data: JSON.stringify(chunk) }];
         }
