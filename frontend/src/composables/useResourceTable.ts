@@ -28,7 +28,11 @@ export function useResourceTable<T, TSearch extends object>(
         initialSearchForm,
     );
 
+    // 请求版本号：快速切换搜索/分页时，旧请求可能晚于新请求返回，不能覆盖最新结果
+    let requestVersion = 0;
+
     async function loadData(): Promise<void> {
+        const version = ++requestVersion;
         loading.value = true;
         try {
             const query = {
@@ -37,10 +41,13 @@ export function useResourceTable<T, TSearch extends object>(
                 pageSize: pagination.pageSize,
             } as TSearch;
             const result = normalizeListResponse(await fetcher(query));
+            if (version !== requestVersion) return;
             data.value = result.list;
             pagination.total = result.total;
         } finally {
-            loading.value = false;
+            if (version === requestVersion) {
+                loading.value = false;
+            }
         }
     }
 

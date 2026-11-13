@@ -107,3 +107,29 @@ export interface RecordDetail extends Record {
     vendor_name?: string | null;
     vendor_model_name?: string | null;
 }
+
+/** 孤儿清理的进度分母快照（开始清理前取一次，之后靠累加增量算进度） */
+export interface OrphanCleanupStats {
+    payload_total: number;
+    activity_total: number;
+    page_size: number;
+    max_page_size: number;
+}
+
+/** 一片孤儿清理的游标入参：首片传 null，之后回填上一次返回的 next_* */
+export interface OrphanCleanupStepInput {
+    after_key: string | null;
+    after_activity_id: number | null;
+    limit?: number;
+}
+
+/** 一片孤儿清理的结果：计数是本片增量，调用方自行累加 */
+export interface OrphanCleanupStepResult {
+    next_after_key: string | null;
+    next_after_activity_id: number | null;
+    scanned_payloads: number;
+    deleted_payloads: number;
+    scanned_activities: number;
+    deleted_activities: number;
+    done: boolean;
+}

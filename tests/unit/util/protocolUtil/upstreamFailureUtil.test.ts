@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import upstreamFailureUtil from "../../../../src/util/protocol/upstreamFailureUtil";
+import upstreamFailureUtil from "../../../../src/util/protocolUtil/upstreamFailureUtil";
 import { ApiFormat } from "../../../../src/constants";
 
 

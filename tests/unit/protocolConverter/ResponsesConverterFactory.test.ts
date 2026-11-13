@@ -11,23 +11,21 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { ResponsesToAnthropicConverter } from "../../../src/util/protocolConverter/ResponsesToAnthropicConverter";
 import { AnthropicToResponsesConverter } from "../../../src/util/protocolConverter/AnthropicToResponsesConverter";
 import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterFactory";
-import { ReasoningEffort } from "../../../src/util/protocolConverter/thinkingConfig";
+import { ReasoningEffort } from "../../../src/util/protocol/commonTypes";
 import { ApiFormat } from "../../../src/constants";
 import type {
+    AnthropicContentBlock,
     AnthropicRequest,
     AnthropicResponse,
-    AnthropicContentBlock,
-    ProtocolStreamEvent,
-} from "../../../src/util/protocolConverter/protocolTypes";
+} from "../../../src/util/protocol/anthropicTypes";
 import type {
-    ResponsesRequest,
-    ResponsesNonStreamResponse,
+    ResponsesContentPart,
     ResponsesInputItem,
-} from "../../../src/util/protocolConverter/responsesTypes";
-
-function parseStreamEventData(events: ProtocolStreamEvent[], index: number = 0): any {
-    return JSON.parse(events[index].data);
-}
+    ResponsesMessageItem,
+    ResponsesNonStreamResponse,
+    ResponsesOutputMessage,
+    ResponsesRequest,
+} from "../../../src/util/protocol/responsesTypes";
 
 // ============================================================
 // ============================================================
@@ -60,8 +58,9 @@ describe("ConverterFactory - Responses ↔ Anthropic routing", () => {
             model: "gpt-5.5",
             max_tokens: 1024,
             messages: [{ role: "user", content: "你好" }],
-        });
-        expect(upstreamReq.input[0].content[0].type).toBe("input_text");
+        }) as ResponsesRequest;
+        const firstItem = upstreamReq.input[0] as ResponsesMessageItem;
+        expect((firstItem.content as ResponsesContentPart[])[0].type).toBe("input_text");
 
         const clientRes = converter!.convertResponse({
             id: "resp_123",
@@ -84,7 +83,7 @@ describe("ConverterFactory - Responses ↔ Anthropic routing", () => {
                 output_tokens: 2,
                 total_tokens: 12,
             },
-        });
+        }) as AnthropicResponse;
 
         expect(clientRes.type).toBe("message");
         expect(clientRes.content[0]).toEqual({ type: "text", text: "你好！" });
@@ -104,8 +103,8 @@ describe("ConverterFactory - Responses ↔ Anthropic routing", () => {
                     content: [{ type: "input_text", text: "hello" }],
                 },
             ],
-        });
-        expect(upstreamReq.messages[0].content[0]).toEqual({ type: "text", text: "hello" });
+        }) as AnthropicRequest;
+        expect((upstreamReq.messages[0].content as AnthropicContentBlock[])[0]).toEqual({ type: "text", text: "hello" });
 
         const clientRes = converter!.convertResponse({
             id: "msg_123",
@@ -115,11 +114,12 @@ describe("ConverterFactory - Responses ↔ Anthropic routing", () => {
             model: "claude-3-sonnet-20240229",
             stop_reason: "end_turn",
             usage: { input_tokens: 10, output_tokens: 2 },
-        });
+        }) as ResponsesNonStreamResponse;
 
         expect(clientRes.object).toBe("response");
         expect(clientRes.output[0].type).toBe("message");
-        expect((clientRes.output[0] as any).content[0].text).toBe("Hello!");
+        const outputItem = clientRes.output[0] as ResponsesOutputMessage;
+        expect(outputItem.content[0].text).toBe("Hello!");
     });
 
     it("should still create Anthropic ↔ OpenAI converters", () => {

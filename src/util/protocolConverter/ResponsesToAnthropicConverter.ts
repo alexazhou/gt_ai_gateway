@@ -1,21 +1,28 @@
+import customError from "../../customError";
 import { BaseConverter } from "./BaseConverter";
 import type {
+    AnthropicContentBlock,
     AnthropicRequest,
     AnthropicResponse,
-    AnthropicContentBlock,
+    AnthropicStreamContentBlock,
+    AnthropicStreamDelta,
+    AnthropicStreamMessage,
+    AnthropicStreamUsage,
     AnthropicTool,
-    ProtocolStreamEvent,
-} from "./protocolTypes";
+} from "../protocol/anthropicTypes";
+import type { ProtocolStreamEvent } from "../protocol/commonTypes";
 import type {
-    ResponsesRequest,
+    ResponsesContentPart,
     ResponsesInputItem,
     ResponsesNonStreamResponse,
-    ResponsesContentPart,
-} from "./responsesTypes";
+    ResponsesOutputItem,
+    ResponsesRequest,
+} from "../protocol/responsesTypes";
 import {
     buildThinkingConfigFromOpenAIResponses,
     thinkingConfigToAnthropic,
 } from "./thinkingConfig";
+import protocolConverterUtil from "./protocolConverterUtil";
 
 /**
  * Responses API → Anthropic 转换器
@@ -26,7 +33,6 @@ import {
  * 3. convertStreamEvent: Anthropic 流式 SSE → Responses 流式 SSE
  */
 export class ResponsesToAnthropicConverter extends BaseConverter {
-    private seq = 0;
     private currentMsgId = "";
     private currentFcId = "";
     private inTextBlock = false;
@@ -46,10 +52,6 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
     private outputTokens = 0;
     private cacheReadTokens = 0;
     private currentToolCallIndex = -1;
-
-    private nextSeq(): number {
-        return ++this.seq;
-    }
 
     // ─── 请求转换 ───
 
@@ -78,7 +80,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
 
             const flushToolResults = () => {
                 if (pendingToolResults.length > 0) {
-                    messages.push({ role: "user", content: pendingToolResults });
+                    protocolConverterUtil.appendAnthropicMessage(messages, "user", pendingToolResults);
                     pendingToolResults = [];
                 }
             };
@@ -90,14 +92,14 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                         type: "tool_use",
                         id: item.call_id || `toolu_${Date.now()}`,
                         name: item.name,
-                        input: this.safeParseArgs(item.arguments),
+                        input: protocolConverterUtil.parseToolArguments(item.arguments),
                     });
                 } else if ("type" in item && item.type === "function_call_output") {
                     // 收集 function_call_output
                     pendingToolResults.push({
                         type: "tool_result",
                         tool_use_id: item.call_id,
-                        content: item.output,
+                        content: this.convertFunctionCallOutput(item.output),
                     });
                 } else {
                     // 遇到其他类型，先 flush 之前收集的内容
@@ -180,7 +182,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                 type: "tool_use",
                 id: item.call_id || `toolu_${Date.now()}`,
                 name: item.name,
-                input: this.safeParseArgs(item.arguments),
+                input: protocolConverterUtil.parseToolArguments(item.arguments),
             };
             messages.push({ role: "assistant", content: [toolUse] });
             return;
@@ -191,7 +193,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             const toolResult: AnthropicContentBlock = {
                 type: "tool_result",
                 tool_use_id: item.call_id,
-                content: item.output,
+                content: this.convertFunctionCallOutput(item.output),
             };
             messages.push({ role: "user", content: [toolResult] });
             return;
@@ -223,7 +225,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
 
             if (role === "system" || role === "developer") {
                 // system/developer message → system prompt
-                const text = this.extractText(content);
+                const text = protocolConverterUtil.extractResponsesText(content, "Anthropic");
                 if (setSystem) {
                     setSystem(text);
                 }
@@ -231,7 +233,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             }
 
             if (typeof content === "string") {
-                messages.push({ role: role as "user" | "assistant", content });
+                protocolConverterUtil.appendAnthropicMessage(messages, role as "user" | "assistant", content);
                 return;
             }
 
@@ -241,47 +243,67 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                     if (part.type === "input_text" || part.type === "output_text") {
                         blocks.push({ type: "text", text: part.text });
                     } else if (part.type === "input_image") {
-                        const url = part.image_url || (part as any).url || "";
-                        if (url.startsWith("data:")) {
-                            const match = url.match(/^data:([^;]+);base64,(.+)$/);
-                            if (match) {
-                                blocks.push({
-                                    type: "image",
-                                    source: { type: "base64", media_type: match[1], data: match[2] },
-                                });
-                            }
-                        } else {
-                            blocks.push({
-                                type: "image",
-                                source: { type: "url", url },
-                            });
-                        }
+                        blocks.push(this.convertInputImage(part));
+                    } else if (part.type === "input_file") {
+                        throw new customError.AppError(
+                            "Responses input_file cannot be converted to Anthropic",
+                            400,
+                        );
                     }
                 }
                 if (blocks.length > 0) {
-                    messages.push({ role: role as "user" | "assistant", content: blocks });
+                    protocolConverterUtil.appendAnthropicMessage(messages, role as "user" | "assistant", blocks);
                 }
             }
         }
     }
 
-    private extractText(content: string | ResponsesContentPart[]): string {
-        if (typeof content === "string") return content;
-        if (!Array.isArray(content)) return "";
-        return content
-            .filter((p: any) => p.type === "input_text" || p.type === "output_text")
-            .map((p: any) => p.text)
-            .join("\n");
+
+    /**
+     * Responses function_call_output.output → Anthropic tool_result content。
+     * 数组输出支持文本和图片；file_id 图片无法由网关解析，明确报错。
+     */
+    private convertFunctionCallOutput(
+        output: string | ResponsesContentPart[],
+    ): string | AnthropicContentBlock[] {
+        if (typeof output === "string") {
+            return output;
+        }
+
+        const blocks: AnthropicContentBlock[] = [];
+        for (const part of output) {
+            if (part.type === "input_text" || part.type === "output_text") {
+                blocks.push({ type: "text", text: part.text });
+            } else if (part.type === "input_image") {
+                blocks.push(this.convertInputImage(part));
+            } else if (part.type === "input_file") {
+                throw new customError.AppError(
+                    "Responses input_file cannot be converted to Anthropic",
+                    400,
+                );
+            }
+        }
+        return blocks.length > 0 ? blocks : "";
     }
 
-    private safeParseArgs(args: string): Record<string, unknown> {
-        try {
-            const parsed = JSON.parse(args);
-            return typeof parsed === "object" && parsed !== null ? parsed : {};
-        } catch {
-            return {};
+
+    /**
+     * Responses input_image → Anthropic image block
+     */
+    private convertInputImage(
+        part: { image_url?: string; url?: string; file_id?: string },
+    ): AnthropicContentBlock {
+        const url = part.image_url || part.url || "";
+        if (!url) {
+            throw new customError.AppError(
+                "Responses input_image with file_id cannot be converted to Anthropic",
+                400,
+            );
         }
+
+        return { type: "image", source: protocolConverterUtil.anthropicImageSourceFromUrl(url) };
     }
+
 
     // ─── 非流式响应转换 ───
 
@@ -348,7 +370,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             }
 
             case "message_start": {
-                const msg = (data as any).message;
+                const msg = data.message as AnthropicStreamMessage | undefined;
                 if (msg?.model) this.updateModel(msg.model);
                 if (msg?.id) {
                     this.responseId = msg.id.startsWith("resp_") ? msg.id : `resp_${msg.id.replace("msg_", "")}`;
@@ -393,9 +415,9 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             }
 
             case "content_block_start": {
-                const block = (data as any).content_block;
+                const block = data.content_block as AnthropicStreamContentBlock | undefined;
                 if (!block) break;
-                const idx = (data as any).index ?? 0;
+                const idx = (data.index as number | undefined) ?? 0;
 
                 if (block.type === "text") {
                     this.inTextBlock = true;
@@ -489,7 +511,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             }
 
             case "content_block_delta": {
-                const delta = (data as any).delta;
+                const delta = data.delta as AnthropicStreamDelta | undefined;
                 if (!delta) break;
 
                 if (delta.type === "text_delta") {
@@ -505,7 +527,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                     });
                     this.textBuf += delta.text || "";
                 } else if (delta.type === "input_json_delta") {
-                    const idx = (data as any).index ?? 0;
+                    const idx = (data.index as number | undefined) ?? 0;
                     this.funcArgsBuf[idx] = (this.funcArgsBuf[idx] || "") + (delta.partial_json || "");
                     out.push({
                         data: JSON.stringify({
@@ -539,7 +561,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             }
 
             case "content_block_stop": {
-                const idx = (data as any).index ?? 0;
+                const idx = (data.index as number | undefined) ?? 0;
 
                 if (this.inTextBlock) {
                     // finalize text
@@ -632,7 +654,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             }
 
             case "message_delta": {
-                const usage = (data as any).usage;
+                const usage = data.usage as AnthropicStreamUsage | undefined;
                 if (usage) {
                     this.outputTokens = usage.output_tokens ?? this.outputTokens;
                     this.inputTokens = usage.input_tokens ?? this.inputTokens;
@@ -685,7 +707,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                 }
 
                 // build output array for response.completed
-                const outputArr: any[] = [];
+                const outputArr: ResponsesOutputItem[] = [];
                 if (this.textBuf) {
                     outputArr.push({
                         id: this.currentMsgId,

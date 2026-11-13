@@ -3,10 +3,12 @@ import { SgModel } from "../model/sgModel";
 import { ApiFormat } from "../constants";
 import modelManager from "../manager/modelManager";
 import modelService from "../service/modelService";
-import sender from "../service/senderService";
+import sender, { type UpstreamRequestSnapshot } from "../service/senderService";
 import userService from "../service/userService";
 import customError from "../customError";
 import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
+import objectUtil from "../util/objectUtil";
+import protocolUtils from "../util/protocolUtil/protocolUtil";
 
 
 function parseJsonLike(text: string): unknown {
@@ -135,17 +137,18 @@ async function getModelsByIds(c: Context) {
 // sender 在 inspect 模式下把最终命中的上游请求注入 c（upstreamRequestSnapshot），此处读出并组装成
 // 与供应商直连测试一致的 VendorTestResponse，前端据此展示请求详情。
 async function testModelRoute(c: Context) {
-    const bodyJson = await c.req.json().catch(() => ({}));
-    const modelName = (bodyJson as any).model;
-    const formatRaw = (bodyJson as any).format || "openai";
+    const rawBody: unknown = await c.req.json().catch(() => ({}));
+    const bodyJson = objectUtil.isRecord(rawBody) ? rawBody : {};
+    const modelName = typeof bodyJson.model === "string" ? bodyJson.model : undefined;
+    const formatRaw = typeof bodyJson.format === "string" ? bodyJson.format : "openai";
 
     if (!modelName) {
         throw new customError.AppError("model is required");
     }
-    if (![ApiFormat.OPENAI, ApiFormat.ANTHROPIC, ApiFormat.RESPONSES].includes(formatRaw)) {
+    if (!protocolUtils.isApiFormat(formatRaw)) {
         throw new customError.AppError("format must be one of openai, anthropic, responses");
     }
-    const format = formatRaw as ApiFormat;
+    const format = formatRaw;
 
     // requireAdmin 已注入完整 user（含租户）；模型按当前视角租户解析（本租户优先、共享兜底）
     const user = c.get("user");
@@ -172,13 +175,14 @@ async function testModelRoute(c: Context) {
     let response: Response;
     try {
         response = await sender.sendRequest(c, user, modelConfig, format, body, { inspect: true });
-    } catch (e: any) {
+    } catch (e) {
         const errorMessage = e instanceof Error ? e.message : String(e);
-        const snapshot = c.get("upstreamRequestSnapshot") as any;
+        const snapshot = c.get("upstreamRequestSnapshot") as UpstreamRequestSnapshot | undefined;
+        const status = objectUtil.isRecord(e) && typeof e.status === "number" ? e.status : undefined;
         c.status(200);
         return c.json({
             success: false,
-            status: typeof e?.status === "number" ? e.status : undefined,
+            status,
             duration: Date.now() - startTime,
             url: snapshot?.url ?? null,
             converted_from:
@@ -194,7 +198,7 @@ async function testModelRoute(c: Context) {
     }
 
     const responseText = await response.text();
-    const snapshot = c.get("upstreamRequestSnapshot") as any;
+    const snapshot = c.get("upstreamRequestSnapshot") as UpstreamRequestSnapshot | undefined;
     c.status(200);
     return c.json({
         success: response.ok,

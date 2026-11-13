@@ -6,8 +6,10 @@ import { ConfigKey, RunMode } from "../../src/constants";
 import dbHelper from "../helpers/dbHelper";
 import ormTestHelper from "../helpers/ormTestHelper";
 
-function createMockR2Bucket(): R2Bucket {
-    const objects = new Map<string, Uint8Array>();
+function createMockR2Bucket(preloadKeys: string[] = []): R2Bucket {
+    const objects = new Map<string, Uint8Array>(
+        preloadKeys.map(key => [key, new Uint8Array([1])]),
+    );
 
     return {
         put: vi.fn(async (key: string, value: unknown) => {
@@ -41,9 +43,16 @@ function createMockR2Bucket(): R2Bucket {
         }),
         list: vi.fn(async (options?: R2ListOptions) => {
             const limit = options?.limit ?? 1000;
+            // 与真实 R2 对齐：单次 list 的 limit 超过 1000 直接报错，
+            // 让「把大 limit 透传给 R2」这类写法在测试里就能被抓到
+            if (!Number.isInteger(limit) || limit <= 0 || limit > 1000) {
+                throw new Error("list: MaxKeys params must be positive integer <= 1000. (10022)");
+            }
+            const startAfter = options?.startAfter;
             const start = options?.cursor ? Number(options.cursor) : 0;
             const allKeys = [...objects.keys()]
                 .filter(key => !options?.prefix || key.startsWith(options.prefix))
+                .filter(key => !startAfter || key > startAfter)
                 .sort();
             const pageKeys = allKeys.slice(start, start + limit);
             const next = start + limit;
@@ -289,5 +298,45 @@ describe("objectStorageService", () => {
         expect(deleted).toBe(2);
         expect(await objectStorageService.getText("record/database-payload")).toBeNull();
         expect(await objectStorageService.getText("record/r2-payload")).toBeNull();
+    });
+
+    it("pages R2 keys beyond the per-call limit instead of passing a huge limit through", async () => {
+        // R2 list() 单次上限 1000：孤儿清理一片最多 5000 条，必须由我们续取，
+        // 而不是把 limit 直接透传给 R2（真实 R2 会抛 MaxKeys 报错，DO 还没删就整片 500）
+        const keys = Array.from({ length: 2500 }, (_, i) => `record/${String(i).padStart(6, "0")}`);
+        const bucket = createMockR2Bucket(keys);
+        ormService.mode = RunMode.WORKER;
+        objectStorageService.setR2Bucket(bucket);
+        await configService.setValue(ConfigKey.RECORD_PAYLOAD_STORAGE, "r2");
+
+        const page = await objectStorageService.listKeyPage("record/", null, 2500);
+
+        expect(page).toEqual(keys);
+        // 每次调用都不许超过 R2 的上限
+        for (const call of (bucket.list as unknown as { mock: { calls: R2ListOptions[][] } }).mock.calls) {
+            expect(call[0]?.limit).toBeLessThanOrEqual(1000);
+        }
+        expect((bucket.list as unknown as { mock: { calls: unknown[][] } }).mock.calls.length).toBeGreaterThan(1);
+    });
+
+    it("resumes R2 keyset paging from afterKey", async () => {
+        const keys = Array.from({ length: 30 }, (_, i) => `record/${String(i).padStart(3, "0")}`);
+        const bucket = createMockR2Bucket(keys);
+        ormService.mode = RunMode.WORKER;
+        objectStorageService.setR2Bucket(bucket);
+        await configService.setValue(ConfigKey.RECORD_PAYLOAD_STORAGE, "r2");
+
+        expect(await objectStorageService.listKeyPage("record/", "record/009", 5))
+            .toEqual(["record/010", "record/011", "record/012", "record/013", "record/014"]);
+    });
+
+    it("counts R2 keys across pages", async () => {
+        const keys = Array.from({ length: 1200 }, (_, i) => `record/${String(i).padStart(5, "0")}`);
+        const bucket = createMockR2Bucket(keys);
+        ormService.mode = RunMode.WORKER;
+        objectStorageService.setR2Bucket(bucket);
+        await configService.setValue(ConfigKey.RECORD_PAYLOAD_STORAGE, "r2");
+
+        expect(await objectStorageService.countKeys("record/")).toBe(1200);
     });
 });

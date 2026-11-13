@@ -149,7 +149,15 @@
                             </div>
                         </a-tab-pane>
 
-                        <a-tab-pane key="request_json" tab="请求数据 (JSON)">
+                        <a-tab-pane key="request_json">
+                            <template #tab>
+                                <span class="json-tab-title">
+                                    请求数据 (JSON)
+                                    <a-tooltip title="此处为客户端发送的原始请求 JSON，未经过插件改写、协议转换或上游模型名替换">
+                                        <InfoCircleOutlined class="json-tab-info-icon" />
+                                    </a-tooltip>
+                                </span>
+                            </template>
                             <div class="json-pane-content">
                                 <div v-if="!recordStore.currentRecord.request_data" class="no-payload-hint">
                                     <div class="no-payload-title">请求内容未记录</div>
@@ -159,7 +167,15 @@
                             </div>
                         </a-tab-pane>
 
-                        <a-tab-pane key="response_json" tab="响应数据 (JSON)">
+                        <a-tab-pane key="response_json">
+                            <template #tab>
+                                <span class="json-tab-title">
+                                    响应数据 (JSON)
+                                    <a-tooltip title="此处为返回给客户端的响应 JSON（跨协议调用时已由上游协议转换回客户端协议格式）">
+                                        <InfoCircleOutlined class="json-tab-info-icon" />
+                                    </a-tooltip>
+                                </span>
+                            </template>
                             <div class="json-pane-content">
                                 <div v-if="!recordStore.currentRecord.response_data" class="no-payload-hint">
                                     <div class="no-payload-title">响应内容未记录</div>
@@ -193,7 +209,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, watch, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { DownloadOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons-vue';
+import { DownloadOutlined, ArrowUpOutlined, ArrowDownOutlined, InfoCircleOutlined } from '@ant-design/icons-vue';
 import { useRecordStore } from '@/stores/record';
 import { deleteRecord } from '@/api/record';
 import { formatDate } from '@/utils/format';
@@ -210,51 +226,82 @@ const recordStore = useRecordStore();
 const viewerIframe = ref<HTMLIFrameElement | null>(null);
 const activeRequestTab = ref<string>('request_json');
 
-const requestJsonRef = ref<any>(null);
-const responseJsonRef = ref<any>(null);
+interface JsonViewerExpose {
+    handleCopy: () => Promise<void>;
+}
+
+interface ViewerBridge {
+    setLlmData?: (data: unknown) => void;
+}
+
+interface ViewerWindow extends Window {
+    gt_bridge?: ViewerBridge;
+}
+
+const requestJsonRef = ref<JsonViewerExpose | null>(null);
+const responseJsonRef = ref<JsonViewerExpose | null>(null);
 
 const isRequestExpanded = ref(true);
 const isResponseExpanded = ref(true);
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 const conversationData = computed(() => {
-    const messages: any[] = [];
-    let system: any = undefined;
+    const messages: unknown[] = [];
+    let system: unknown;
     try {
         if (recordStore.currentRecord?.request_data) {
-            const req = JSON.parse(recordStore.currentRecord.request_data);
-            if (req.messages && Array.isArray(req.messages)) {
-                messages.push(...req.messages);
-            }
-            if (req.system != null) {
-                system = req.system;
+            const req: unknown = JSON.parse(recordStore.currentRecord.request_data);
+            if (isRecord(req)) {
+                if (Array.isArray(req.messages)) {
+                    messages.push(...req.messages);
+                }
+                if (req.system != null) {
+                    system = req.system;
+                }
             }
         }
-    } catch(e) {}
+    } catch {
+        // 请求数据不是合法 JSON 时按无对话处理
+    }
     try {
         if (recordStore.currentRecord?.response_data) {
-            const res = JSON.parse(recordStore.currentRecord.response_data);
-            if (res.choices && res.choices.length > 0 && res.choices[0].message) {
-                messages.push(res.choices[0].message);
-            } else if (res.message) {
+            const res: unknown = JSON.parse(recordStore.currentRecord.response_data);
+            if (isRecord(res) && Array.isArray(res.choices) && res.choices.length > 0) {
+                const firstChoice = res.choices[0];
+                if (isRecord(firstChoice) && firstChoice.message != null) {
+                    messages.push(firstChoice.message);
+                }
+            } else if (isRecord(res) && res.message != null) {
                 messages.push(res.message);
             }
         }
-    } catch(e) {}
+    } catch {
+        // 响应数据不是合法 JSON 时按无对话处理
+    }
     return system !== undefined ? { system, messages } : messages;
 });
 
-function getMessageCount(data: any): number {
+function getMessageCount(data: unknown): number {
     if (Array.isArray(data)) return data.length;
-    return data?.messages?.length ?? 0;
+    if (isRecord(data) && Array.isArray(data.messages)) return data.messages.length;
+    return 0;
+}
+
+function sendToViewer(data: unknown): void {
+    const contentWindow = viewerIframe.value?.contentWindow as ViewerWindow | null | undefined;
+    const bridge = contentWindow?.gt_bridge;
+    if (bridge && typeof bridge.setLlmData === 'function') {
+        bridge.setLlmData(JSON.parse(JSON.stringify(data)));
+    }
 }
 
 function onIframeLoad() {
     if (viewerIframe.value && viewerIframe.value.contentWindow) {
         setTimeout(() => {
-            const bridge = (viewerIframe.value!.contentWindow as any).gt_bridge;
-            if (bridge && typeof bridge.setLlmData === 'function') {
-                bridge.setLlmData(JSON.parse(JSON.stringify(conversationData.value)));
-            }
+            sendToViewer(conversationData.value);
         }, 300);
     }
 }
@@ -269,10 +316,7 @@ watch(conversationData, (newVal) => {
     }
 
     if (getMessageCount(newVal) > 0 && viewerIframe.value && viewerIframe.value.contentWindow) {
-        const bridge = (viewerIframe.value.contentWindow as any).gt_bridge;
-        if (bridge && typeof bridge.setLlmData === 'function') {
-            bridge.setLlmData(JSON.parse(JSON.stringify(newVal)));
-        }
+        sendToViewer(newVal);
     }
 }, { deep: true, immediate: true });
 
@@ -382,8 +426,17 @@ function getStatusText(status: string | null): string {
 function getErrorMessage(responseData: string | null): string {
     if (!responseData) return '未知错误';
     try {
-        const parsed = JSON.parse(responseData);
-        return parsed.error?.message || parsed.error || '请求失败';
+        const parsed: unknown = JSON.parse(responseData);
+        if (isRecord(parsed)) {
+            const error = parsed.error;
+            if (isRecord(error) && typeof error.message === 'string') {
+                return error.message;
+            }
+            if (typeof error === 'string') {
+                return error;
+            }
+        }
+        return '请求失败';
     } catch {
         return responseData || '请求失败';
     }
@@ -533,5 +586,17 @@ async function downloadJson(data: string | null, type: 'request' | 'response') {
 
 .json-pane-content {
     margin-top: 8px;
+}
+
+.json-tab-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.json-tab-info-icon {
+    font-size: 12px;
+    color: var(--text-secondary, #999);
+    cursor: help;
 }
 </style>

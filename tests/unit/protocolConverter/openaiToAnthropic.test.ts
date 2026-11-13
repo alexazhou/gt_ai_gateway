@@ -5,13 +5,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { OpenAIToAnthropicConverter } from "../../../src/util/protocolConverter/OpenAIToAnthropicConverter";
 import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterFactory";
-import { ReasoningEffort } from "../../../src/util/protocolConverter/thinkingConfig";
+import { ReasoningEffort } from "../../../src/util/protocol/commonTypes";
 import { ApiFormat } from "../../../src/constants";
-import type { AnthropicRequest, AnthropicResponse, OpenAIRequest, ProtocolStreamEvent } from "../../../src/util/protocolConverter/protocolTypes";
-
-function parseStreamEventData(events: ProtocolStreamEvent[], index: number = 0): any {
-    return JSON.parse(events[index].data);
-}
+import type { AnthropicContentBlock, AnthropicRequest, AnthropicResponse } from "../../../src/util/protocol/anthropicTypes";
+import type { ProtocolStreamEvent } from "../../../src/util/protocol/commonTypes";
+import type { OpenAIRequest } from "../../../src/util/protocol/openaiTypes";
+import protocolConverterTestUtil from "./protocolConverterTestUtil";
 
 describe("OpenAIToAnthropicConverter - convertRequest", () => {
     let converter: OpenAIToAnthropicConverter;
@@ -36,6 +35,66 @@ describe("OpenAIToAnthropicConverter - convertRequest", () => {
         expect(result.messages[0].role).toBe("user");
         expect(result.messages[0].content).toBe("Hello");
         expect(result.max_tokens).toBe(1024);
+    });
+
+    it("should convert data-URL image content into an Anthropic base64 image block", () => {
+        const openaiReq: OpenAIRequest = {
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "描述这张图片" },
+                        { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(openaiReq) as AnthropicRequest;
+
+        expect(result.messages[0].content).toEqual([
+            { type: "text", text: "描述这张图片" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+        ]);
+    });
+
+    it("should convert remote image URLs into Anthropic url image blocks", () => {
+        const openaiReq: OpenAIRequest = {
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "描述这张图片" },
+                        { type: "image_url", image_url: { url: "https://example.com/cat.png" } },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(openaiReq) as AnthropicRequest;
+
+        expect(result.messages[0].content).toEqual([
+            { type: "text", text: "描述这张图片" },
+            { type: "image", source: { type: "url", url: "https://example.com/cat.png" } },
+        ]);
+    });
+
+    it("should keep text-only content arrays unchanged", () => {
+        const openaiReq: OpenAIRequest = {
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Hello" }],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(openaiReq) as AnthropicRequest;
+
+        expect(result.messages[0].content).toEqual([{ type: "text", text: "Hello" }]);
     });
 
     it("should extract system messages into Anthropic system field", () => {
@@ -170,6 +229,81 @@ describe("OpenAIToAnthropicConverter - convertRequest", () => {
         const toolResultBlock = (toolResultMsg!.content as Array<any>).find((b: any) => b.type === "tool_result");
         expect(toolResultBlock.tool_use_id).toBe("call_123");
         expect(toolResultBlock.content).toBe("Sunny, 25°C");
+    });
+
+    it("should merge consecutive user text messages into one user message", () => {
+        const openaiReq: OpenAIRequest = {
+            model: "gpt-4",
+            messages: [
+                { role: "user", content: "first" },
+                { role: "user", content: "second" },
+            ],
+            max_tokens: 1024,
+        };
+
+        const result = converter.convertRequest(openaiReq);
+
+        expect(result.messages).toHaveLength(1);
+        expect(result.messages[0].content).toEqual([
+            { type: "text", text: "first" },
+            { type: "text", text: "second" },
+        ]);
+    });
+
+    it("should merge consecutive tool messages into a single user message", () => {
+        const openaiReq: OpenAIRequest = {
+            model: "gpt-4",
+            messages: [
+                {
+                    role: "assistant",
+                    content: null,
+                    tool_calls: [
+                        { id: "call_1", type: "function", function: { name: "get_weather", arguments: "{}" } },
+                        { id: "call_2", type: "function", function: { name: "get_time", arguments: "{}" } },
+                    ],
+                },
+                { role: "tool", content: "Sunny", tool_call_id: "call_1" },
+                { role: "tool", content: "10:00", tool_call_id: "call_2" },
+            ],
+            max_tokens: 1024,
+        };
+
+        const result = converter.convertRequest(openaiReq);
+
+        expect(result.messages.map((m) => m.role)).toEqual(["assistant", "user"]);
+        const content = result.messages[1].content as AnthropicContentBlock[];
+        expect(content).toEqual([
+            { type: "tool_result", tool_use_id: "call_1", content: "Sunny" },
+            { type: "tool_result", tool_use_id: "call_2", content: "10:00" },
+        ]);
+    });
+
+    it("should merge a user message following tool results into the same user message", () => {
+        const openaiReq: OpenAIRequest = {
+            model: "gpt-4",
+            messages: [
+                { role: "user", content: "What's the weather?" },
+                {
+                    role: "assistant",
+                    content: null,
+                    tool_calls: [
+                        { id: "call_123", type: "function", function: { name: "get_weather", arguments: "{}" } },
+                    ],
+                },
+                { role: "tool", content: "Sunny, 25°C", tool_call_id: "call_123" },
+                { role: "user", content: "Thanks" },
+            ],
+            max_tokens: 1024,
+        };
+
+        const result = converter.convertRequest(openaiReq);
+
+        expect(result.messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+        const content = result.messages[2].content as AnthropicContentBlock[];
+        expect(content).toEqual([
+            { type: "tool_result", tool_use_id: "call_123", content: "Sunny, 25°C" },
+            { type: "text", text: "Thanks" },
+        ]);
     });
 
     it("should convert stop to stop_sequences", () => {
@@ -458,7 +592,7 @@ describe("OpenAIToAnthropicConverter - convertStreamEvent", () => {
             },
         }));
 
-        const chunk = parseStreamEventData(events);
+        const chunk = protocolConverterTestUtil.parseStreamEventData(events);
         expect(chunk.choices[0].delta.role).toBe("assistant");
         expect(chunk.model).toBe("claude-3-sonnet-20240229");
     });
@@ -480,7 +614,7 @@ describe("OpenAIToAnthropicConverter - convertStreamEvent", () => {
             index: 0,
             delta: { type: "text_delta", text: "Hello" },
         }));
-        const chunk = parseStreamEventData(events);
+        const chunk = protocolConverterTestUtil.parseStreamEventData(events);
 
         expect(chunk.choices[0].delta.content).toBe("Hello");
     });
@@ -502,8 +636,8 @@ describe("OpenAIToAnthropicConverter - convertStreamEvent", () => {
             delta: { type: "thinking_delta", thinking: "reasoning" },
         }));
 
-        expect(parseStreamEventData(startEvents).choices[0].delta.reasoning_content).toBe("");
-        expect(parseStreamEventData(deltaEvents).choices[0].delta.reasoning_content).toBe("reasoning");
+        expect(protocolConverterTestUtil.parseStreamEventData(startEvents).choices[0].delta.reasoning_content).toBe("");
+        expect(protocolConverterTestUtil.parseStreamEventData(deltaEvents).choices[0].delta.reasoning_content).toBe("reasoning");
     });
 
     it("should convert tool_use stream events to OpenAI tool call deltas", () => {
@@ -523,7 +657,7 @@ describe("OpenAIToAnthropicConverter - convertStreamEvent", () => {
             delta: { type: "input_json_delta", partial_json: "{\"location\"" },
         }));
 
-        const toolStart = parseStreamEventData(startEvents).choices[0].delta.tool_calls[0];
+        const toolStart = protocolConverterTestUtil.parseStreamEventData(startEvents).choices[0].delta.tool_calls[0];
         expect(toolStart).toMatchObject({
             index: 0,
             id: "toolu_123",
@@ -531,7 +665,7 @@ describe("OpenAIToAnthropicConverter - convertStreamEvent", () => {
             function: { name: "get_weather", arguments: "" },
         });
 
-        const toolDelta = parseStreamEventData(deltaEvents).choices[0].delta.tool_calls[0];
+        const toolDelta = protocolConverterTestUtil.parseStreamEventData(deltaEvents).choices[0].delta.tool_calls[0];
         expect(toolDelta.index).toBe(0);
         expect(toolDelta.function.arguments).toBe("{\"location\"");
     });
@@ -543,7 +677,7 @@ describe("OpenAIToAnthropicConverter - convertStreamEvent", () => {
             usage: { output_tokens: 50 },
         }));
 
-        const finalChunk = parseStreamEventData(events);
+        const finalChunk = protocolConverterTestUtil.parseStreamEventData(events);
         expect(finalChunk.choices[0].finish_reason).toBe("stop");
     });
 

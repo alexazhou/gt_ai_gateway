@@ -1,4 +1,4 @@
-import type { ProtocolStreamEvent } from "../protocolConverter/protocolTypes";
+import type { ProtocolStreamEvent } from "../protocol/commonTypes";
 
 
 /**

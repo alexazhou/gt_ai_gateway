@@ -24,7 +24,7 @@ let cachedStatus: UpdateStatus | null = null;
 let lastCheckTime = 0;
 const CHECK_INTERVAL = 1000 * 60 * 60 * 12; // 12 hours
 
-async function checkUpdate(_ctx: any, force: boolean = false): Promise<UpdateStatus> {
+async function checkUpdate(force: boolean = false): Promise<UpdateStatus> {
     const currentVersion = packageJson.version;
     const now = Date.now();
 

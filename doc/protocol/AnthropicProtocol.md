@@ -49,6 +49,64 @@ anthropic-version: 2023-06-01
 }
 ```
 
+### 请求内容块
+
+`messages[].content` 可以是字符串，也可以是内容块数组。常用类型：
+
+**图片**
+
+```json
+{
+  "type": "image",
+  "source": {
+    "type": "base64",
+    "media_type": "image/png",
+    "data": "..."
+  }
+}
+```
+
+```json
+{
+  "type": "image",
+  "source": { "type": "url", "url": "https://example.com/cat.png" }
+}
+```
+
+**工具调用（assistant）**
+
+```json
+{
+  "type": "tool_use",
+  "id": "toolu_123",
+  "name": "get_weather",
+  "input": { "location": "Tokyo" }
+}
+```
+
+**工具结果（user）**
+
+```json
+{
+  "type": "tool_result",
+  "tool_use_id": "toolu_123",
+  "content": "Sunny, 25°C"
+}
+```
+
+`tool_result.content` 也可以是内容块数组，数组中的元素支持 `text` 和 `image`：
+
+```json
+{
+  "type": "tool_result",
+  "tool_use_id": "toolu_123",
+  "content": [
+    { "type": "text", "text": "截图如下" },
+    { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "..." } }
+  ]
+}
+```
+
 ---
 
 ## 2. 流式请求格式（SSE）
@@ -337,7 +395,7 @@ response = {
 | 特性 | Anthropic | OpenAI |
 |------|-----------|--------|
 | 事件格式 | `event: xxx\ndata: {...}` | `data: {...}` |
-| 多内容块 | 支持（thinking + text） | 不支持 |
+| 多内容块 | 支持（thinking + text） | 支持（text + image_url 等内容块） |
 | delta 类型区分 | `thinking_delta` / `signature_delta` / `text_delta` | 只有 `delta.content` |
 | Token 字段名 | `input_tokens` / `output_tokens` | `prompt_tokens` / `completion_tokens` |
-| 消息结构 | `content: [{type, text}]` | `content: string` |
+| 消息结构 | `content: [{type, text}]` | `content: string` 或内容块数组 |

@@ -2,7 +2,11 @@ name = "gt-ai-gateway"
 main = "src/index.ts"
 compatibility_date = "2025-01-19"
 
-compatibility_flags = [ "nodejs_compat", "no_handle_cross_request_promise_resolution" ]
+# enhanced_error_serialization：让 name 与自定义属性穿过 fetch / 序列化边界。
+# 上游超时与客户端断开以 TaggedError 作为 abort reason，workerd 默认（该 flag 关闭时）
+# 会用 new Error 重建、只保留 message，导致 failed_code 丢失；开启后 name 与 failedCode 得以保留。
+# 详见 src/util/abortTimeoutUtil.ts 的 isTaggedError 与 cloudflare/workerd#7035。
+compatibility_flags = [ "nodejs_compat", "no_handle_cross_request_promise_resolution", "enhanced_error_serialization" ]
 
 
 [vars]

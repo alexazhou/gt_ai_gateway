@@ -33,14 +33,15 @@ async function create(vendorId: number, modelId: string): Promise<SgVendorModel>
 }
 
 /**
- * 同步该 vendor 下的模型列表：先删除旧记录，再重新插入选中的 model_id。
+ * 批量新增该 vendor 下的模型：只补全尚不存在的 model_id，不删除已有记录。
+ * 这样 vendor_model.id 不会被重排，model.routing_config 的引用也就不会悬空。
  * @returns 同步后的完整模型列表（按 model_id 升序）
  */
 async function syncByVendor(vendorId: number, modelIds: string[]): Promise<SgVendorModel[]> {
-    await SgVendorModel.query().where("vendor_id", vendorId).delete();
+    const existingModelIds = new Set((await listByVendor(vendorId)).map(m => m.model_id));
 
-    if (modelIds.length > 0) {
-        for (const modelId of modelIds) {
+    for (const modelId of new Set(modelIds)) {
+        if (!existingModelIds.has(modelId)) {
             await SgVendorModel.query().create({
                 vendor_id: vendorId,
                 model_id: modelId,

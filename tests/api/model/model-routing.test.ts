@@ -796,7 +796,15 @@ describe("Model multi-upstream routing", () => {
             adminToken,
         );
         expect(records.body.total).toBe(1);
-        expect(records.body.list[0].status).toBe("failed");
+        const record = records.body.list[0];
+        expect(record.status).toBe("failed");
+        // 所有上游都连不上：最终记网络不可达，而不是 no_available_upstream 或 null。
+        // 这条覆盖 failover 耗尽路径——该分支仅在 lastFailureCode 非空时写 failed_code，
+        // 上游发起阶段漏了分类就会退化成 null。
+        expect(record.failed_code).toBe("upstream_unreachable");
+        // 原始错误保留在 response_data（列表接口是摘要列，需查详情）；文案按运行时不同，故只断言有原文
+        const detail = await requestHelper.get(`/record/${record.id}.json`, adminToken);
+        expect(detail.body.response_data).toBeTruthy();
     });
 
     it("records the request processing timeline as activities", async () => {

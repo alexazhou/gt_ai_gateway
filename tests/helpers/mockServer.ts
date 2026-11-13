@@ -302,6 +302,7 @@ function handleOpenAIChat(req: IncomingMessage, res: ServerResponse): void {
     req.on("end", () => {
         try {
             const data = body ? JSON.parse(body) : {};
+            captureRequest(req, body, data);
             const isStream = data.stream === true;
             const hasTools = Array.isArray(data.tools) && data.tools.length > 0;
 
@@ -910,6 +911,7 @@ function handleAnthropicMessages(
     req.on("end", () => {
         try {
             const data = body ? JSON.parse(body) : {};
+            captureRequest(req, body, data);
             const isStream = data.stream === true;
             const hasTools = Array.isArray(data.tools) && data.tools.length > 0;
 

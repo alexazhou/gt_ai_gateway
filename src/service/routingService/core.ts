@@ -4,7 +4,7 @@ import { SgModel } from "../../model/sgModel";
 import vendorManager from "../../manager/vendorManager";
 import vendorModelManager from "../../manager/vendorModelManager";
 import customError from "../../customError";
-import protocolUtils from "../../util/protocol/protocolUtil";
+import protocolUtils from "../../util/protocolUtil/protocolUtil";
 import RoutingContext from "./routingContext";
 import { ModelRoutingResult } from "./types";
 import BaseRoutingStrategy from "./routingStrategy/baseRoutingStrategy";

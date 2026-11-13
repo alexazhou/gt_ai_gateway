@@ -4,50 +4,30 @@
  * 与 openaiChatAccumulator / responsesAccumulator 并列，各处理一种协议。
  */
 
-import type { AnthropicErrorEvent, ProtocolStreamEvent } from "../protocolConverter/protocolTypes";
+import type {
+    AnthropicContentBlock,
+    AnthropicErrorEvent,
+    AnthropicStreamContentBlock,
+    AnthropicStreamDelta,
+    AnthropicStreamMessage,
+    AnthropicStreamUsage,
+} from "../protocol/anthropicTypes";
+import type { ProtocolStreamEvent } from "../protocol/commonTypes";
 import { AccumulatorBase } from "./accumulatorBase";
 import type { AccumulatedResponse } from "./accumulatorTypes";
 
 interface AnthropicChunk {
     type?: string;
-    message?: {
-        id?: string;
+    message?: AnthropicStreamMessage & {
         type?: string;
         role?: string;
-        content?: any[];
-        model?: string;
-        stop_reason?: string | null;
-        stop_sequence?: string | null;
-        usage?: {
-            input_tokens?: number;
-            output_tokens?: number;
-            cache_read_input_tokens?: number;
-            cache_creation_input_tokens?: number;
-        };
-    };
-    content_block?: {
-        type?: "thinking" | "text" | "tool_use";
-        thinking?: string;
-        text?: string;
-        id?: string;
-        name?: string;
-        input?: Record<string, unknown>;
-    };
-    usage?: {
-        input_tokens?: number;
-        output_tokens?: number;
-        cache_read_input_tokens?: number;
-        cache_creation_input_tokens?: number;
-    };
-    delta?: {
-        type?: "text_delta" | "thinking_delta" | "signature_delta" | "input_json_delta";
-        text?: string;
-        thinking?: string;
-        signature?: string;
-        partial_json?: string;
+        content?: AnthropicContentBlock[];
         stop_reason?: string | null;
         stop_sequence?: string | null;
     };
+    content_block?: AnthropicStreamContentBlock;
+    usage?: AnthropicStreamUsage;
+    delta?: AnthropicStreamDelta;
     index?: number;
 }
 

@@ -11,7 +11,10 @@ export const clientProtocolLabels: Record<ClientName, string> = {
 };
 
 
-export function filterSelectOption(input: string, option: any): boolean {
+export function filterSelectOption(
+    input: string,
+    option: { label?: unknown; children?: unknown } | null | undefined,
+): boolean {
     return String(option?.label ?? option?.children ?? '').toLowerCase().includes(input.toLowerCase());
 }
 

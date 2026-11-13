@@ -4,6 +4,7 @@ import { SgUser } from "../model/sgUser";
 import { SgVendor } from "../model/sgVendor";
 import { SgRecord } from "../model/sgRecord";
 import recordService from "./recordService";
+import type { MarkFailedOptions } from "./recordService";
 import requestActivityService from "./requestActivityService";
 import { SgRecordStatus, ApiFormat, VendorAuthMode, FailedCode, RequestActivityStage, ActivityLevel, ConfigKey } from "../constants";
 import pluginService from "./pluginService";
@@ -54,6 +55,20 @@ function buildRateLimitResponse(c: Context, error: InstanceType<typeof customErr
     const response = c.json(body, 429);
     response.headers.set("Retry-After", String(error.retryAfterSeconds ?? 60));
     return response;
+}
+
+
+/** inspect 模式注入到 Context 的上游请求快照 */
+export interface UpstreamRequestSnapshot {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    body: string;
+    client_format: ApiFormat;
+    upstream_format: ApiFormat;
+    vendor: { id: number; name: string };
+    vendor_model_name: string;
+    proxy: { type: "http" | "socks5"; url: string } | null;
 }
 
 
@@ -278,23 +293,30 @@ async function sendRequestToUpstream(
             body: upstreamBody,
             signal: clientAbortCtrl.signal,
             // dispatcher 是 undici (Node.js) 特有选项，不在 Cloudflare Workers 的 RequestInit 类型定义中
-            ...(dispatcher ? { dispatcher: dispatcher } as any : {}),
+            ...(dispatcher ? { dispatcher } : {}),
         });
-    } catch (e: any) {
+    } catch (e) {
         console.error("Upstream fetch failed:", e);
-        await recordService.markFailed(recordId, clientAbortCtrl.failedCode(), {
+        // 补上失败码：我们自己的 abort 原样透传；普通网络错误 → UPSTREAM_UNREACHABLE；
+        // 其余（如 getDispatcher 里模块加载 / 代理配置出错）如实归 UNKNOWN，不冒充上游不可达。
+        const err = abortTimeoutUtil.classifyUpstreamFetchError(e);
+        // response_data 落**原始错误**（不按失败码生成文案）：失败码负责分类，原文负责排查。
+        const errorText = abortTimeoutUtil.describeError(e);
+        const markOptions: MarkFailedOptions = {
             stage: RequestActivityStage.UPSTREAM_ATTEMPT,
             message: "上游请求失败",
             level: ActivityLevel.ERROR,
-            response_data: String(e),
             detail: {
                 vendor_id: vendor.id,
                 vendor_name: vendor.name,
                 url,
-                error: e instanceof Error ? e.message : String(e),
+                error: errorText,
             },
-        });
-        throw e;
+            response_data: errorText,
+        };
+        await recordService.markFailed(recordId, err.failedCode, markOptions);
+        // 向上抛归类后的错误：失败码与原始错误随错误对象带出，供上层 failover 记账与回传
+        throw err;
     } finally {
         clientAbortCtrl.dispose();
     }
@@ -488,8 +510,22 @@ async function sendRequest(
             }
 
             return response;
-        } catch (e: any) {
-            if (c.req.raw.signal.aborted || e instanceof customError.AppError) {
+        } catch (e) {
+            if (c.req.raw.signal.aborted) {
+                throw e;
+            }
+
+            if (e instanceof customError.AppError) {
+                // AppError 是终态失败：进入上游前被拒绝（路由 / 插件 / 协议转换）或响应转换失败，
+                // 不会再尝试其他上游。必须在这里收尾，否则记录会停留在 init / processing。
+                await recordService.markFailed(recordId, FailedCode.UNKNOWN, {
+                    message: "请求处理失败",
+                    level: ActivityLevel.ERROR,
+                    detail: {
+                        error: e.message,
+                        status_code: e.statusCode,
+                    },
+                });
                 throw e;
             }
 

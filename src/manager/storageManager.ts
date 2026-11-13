@@ -1,5 +1,6 @@
 import { SgStorageRecord } from "../model/sgStorageRecord";
 import customError from "../customError";
+import { bindParamBatchSize } from "../util/db/bindParamUtil";
 
 interface StoredObject {
     object_key: string;
@@ -111,10 +112,68 @@ async function deleteFromTable(key: string) {
     await SgStorageRecord.query().where("object_key", key).delete();
 }
 
+/** 统计某前缀下的 key 条数（只 COUNT，不读 BLOB） */
+async function countByPrefix(prefix: string): Promise<number> {
+    const pattern = `${prefix}%`;
+    const count = await SgStorageRecord.query().where("object_key", "like", pattern).count();
+    return Number(count || 0);
+}
+
+/**
+ * 删除某前缀下的全部 key，返回删除条数。
+ *
+ * 先 count 再 delete：worker 模式的 D1 方言只取 `run()` 的 `results`，
+ * 丢掉 `meta.changes`，`.delete()` 恒返回 0（详见 `requestActivityManager.deleteByRecordIds`）。
+ * 直接回报影响行数会一直显示「清了 0 条」。
+ */
 async function deleteFromTableByPrefix(prefix: string): Promise<number> {
     const pattern = `${prefix}%`;
-    const deleted = await SgStorageRecord.query().where("object_key", "like", pattern).delete();
-    return Number(deleted || 0);
+    const count = await countByPrefix(prefix);
+    await SgStorageRecord.query().where("object_key", "like", pattern).delete();
+    return count;
+}
+
+/**
+ * 按 object_key 升序**分页**列出某前缀下的 key（只取 key 列，不加载 data blob）。
+ *
+ * 翻页用 keyset（`object_key > afterKey`）而不是 `LIMIT/OFFSET`：调用方是边扫边删，
+ * 删掉前面的行会让后面所有行的 offset 前移，用 offset 翻页会成片跳过。
+ * `object_key` 是主键，keyset 条件 + `ORDER BY object_key` 走同一棵索引，代价与页码无关。
+ *
+ * @param afterKey 上一页最后一个 key；null/undefined 表示从该前缀的第一页开始
+ * @param limit    本页最多返回多少条
+ */
+async function listKeysPage(prefix: string, afterKey: string | null | undefined, limit: number): Promise<string[]> {
+    const pattern = `${prefix}%`;
+    const query = SgStorageRecord.query().select("object_key").where("object_key", "like", pattern);
+    if (afterKey) {
+        query.where("object_key", ">", afterKey);
+    }
+    const rows = await query.orderBy("object_key", "asc").limit(limit).get();
+    return rows.all().map(r => String(r.object_key));
+}
+
+/**
+ * 按 object_key 批量删除一批 key。
+ *
+ * 一批压成一条 `WHERE object_key IN (...)`（内部按 `bindParamBatchSize()` 再拆），
+ * 而不是每个 key 一次 DELETE：worker 模式下 D1 对单次请求有 1000 条查询上限，
+ * 逐条删会把查询预算直接吃光。
+ *
+ * 返回删除条数。同样先 count 再 delete，理由见 `deleteFromTableByPrefix`。
+ */
+async function deleteFromTableByKeys(keys: string[]): Promise<number> {
+    if (keys.length === 0) {
+        return 0;
+    }
+    const batchSize = bindParamBatchSize();
+    let deleted = 0;
+    for (let i = 0; i < keys.length; i += batchSize) {
+        const batch = keys.slice(i, i + batchSize);
+        deleted += Number(await SgStorageRecord.query().whereIn("object_key", batch).count() || 0);
+        await SgStorageRecord.query().whereIn("object_key", batch).delete();
+    }
+    return deleted;
 }
 
 export type { StoredObject };
@@ -124,4 +183,7 @@ export default {
     getFromTable,
     deleteFromTable,
     deleteFromTableByPrefix,
+    deleteFromTableByKeys,
+    countByPrefix,
+    listKeysPage,
 };

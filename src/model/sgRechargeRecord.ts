@@ -1,6 +1,6 @@
 import { Model } from "sutando";
 import { inspect, InspectOptions } from "util";
-import { MicroAmountCast } from "../util/protocol/billingUtil";
+import { MicroAmountCast } from "../util/protocolUtil/billingUtil";
 
 class SgRechargeRecord extends Model {
     table = "recharge_records";

@@ -1,18 +1,22 @@
+import customError from "../../customError";
 import { BaseConverter } from "./BaseConverter";
+import type { ProtocolStreamEvent } from "../protocol/commonTypes";
 import type {
+    OpenAIMessage,
     OpenAIRequest,
     OpenAIResponse,
-    OpenAIMessage,
-    OpenAIChunk,
-    ProtocolStreamEvent,
-} from "./protocolTypes";
+    OpenAIUsage,
+} from "../protocol/openaiTypes";
 import type {
-    ResponsesRequest,
-    ResponsesNonStreamResponse,
-    ResponsesInputItem,
-    ResponsesOutputItem,
+    ResponsesContentPart,
     ResponsesEventResponseFailed,
-} from "./responsesTypes";
+    ResponsesInputItem,
+    ResponsesNonStreamResponse,
+    ResponsesOutputItem,
+    ResponsesRequest,
+    ResponsesStreamItem,
+    ResponsesStreamResponse,
+} from "../protocol/responsesTypes";
 import {
     buildThinkingConfigFromOpenAI,
     thinkingConfigToOpenAIResponses,
@@ -52,8 +56,8 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                     });
                 } else if (Array.isArray(msg.content)) {
                     // 多模态内容
-                    const contentParts: any[] = [];
-                    for (const part of msg.content as any[]) {
+                    const contentParts: ResponsesContentPart[] = [];
+                    for (const part of msg.content) {
                         if (part.type === "text") {
                             contentParts.push({ type: "input_text", text: part.text });
                         } else if (part.type === "image_url") {
@@ -61,6 +65,12 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                                 type: "input_image",
                                 image_url: part.image_url.url,
                             });
+                        } else {
+                            const unsupportedType = (part as { type?: string }).type ?? "unknown";
+                            throw new customError.AppError(
+                                `Unsupported OpenAI content part type for protocol conversion: ${unsupportedType}`,
+                                400,
+                            );
                         }
                     }
                     if (contentParts.length > 0) {
@@ -257,7 +267,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
         switch (eventType) {
             case "response.created": {
                 // 发送首个 chunk（包含 role）
-                const response = data.response as any;
+                const response = data.response as ResponsesStreamResponse | undefined;
                 const model = response?.model || this.requestModel;
                 const id = response?.id || this.responseId;
                 const chatId = id.startsWith("chatcmpl-") ? id : `chatcmpl-${id.replace("resp_", "")}`;
@@ -279,7 +289,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
             }
 
             case "response.output_item.added": {
-                const item = data.item as any;
+                const item = data.item as ResponsesStreamItem | undefined;
                 if (item?.type === "function_call") {
                     this.hasToolCalls = true;
                     // 新的 tool call
@@ -383,7 +393,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
             }
 
             case "response.completed": {
-                const response = data.response as any;
+                const response = data.response as ResponsesStreamResponse | undefined;
                 const usage = response?.usage;
 
                 // 发送 finish_reason
@@ -410,7 +420,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                     const cachedTokens = usage.input_tokens_details?.cached_tokens;
                     const reasoningTokens = usage.output_tokens_details?.reasoning_tokens;
 
-                    const usageData: any = {
+                    const usageData: OpenAIUsage = {
                         prompt_tokens: inputTokens,
                         completion_tokens: outputTokens,
                         total_tokens: totalTokens,

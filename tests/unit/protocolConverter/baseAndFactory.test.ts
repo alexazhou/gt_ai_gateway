@@ -9,28 +9,27 @@ import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterF
 import { BaseConverter } from "../../../src/util/protocolConverter/BaseConverter";
 import { ApiFormat } from "../../../src/constants";
 import customError from "../../../src/customError";
-import type { ProtocolStreamEvent } from "../../../src/util/protocolConverter/protocolTypes";
-
-function parseStreamEventData(events: ProtocolStreamEvent[], index: number = 0): any {
-    return JSON.parse(events[index].data);
-}
+import type { AnthropicRequest } from "../../../src/util/protocol/anthropicTypes";
+import type { ProtocolStreamEvent } from "../../../src/util/protocol/commonTypes";
+import type { OpenAIResponse } from "../../../src/util/protocol/openaiTypes";
+import protocolConverterTestUtil from "./protocolConverterTestUtil";
 
 class TestConverter extends BaseConverter {
     constructor(private shouldThrow: "none" | "error" | "appError" = "none") {
         super("test-model", "test-response-id");
     }
 
-    public convertRequest(clientReq: any): any {
+    public convertRequest(clientReq: unknown): unknown {
         if (this.shouldThrow === "error") {
             throw new Error("boom");
         }
         if (this.shouldThrow === "appError") {
             throw new customError.AppError("custom boom", 422);
         }
-        return { converted: clientReq.value };
+        return { converted: (clientReq as { value?: unknown }).value };
     }
 
-    public convertResponse(upstreamRes: any): any {
+    public convertResponse(upstreamRes: unknown): unknown {
         return upstreamRes;
     }
 
@@ -103,7 +102,7 @@ describe("BaseConverter", () => {
         converter.updateModel("updated-model");
         converter.updateResponseId("updated-id");
 
-        const eventData = parseStreamEventData(converter.convertStreamEvent(JSON.stringify({ value: "hello" })));
+        const eventData = protocolConverterTestUtil.parseStreamEventData(converter.convertStreamEvent(JSON.stringify({ value: "hello" })));
         expect(eventData).toEqual({
             converted: "hello",
             model: "updated-model",
@@ -134,7 +133,7 @@ describe("ConverterFactory", () => {
         const upstreamRequest = converter!.convertRequest({
             model: "gpt-4",
             messages: [{ role: "user", content: "Hello" }],
-        });
+        }) as AnthropicRequest;
         expect(upstreamRequest.max_tokens).toBe(32768);
         expect(upstreamRequest.messages[0].content).toBe("Hello");
 
@@ -146,7 +145,7 @@ describe("ConverterFactory", () => {
             model: "claude-3-haiku-20240307",
             stop_reason: "end_turn",
             usage: { input_tokens: 1, output_tokens: 2 },
-        });
+        }) as OpenAIResponse;
         expect(clientResponse.object).toBe("chat.completion");
         expect(clientResponse.choices[0].message.content).toBe("Hi");
     });

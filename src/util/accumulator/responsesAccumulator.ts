@@ -12,22 +12,43 @@
  * - response.completed     → 用完整 response 对象覆盖（包含 usage）
  */
 
-import type { ProtocolStreamEvent } from "../protocolConverter/protocolTypes";
-import type { ResponsesStreamEvent } from "../protocolConverter/responsesTypes";
+import type { ProtocolStreamEvent } from "../protocol/commonTypes";
+import type { ResponsesStreamContentPart, ResponsesStreamItem } from "../protocol/responsesTypes";
 import { AccumulatorBase } from "./accumulatorBase";
 
-interface ResponsesContentPart {
-    type?: string;
-    text?: string;
-    annotations?: any[];
-}
-
-interface ResponsesOutputItem {
+/** 累加器内部的可变部分视图（字段可缺省，便于逐事件填充） */
+interface ResponsesAccumulatorOutputItem {
     id?: string;
     type?: string;
     role?: string;
     status?: string;
-    content: ResponsesContentPart[];
+    content: ResponsesStreamContentPart[];
+}
+
+/** SSE 事件中累加器实际读取的字段 */
+interface ResponsesAccumulatorEvent {
+    type?: string;
+    error?: unknown;
+    response?: {
+        id?: string;
+        object?: string;
+        created_at?: number;
+        model?: string;
+        status?: string;
+        completed_at?: number;
+        output?: ResponsesAccumulatorOutputItem[];
+        usage?: {
+            input_tokens?: number;
+            output_tokens?: number;
+            input_tokens_details?: { cached_tokens?: number };
+        };
+    };
+    output_index?: number;
+    content_index?: number;
+    item?: ResponsesStreamItem;
+    part?: ResponsesStreamContentPart;
+    delta?: string;
+    text?: string;
 }
 
 /**
@@ -47,7 +68,7 @@ interface ResponsesAccumulatedResponse {
     created_at?: number;
     model?: string;
     status?: string;
-    output: ResponsesOutputItem[];
+    output: ResponsesAccumulatorOutputItem[];
     usage?: ResponsesUsage;
     completed_at?: number;
 }
@@ -74,9 +95,9 @@ export class ResponsesAccumulator extends AccumulatorBase {
      * 内部解析为 ResponsesStreamEvent 并检测完成/错误/首个输出，与 OpenAIChatAccumulator.addEvent 同构。
      */
     addEvent(clientEvent: ProtocolStreamEvent): void {
-        let event: Record<string, any>;
+        let event: ResponsesAccumulatorEvent;
         try {
-            event = JSON.parse(clientEvent.data) as Record<string, any>;
+            event = JSON.parse(clientEvent.data) as ResponsesAccumulatorEvent;
         } catch {
             this.markParseFailed();
             return;
@@ -133,16 +154,15 @@ export class ResponsesAccumulator extends AccumulatorBase {
 
     // error 字段判 != null 而不是判真假：正常的 Responses 响应里会带 error: null，不算失败。
     // 最后那个 error 非空判断是兜底：有些上游不带上面两种 type，直接把错误对象放在顶层。
-    private isErrorEvent(event: Record<string, any>, eventName?: string): boolean {
-        const type = event.type as ResponsesStreamEvent["type"] | undefined;
+    private isErrorEvent(event: ResponsesAccumulatorEvent, eventName?: string): boolean {
         return eventName === "error"
-            || type === "error"
-            || type === "response.failed"
+            || event.type === "error"
+            || event.type === "response.failed"
             || event.error != null;
     }
 
 
-    private handleResponseCreated(responseObj: Record<string, any> | undefined): void {
+    private handleResponseCreated(responseObj: ResponsesAccumulatorEvent["response"]): void {
         if (!responseObj) return;
         if (responseObj.id) this.response.id = responseObj.id;
         if (responseObj.object) this.response.object = responseObj.object;
@@ -159,7 +179,7 @@ export class ResponsesAccumulator extends AccumulatorBase {
     }
 
 
-    private handleOutputItemAdded(outputIndex: number, item: Record<string, any> | undefined): void {
+    private handleOutputItemAdded(outputIndex: number, item: ResponsesStreamItem | undefined): void {
         this.ensureOutputItem(outputIndex);
         if (!item) return;
         const existing = this.response.output[outputIndex];
@@ -176,7 +196,7 @@ export class ResponsesAccumulator extends AccumulatorBase {
     private handleContentPartAdded(
         outputIndex: number,
         contentIndex: number,
-        part: Record<string, any> | undefined,
+        part: ResponsesStreamContentPart | undefined,
     ): void {
         this.ensureOutputItem(outputIndex);
         const item = this.response.output[outputIndex];
@@ -220,7 +240,7 @@ export class ResponsesAccumulator extends AccumulatorBase {
     }
 
 
-    private handleOutputItemDone(outputIndex: number, item: Record<string, any> | undefined): void {
+    private handleOutputItemDone(outputIndex: number, item: ResponsesStreamItem | undefined): void {
         if (!item) return;
         this.ensureOutputItem(outputIndex);
         const existing = this.response.output[outputIndex];
@@ -239,17 +259,19 @@ export class ResponsesAccumulator extends AccumulatorBase {
     /**
      * Responses 原生 usage → 归一化口径（prompt_tokens 总量含缓存 / completion_tokens / cache_read_tokens）
      */
-    private toCanonicalUsage(usage: Record<string, any> | undefined): ResponsesUsage | undefined {
+    private toCanonicalUsage(
+        usage: NonNullable<ResponsesAccumulatorEvent["response"]>["usage"],
+    ): ResponsesUsage | undefined {
         if (!usage) return undefined;
         return {
             prompt_tokens: usage.input_tokens ?? null,
             completion_tokens: usage.output_tokens ?? null,
-            cache_read_tokens: (usage.input_tokens_details as Record<string, any> | undefined)?.cached_tokens ?? null,
+            cache_read_tokens: usage.input_tokens_details?.cached_tokens ?? null,
         };
     }
 
 
-    private handleResponseCompleted(responseObj: Record<string, any> | undefined): void {
+    private handleResponseCompleted(responseObj: ResponsesAccumulatorEvent["response"]): void {
         if (!responseObj) return;
         // response.completed 包含最终完整的 response 对象，直接覆盖
         if (responseObj.id) this.response.id = responseObj.id;

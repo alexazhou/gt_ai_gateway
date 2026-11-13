@@ -1,5 +1,5 @@
 # 1. 前端构建阶段 (强制在宿主机原生平台运行，避免 QEMU 仿真)
-FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend-builder
 WORKDIR /app/frontend
 
 # 复制前端依赖文件
@@ -18,7 +18,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # 2. 依赖和源码准备阶段 (针对每个目标架构分别运行)
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 
 # 复制后端依赖文件
@@ -39,7 +39,7 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 COPY . .
 
 # 3. 生产环境镜像阶段
-FROM node:20-alpine
+FROM node:24-alpine
 WORKDIR /app
 
 # 安装运行时需要的库并创建目录

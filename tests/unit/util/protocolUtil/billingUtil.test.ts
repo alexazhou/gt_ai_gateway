@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import billingUtils from "../../../../src/util/protocol/billingUtil";
+import billingUtils from "../../../../src/util/protocolUtil/billingUtil";
 
 const UNIT = 0.000001;
 

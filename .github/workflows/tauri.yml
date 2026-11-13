@@ -13,7 +13,12 @@ concurrency:
 jobs:
   build-mac:
     name: Build macOS App (${{ matrix.target }})
-    runs-on: macos-14 # Use Apple Silicon runner
+    # macos-14 镜像已于 2026-11-02 被 GitHub 退役（排队阶段即被拒：
+    # runner_name 为空、job 1 秒 cancelled、steps 为 0，注解为
+    # "The configuration 'macos-14-arm64-us-default' is not supported"），
+    # 故升到 macos-15（同为 Apple Silicon，两个 target 都靠 Rust target 交叉编）。
+    # 不用浮动的 macos-latest：它指向的镜像版本会漂移，下次退役又是同样的坑。
+    runs-on: macos-15 # Apple Silicon runner
     timeout-minutes: 30
     strategy:
       matrix:

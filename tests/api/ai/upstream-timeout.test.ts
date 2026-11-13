@@ -29,6 +29,7 @@ let hangBodyModelId: number;
 
 let hangBodyModelName: string;
 let hangHeadersModelName: string;
+let unreachableModelName: string;
 let slowModelName: string;
 let trickleModelName: string;
 let badDataModelName: string;
@@ -94,6 +95,24 @@ describe("Upstream Timeout & Orphan Recovery", () => {
         await requestHelper.post(
             "/model/create.json",
             modelFixtures.createRandomModel(hangHeadersVendor.body.id, hangHeadersModelName),
+            adminToken,
+        );
+
+        // --- 连接不可达 vendor/model（fetch 阶段普通网络错误：非超时、非客户端断开） ---
+        const unreachableVendor = await requestHelper.post(
+            "/vendor/create.json",
+            {
+                type: "other",
+                name: "Mock OpenAI Unreachable",
+                token: "test-token",
+                urls: { openai: "http://127.0.0.1:47832/chat/completions" },
+            },
+            adminToken,
+        );
+        unreachableModelName = `openai-unreachable-${Date.now()}`;
+        await requestHelper.post(
+            "/model/create.json",
+            modelFixtures.createRandomModel(unreachableVendor.body.id, unreachableModelName),
             adminToken,
         );
 
@@ -165,6 +184,27 @@ describe("Upstream Timeout & Orphan Recovery", () => {
 
         expect(record.status).toBe("failed");
         expect(record.failed_code).toBe("upstream_timeout");
+        // 详情页报错文案可读：不落裸 AbortError，写明超时原因
+        expect(record.response_data).toContain("上游响应超时");
+    }, 15000);
+
+    it("should classify an unreachable upstream as upstream_unreachable and keep the raw error", async () => {
+        await requestHelper.post(
+            "/llm/v1/chat/completions",
+            { model: unreachableModelName, messages: [{ role: "user", content: "hi" }] },
+            testUserToken,
+        );
+
+        const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+        const record = records[0];
+
+        expect(record.status).toBe("failed");
+        expect(record.failed_code).toBe("upstream_unreachable");
+        // response_data 保留原始错误而非按失败码生成的文案；具体文案按运行时不同
+        // （undici "TypeError: fetch failed; cause: ..."，workerd "Error: Network connection lost."），
+        // 故只断言有原文、且不冒充超时。拼接格式由单测覆盖。
+        expect(record.response_data).toBeTruthy();
+        expect(record.response_data).not.toContain("上游响应超时");
     }, 15000);
 
 
@@ -180,6 +220,7 @@ describe("Upstream Timeout & Orphan Recovery", () => {
 
         expect(record.status).toBe("failed");
         expect(record.failed_code).toBe("upstream_timeout");
+        expect(record.response_data).toContain("上游响应超时");
     }, 15000);
 
 
@@ -195,6 +236,7 @@ describe("Upstream Timeout & Orphan Recovery", () => {
 
         expect(record.status).toBe("failed");
         expect(record.failed_code).toBe("upstream_timeout");
+        expect(record.response_data).toContain("上游响应超时");
     }, 15000);
 
 
@@ -262,6 +304,49 @@ describe("Upstream Timeout & Orphan Recovery", () => {
 
             expect(record.status).toBe("failed");
             expect(record.failed_code).toBe("client_disconnected");
+            // 详情页报错文案可读：不落裸 AbortError，写明客户端断开
+            expect(record.response_data).toContain("客户端断开");
+            expect(record.response_data).not.toContain("AbortError");
+        }, 15000);
+
+        it("should write readable response_data when client aborts while waiting for upstream headers", async () => {
+            const baseUrl = config.SERVER_CONFIG.baseUrl;
+            const ac = new AbortController();
+
+            const responsePromise = fetch(`${baseUrl}/llm/v1/chat/completions`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${testUserToken}`,
+                },
+                body: JSON.stringify({
+                    // 上游一直不回响应头：断开发生在「等响应头」阶段（fetch 阶段 abort），
+                    // 与等 body 阶段断开的用例互为补充
+                    model: hangHeadersModelName,
+                    messages: [{ role: "user", content: "hi" }],
+                }),
+                signal: ac.signal,
+            } as any);
+
+            // 在响应头超时（2s）之前断开客户端
+            await new Promise((resolve) => setTimeout(resolve, 600));
+            ac.abort();
+            try {
+                await responsePromise;
+            } catch (e) {
+                // aborted — expected
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 800));
+
+            const records = await requestHelper.getFinalizedRecords(adminToken, 1);
+            const record = records[0];
+
+            expect(record.status).toBe("failed");
+            expect(record.failed_code).toBe("client_disconnected");
+            // 详情页报错文案可读：不落裸 AbortError，写明客户端断开
+            expect(record.response_data).toContain("客户端断开");
+            expect(record.response_data).not.toContain("AbortError");
         }, 15000);
     });
 

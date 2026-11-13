@@ -137,11 +137,11 @@ onMounted(() => {
     // Check for updates if auto-update is enabled
     getConfig().then(config => {
         // Handle PostHog telemetry opt-in/opt-out based on backend config
-        if ((window as any).posthog) {
+        if (window.posthog) {
             if (config.telemetry_disabled === 'true') {
-                (window as any).posthog.opt_out_capturing();
+                window.posthog.opt_out_capturing();
             } else {
-                (window as any).posthog.opt_in_capturing();
+                window.posthog.opt_in_capturing();
             }
         }
 

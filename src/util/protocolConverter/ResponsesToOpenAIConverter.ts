@@ -1,23 +1,27 @@
+import customError from "../../customError";
 import { BaseConverter } from "./BaseConverter";
+import type { ProtocolStreamEvent } from "../protocol/commonTypes";
 import type {
+    OpenAIContentPart,
+    OpenAIChunk,
+    OpenAIMessage,
     OpenAIRequest,
     OpenAIResponse,
-    OpenAIMessage,
-    OpenAITool,
-    OpenAIChunk,
     OpenAIStreamError,
-    ProtocolStreamEvent,
-} from "./protocolTypes";
+    OpenAITool,
+} from "../protocol/openaiTypes";
 import type {
-    ResponsesRequest,
+    ResponsesContentPart,
     ResponsesInputItem,
     ResponsesNonStreamResponse,
-    ResponsesContentPart,
-} from "./responsesTypes";
+    ResponsesOutputItem,
+    ResponsesRequest,
+} from "../protocol/responsesTypes";
 import {
     buildThinkingConfigFromOpenAIResponses,
     thinkingConfigToOpenAI,
 } from "./thinkingConfig";
+import protocolConverterUtil from "./protocolConverterUtil";
 
 /**
  * Responses API → OpenAI Chat Completions 转换器
@@ -28,7 +32,6 @@ import {
  * 3. convertStreamEvent: OpenAI 流式 SSE → Responses 流式 SSE
  */
 export class ResponsesToOpenAIConverter extends BaseConverter {
-    private seq = 0;
     private currentMsgId = "";
     private messageOpen = false;
     private contentPartOpen = false;
@@ -45,10 +48,6 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
     private funcCallIds: Record<number, string> = {};
     private createdEmitted = false;
     private finishReason: string | null = null;
-
-    private nextSeq(): number {
-        return ++this.seq;
-    }
 
     // ─── 请求转换 ───
 
@@ -83,7 +82,21 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                 }
             };
 
+            // Responses 的 function_call_output 支持图片，但 OpenAI tool 消息只支持文本：
+            // 图片先攒起来，等连续的 tool 消息全部输出完后，再作为一条 user 消息补上。
+            const pendingToolImages: OpenAIContentPart[] = [];
+            const flushToolImages = () => {
+                if (pendingToolImages.length > 0) {
+                    // splice(0) 交出副本，避免随后清空数组时把已写入消息的内容一起清掉
+                    messages.push({ role: "user", content: pendingToolImages.splice(0) });
+                }
+            };
+
             for (const item of req.input) {
+                if (!("type" in item && item.type === "function_call_output")) {
+                    flushToolImages();
+                }
+
                 if ("type" in item && item.type === "function_call") {
                     // 收集 function_call
                     if (!pendingToolCalls) {
@@ -99,7 +112,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                     });
                 } else if ("role" in item && item.role === "assistant" && pendingToolCalls.length > 0) {
                     // 如果是 message assistant 且有 pendingToolCalls，合并到一起
-                    const content = this.extractText(item.content);
+                    const content = protocolConverterUtil.extractResponsesText(item.content, "OpenAI");
                     messages.push({
                         role: "assistant",
                         content: content || null,
@@ -109,12 +122,13 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                 } else {
                     // 遇到其他类型，先 flush 之前收集的 tool_calls
                     flushToolCalls();
-                    this.convertInputItem(item, messages);
+                    this.convertInputItem(item, messages, pendingToolImages);
                 }
             }
 
-            // flush 剩余的 tool_calls
+            // flush 剩余的 tool_calls 与工具结果图片
             flushToolCalls();
+            flushToolImages();
         }
 
         const openaiReq: OpenAIRequest = {
@@ -177,6 +191,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
     private convertInputItem(
         item: ResponsesInputItem,
         messages: OpenAIMessage[],
+        toolImages: OpenAIContentPart[],
     ): void {
         if ("type" in item && item.type === "function_call") {
             // function_call → assistant message with tool_calls
@@ -196,11 +211,37 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
         }
 
         if ("type" in item && item.type === "function_call_output") {
-            // function_call_output → tool message
+            // function_call_output → tool message；图片从数组输出中拆出，稍后放进 user 消息。
+            let content = "";
+            if (typeof item.output === "string") {
+                content = item.output;
+            } else {
+                const texts: string[] = [];
+                for (const part of item.output) {
+                    if (part.type === "input_text" || part.type === "output_text") {
+                        texts.push(part.text);
+                    } else if (part.type === "input_image") {
+                        const url = part.image_url || part.url || "";
+                        if (!url) {
+                            throw new customError.AppError(
+                                "Responses input_image with file_id cannot be converted to OpenAI",
+                                400,
+                            );
+                        }
+                        toolImages.push({ type: "image_url", image_url: { url } });
+                    } else if (part.type === "input_file") {
+                        throw new customError.AppError(
+                            "Responses input_file cannot be converted to OpenAI",
+                            400,
+                        );
+                    }
+                }
+                content = texts.join("\n");
+            }
             messages.push({
                 role: "tool",
                 tool_call_id: item.call_id,
-                content: item.output,
+                content,
             });
             return;
         }
@@ -217,7 +258,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
 
             if (role === "system" || role === "developer") {
                 // system/developer message → system message
-                const text = this.extractText(content);
+                const text = protocolConverterUtil.extractResponsesText(content, "OpenAI");
                 messages.push({ role: "system", content: text });
                 return;
             }
@@ -228,46 +269,48 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
             }
 
             if (Array.isArray(content)) {
-                // 检查是否包含图片
-                const hasImage = content.some((p) => p.type === "input_image");
-                const texts: string[] = [];
-                const imageParts: Array<{ type: "image_url"; image_url: { url: string } }> = [];
+                // 按原始顺序构建内容块，保留 text → image → text 的多模态语义
+                const parts: OpenAIContentPart[] = [];
+                let hasImage = false;
 
                 for (const part of content) {
                     if (part.type === "input_text" || part.type === "output_text") {
-                        texts.push(part.text);
+                        parts.push({ type: "text", text: part.text });
                     } else if (part.type === "input_image") {
-                        const url = (part as any).image_url || (part as any).url || "";
-                        imageParts.push({
+                        const url = part.image_url || part.url || "";
+                        if (!url) {
+                            throw new customError.AppError(
+                                "Responses input_image with file_id cannot be converted to OpenAI",
+                                400,
+                            );
+                        }
+                        hasImage = true;
+                        parts.push({
                             type: "image_url",
                             image_url: { url },
                         });
+                    } else if (part.type === "input_file") {
+                        throw new customError.AppError(
+                            "Responses input_file cannot be converted to OpenAI",
+                            400,
+                        );
                     }
                 }
 
-                if (imageParts.length > 0) {
-                    // 多模态内容
-                    const multiContent: any[] = [];
-                    if (texts.length > 0) {
-                        multiContent.push({ type: "text", text: texts.join("\n") });
-                    }
-                    multiContent.push(...imageParts);
-                    messages.push({ role: role as "user" | "assistant", content: multiContent as any });
-                } else if (texts.length > 0) {
-                    messages.push({ role: role as "user" | "assistant", content: texts.join("\n") });
+                if (hasImage) {
+                    messages.push({ role: role as "user" | "assistant", content: parts });
+                } else if (parts.length > 0) {
+                    // 纯文本时保持原有拼接行为
+                    const texts = parts
+                        .filter((part): part is { type: "text"; text: string } => part.type === "text")
+                        .map((part) => part.text)
+                        .join("\n");
+                    messages.push({ role: role as "user" | "assistant", content: texts });
                 }
             }
         }
     }
 
-    private extractText(content: string | ResponsesContentPart[]): string {
-        if (typeof content === "string") return content;
-        if (!Array.isArray(content)) return "";
-        return content
-            .filter((p: any) => p.type === "input_text" || p.type === "output_text")
-            .map((p: any) => p.text)
-            .join("\n");
-    }
 
     // ─── 非流式响应转换 ───
 
@@ -644,12 +687,12 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
         if (chunk.usage) {
             this.inputTokens = chunk.usage.prompt_tokens ?? this.inputTokens;
             this.outputTokens = chunk.usage.completion_tokens ?? this.outputTokens;
-            const cachedTokens = (chunk.usage as any).prompt_tokens_details?.cached_tokens;
+            const cachedTokens = chunk.usage.prompt_tokens_details?.cached_tokens;
             if (cachedTokens !== undefined) {
                 this.cacheReadTokens = cachedTokens;
             }
 
-            const outputArr: any[] = [];
+            const outputArr: ResponsesOutputItem[] = [];
             if (this.textBuf) {
                 outputArr.push({
                     id: this.currentMsgId,
@@ -830,7 +873,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
             }
 
             // 生成 response.completed
-            const outputArr: any[] = [];
+            const outputArr: ResponsesOutputItem[] = [];
             if (this.textBuf) {
                 outputArr.push({
                     id: this.currentMsgId,

@@ -6,11 +6,11 @@ import responsesAccumulator from "../../../src/util/accumulator/responsesAccumul
 import type {
     ResponsesRequest,
     ResponsesNonStreamResponse,
-} from "../../../src/util/protocolConverter/responsesTypes";
+} from "../../../src/util/protocol/responsesTypes";
 import type {
     OpenAIResponse,
     OpenAIChunk,
-} from "../../../src/util/protocolConverter/protocolTypes";
+} from "../../../src/util/protocol/openaiTypes";
 
 describe("ResponsesToOpenAIConverter", () => {
     const converter = new ResponsesToOpenAIConverter("gpt-4");
@@ -164,6 +164,172 @@ describe("ResponsesToOpenAIConverter", () => {
                 role: "tool",
                 tool_call_id: "call_123",
                 content: '{"temp":25}',
+            });
+        });
+
+        it("should move images from function_call_output arrays into a following user message", () => {
+            const req: ResponsesRequest = {
+                model: "gpt-4",
+                input: [
+                    {
+                        type: "function_call_output",
+                        call_id: "call_123",
+                        output: [
+                            { type: "input_text", text: "截图如下" },
+                            { type: "input_image", image_url: "data:image/png;base64,AAAA" },
+                        ],
+                    },
+                ],
+            };
+            const result = converter.convertRequest(req);
+
+            expect(result.messages).toHaveLength(2);
+            expect(result.messages[0]).toEqual({
+                role: "tool",
+                tool_call_id: "call_123",
+                content: "截图如下",
+            });
+            expect(result.messages[1]).toEqual({
+                role: "user",
+                content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } }],
+            });
+        });
+
+        it("should keep tool messages contiguous when multiple function_call_output items carry images", () => {
+            const req: ResponsesRequest = {
+                model: "gpt-4",
+                input: [
+                    { type: "function_call", call_id: "call_1", name: "read_image", arguments: "{}" },
+                    { type: "function_call", call_id: "call_2", name: "read_image", arguments: "{}" },
+                    {
+                        type: "function_call_output",
+                        call_id: "call_1",
+                        output: [
+                            { type: "input_text", text: "第一张" },
+                            { type: "input_image", image_url: "https://example.com/1.png" },
+                        ],
+                    },
+                    {
+                        type: "function_call_output",
+                        call_id: "call_2",
+                        output: [
+                            { type: "input_image", image_url: "https://example.com/2.png" },
+                        ],
+                    },
+                ],
+            };
+            const result = converter.convertRequest(req);
+
+            expect(result.messages).toHaveLength(4);
+            expect(result.messages[1]).toEqual({ role: "tool", tool_call_id: "call_1", content: "第一张" });
+            expect(result.messages[2]).toEqual({ role: "tool", tool_call_id: "call_2", content: "" });
+            expect(result.messages[3]).toEqual({
+                role: "user",
+                content: [
+                    { type: "image_url", image_url: { url: "https://example.com/1.png" } },
+                    { type: "image_url", image_url: { url: "https://example.com/2.png" } },
+                ],
+            });
+        });
+
+        it("should convert text-only function_call_output arrays to joined tool text", () => {
+            const req: ResponsesRequest = {
+                model: "gpt-4",
+                input: [
+                    {
+                        type: "function_call_output",
+                        call_id: "call_123",
+                        output: [
+                            { type: "input_text", text: "第一行" },
+                            { type: "output_text", text: "第二行" },
+                        ],
+                    },
+                ],
+            };
+            const result = converter.convertRequest(req);
+
+            expect(result.messages).toEqual([
+                { role: "tool", tool_call_id: "call_123", content: "第一行\n第二行" },
+            ]);
+        });
+
+        it("should reject function_call_output images that only carry file_id", () => {
+            const req: ResponsesRequest = {
+                model: "gpt-4",
+                input: [
+                    {
+                        type: "function_call_output",
+                        call_id: "call_123",
+                        output: [
+                            { type: "input_image", file_id: "file-123" },
+                        ],
+                    },
+                ],
+            };
+
+            expect(() => converter.convertRequest(req)).toThrow(/file_id/);
+        });
+
+        it("should reject input_file in function_call_output instead of dropping it", () => {
+            const req: ResponsesRequest = {
+                model: "gpt-4",
+                input: [
+                    {
+                        type: "function_call_output",
+                        call_id: "call_123",
+                        output: [
+                            { type: "input_file", file_data: "AAAA", filename: "report.pdf" },
+                        ],
+                    },
+                ],
+            };
+
+            expect(() => converter.convertRequest(req)).toThrow(/input_file/);
+        });
+
+        it("should reject input_file in message content instead of dropping it", () => {
+            const req: ResponsesRequest = {
+                model: "gpt-4",
+                input: [
+                    {
+                        type: "message",
+                        role: "user",
+                        content: [
+                            { type: "input_text", text: "请总结这个文件" },
+                            { type: "input_file", file_data: "AAAA", filename: "report.pdf" },
+                        ],
+                    },
+                ],
+            };
+
+            expect(() => converter.convertRequest(req)).toThrow(/input_file/);
+        });
+
+        it("should preserve text/image part order in message content", () => {
+            const req: ResponsesRequest = {
+                model: "gpt-4",
+                input: [
+                    {
+                        type: "message",
+                        role: "user",
+                        content: [
+                            { type: "input_text", text: "before" },
+                            { type: "input_image", image_url: "https://example.com/a.png" },
+                            { type: "input_text", text: "after" },
+                        ],
+                    },
+                ],
+            };
+
+            const result = converter.convertRequest(req);
+
+            expect(result.messages[0]).toEqual({
+                role: "user",
+                content: [
+                    { type: "text", text: "before" },
+                    { type: "image_url", image_url: { url: "https://example.com/a.png" } },
+                    { type: "text", text: "after" },
+                ],
             });
         });
 

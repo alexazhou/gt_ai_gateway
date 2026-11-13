@@ -1,4 +1,5 @@
 import { parse as smolParse, stringify } from "smol-toml";
+import objectUtil from "./objectUtil";
 
 
 function buildTomlString(value: string): string {
@@ -6,8 +7,8 @@ function buildTomlString(value: string): string {
 }
 
 
-function parse(content: string): Record<string, any> {
-    return smolParse(content) as Record<string, any>;
+function parse(content: string): Record<string, unknown> {
+    return smolParse(content) as Record<string, unknown>;
 }
 
 
@@ -58,12 +59,12 @@ function cleanDuplicateKeys(content: string): string {
 }
 
 
-function safeParse(content: string): Record<string, any> {
+function safeParse(content: string): Record<string, unknown> {
     if (!content.trim()) {
         return {};
     }
     const cleaned = cleanDuplicateKeys(content);
-    return parse(cleaned) as Record<string, any>;
+    return parse(cleaned);
 }
 
 
@@ -85,17 +86,17 @@ function getTomlTableValue(content: string, tableName: string, key: string): str
     try {
         const doc = safeParse(content);
         const parts = tableName.split(".");
-        let current: any = doc;
+        let current: unknown = doc;
 
         for (const part of parts) {
-            if (current && typeof current === "object" && part in current) {
+            if (objectUtil.isRecord(current) && part in current) {
                 current = current[part];
             } else {
                 return null;
             }
         }
 
-        if (current && typeof current === "object" && key in current) {
+        if (objectUtil.isRecord(current) && key in current) {
             const value = current[key];
             if (typeof value === "string") {
                 return value;
@@ -117,7 +118,7 @@ function deleteTomlTable(content: string, tableName: string): string {
             delete doc[parts[0]];
         } else if (parts.length === 2) {
             const parent = doc[parts[0]];
-            if (parent && typeof parent === "object") {
+            if (objectUtil.isRecord(parent)) {
                 delete parent[parts[1]];
             }
         }
@@ -160,24 +161,29 @@ function upsertTomlTable(content: string, tableName: string, values: Record<stri
     try {
         const doc = safeParse(content);
         const parts = tableName.split(".");
-        let current = doc;
+        let current: Record<string, unknown> = doc;
 
         // Navigate to the parent of the target table
         for (let i = 0; i < parts.length - 1; i++) {
-            if (!(parts[i] in current)) {
-                current[parts[i]] = {};
+            const part = parts[i];
+            const next = current[part];
+            if (objectUtil.isRecord(next)) {
+                current = next;
+            } else {
+                const created: Record<string, unknown> = {};
+                current[part] = created;
+                current = created;
             }
-            current = current[parts[i]];
         }
 
         const tableName2 = parts[parts.length - 1];
-        if (!(tableName2 in current)) {
-            current[tableName2] = {};
-        }
+        const existingTarget = current[tableName2];
+        const target: Record<string, unknown> = objectUtil.isRecord(existingTarget) ? existingTarget : {};
+        current[tableName2] = target;
 
         // Set values (remove quotes for string values)
         for (const [key, value] of Object.entries(values)) {
-            current[tableName2][key] = value.replace(/^"|"$/g, "");
+            target[key] = value.replace(/^"|"$/g, "");
         }
 
         return stringify(doc);

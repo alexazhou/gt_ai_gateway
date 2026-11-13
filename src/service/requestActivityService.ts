@@ -70,7 +70,20 @@ async function getByRecordId(recordId: number): Promise<RequestActivityEntry[]> 
 }
 
 
+/**
+ * 按 record_id 批量删除活动时间线（删除 record / 清理全部记录时调用）。
+ * 返回实际删除行数。与 append 不同，这里的失败必须上抛：静默失败会留下永久孤儿数据。
+ */
+async function clearByRecordIds(recordIds: number[]): Promise<number> {
+    if (recordIds.length === 0) {
+        return 0;
+    }
+    return await requestActivityManager.deleteByRecordIds(recordIds);
+}
+
+
 export default {
     append,
     getByRecordId,
+    clearByRecordIds,
 };

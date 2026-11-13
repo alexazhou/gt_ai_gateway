@@ -5,13 +5,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { AnthropicToOpenAIConverter } from "../../../src/util/protocolConverter/AnthropicToOpenAIConverter";
 import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterFactory";
-import { ReasoningEffort } from "../../../src/util/protocolConverter/thinkingConfig";
+import { ReasoningEffort } from "../../../src/util/protocol/commonTypes";
 import { ApiFormat } from "../../../src/constants";
-import type { AnthropicRequest, OpenAIRequest, OpenAIResponse, ProtocolStreamEvent } from "../../../src/util/protocolConverter/protocolTypes";
-
-function parseStreamEventData(events: ProtocolStreamEvent[], index: number = 0): any {
-    return JSON.parse(events[index].data);
-}
+import type { AnthropicRequest } from "../../../src/util/protocol/anthropicTypes";
+import type { ProtocolStreamEvent } from "../../../src/util/protocol/commonTypes";
+import type { OpenAIRequest, OpenAIResponse } from "../../../src/util/protocol/openaiTypes";
+import protocolConverterTestUtil from "./protocolConverterTestUtil";
 
 describe("AnthropicToOpenAIConverter - convertRequest", () => {
     let converter: AnthropicToOpenAIConverter;
@@ -36,6 +35,162 @@ describe("AnthropicToOpenAIConverter - convertRequest", () => {
         expect(result.messages[0].role).toBe("user");
         expect(result.messages[0].content).toBe("Hello, how are you?");
         expect(result.max_tokens).toBe(1024);
+    });
+
+    it("should convert Anthropic base64 image blocks to OpenAI image_url parts", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "描述这张图片" },
+                        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "BBBB" } },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
+
+        expect(result.messages[0].content).toEqual([
+            { type: "text", text: "描述这张图片" },
+            { type: "image_url", image_url: { url: "data:image/jpeg;base64,BBBB" } },
+        ]);
+    });
+
+    it("should convert Anthropic url image blocks to OpenAI image_url parts", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "描述这张图片" },
+                        { type: "image", source: { type: "url", url: "https://example.com/cat.png" } },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
+
+        expect(result.messages[0].content).toEqual([
+            { type: "text", text: "描述这张图片" },
+            { type: "image_url", image_url: { url: "https://example.com/cat.png" } },
+        ]);
+    });
+
+    it("should keep text-only content arrays as a joined string", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "first" },
+                        { type: "text", text: "second" },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
+
+        expect(result.messages[0].content).toBe("first\nsecond");
+    });
+
+    it("should reject image blocks without a source instead of dropping them", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "描述这张图片" },
+                        { type: "image" },
+                    ],
+                },
+            ],
+        };
+
+        expect(() => converter.convertRequest(anthropicReq)).toThrow(/source/);
+    });
+
+    it("should reject base64 image blocks without data instead of dropping them", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "image", source: { type: "base64", media_type: "image/png" } },
+                    ],
+                },
+            ],
+        };
+
+        expect(() => converter.convertRequest(anthropicReq)).toThrow(/source/);
+    });
+
+    it("should reject invalid image sources inside tool_result instead of dropping them", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool_use", id: "toolu_123", name: "read_image", input: {} },
+                    ],
+                },
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "tool_result",
+                            tool_use_id: "toolu_123",
+                            content: [
+                                { type: "image", source: { type: "file" } },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        expect(() => converter.convertRequest(anthropicReq)).toThrow(/source/);
+    });
+
+    it("should keep tool_result messages before multimodal user content", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "tool_result", tool_use_id: "call_1", content: "ok" },
+                        { type: "text", text: "描述这张图片" },
+                        { type: "image", source: { type: "url", url: "https://example.com/cat.png" } },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
+
+        expect(result.messages).toHaveLength(2);
+        expect(result.messages[0]).toEqual({ role: "tool", tool_call_id: "call_1", content: "ok" });
+        expect(result.messages[1].content).toEqual([
+            { type: "text", text: "描述这张图片" },
+            { type: "image_url", image_url: { url: "https://example.com/cat.png" } },
+        ]);
     });
 
     it("should convert system prompt from string to system message", () => {
@@ -300,6 +455,136 @@ describe("AnthropicToOpenAIConverter - convertRequest", () => {
         const toolMsg = result.messages.find((m: any) => m.role === "tool")!;
         expect(toolMsg.content).toBe("Sunny, 25°C");
         expect(toolMsg.tool_call_id).toBe("toolu_123");
+    });
+
+    it("should move images from tool_result content into a following user message", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool_use", id: "toolu_123", name: "read_image", input: {} },
+                    ],
+                },
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "tool_result",
+                            tool_use_id: "toolu_123",
+                            content: [
+                                { type: "text", text: "截图如下" },
+                                { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
+
+        expect(result.messages).toHaveLength(3);
+        expect(result.messages[1]).toEqual({
+            role: "tool",
+            tool_call_id: "toolu_123",
+            content: "截图如下",
+        });
+        expect(result.messages[2]).toEqual({
+            role: "user",
+            content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } }],
+        });
+    });
+
+    it("should keep an empty tool message when tool_result only contains images", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool_use", id: "toolu_123", name: "read_image", input: {} },
+                    ],
+                },
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "tool_result",
+                            tool_use_id: "toolu_123",
+                            content: [
+                                { type: "image", source: { type: "url", url: "https://example.com/cat.png" } },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
+
+        expect(result.messages).toHaveLength(3);
+        expect(result.messages[1]).toEqual({
+            role: "tool",
+            tool_call_id: "toolu_123",
+            content: "",
+        });
+        expect(result.messages[2]).toEqual({
+            role: "user",
+            content: [{ type: "image_url", image_url: { url: "https://example.com/cat.png" } }],
+        });
+    });
+
+    it("should collect images from multiple tool results after all tool messages", () => {
+        const anthropicReq: AnthropicRequest = {
+            model: "claude-3-sonnet-20240229",
+            max_tokens: 1024,
+            messages: [
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool_use", id: "call_1", name: "read_image", input: {} },
+                        { type: "tool_use", id: "call_2", name: "read_image", input: {} },
+                    ],
+                },
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "tool_result",
+                            tool_use_id: "call_1",
+                            content: [
+                                { type: "text", text: "第一张" },
+                                { type: "image", source: { type: "url", url: "https://example.com/1.png" } },
+                            ],
+                        },
+                        {
+                            type: "tool_result",
+                            tool_use_id: "call_2",
+                            content: [
+                                { type: "image", source: { type: "url", url: "https://example.com/2.png" } },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const result = converter.convertRequest(anthropicReq) as OpenAIRequest;
+
+        expect(result.messages).toHaveLength(4);
+        expect(result.messages[1]).toEqual({ role: "tool", tool_call_id: "call_1", content: "第一张" });
+        expect(result.messages[2]).toEqual({ role: "tool", tool_call_id: "call_2", content: "" });
+        expect(result.messages[3]).toEqual({
+            role: "user",
+            content: [
+                { type: "image_url", image_url: { url: "https://example.com/1.png" } },
+                { type: "image_url", image_url: { url: "https://example.com/2.png" } },
+            ],
+        });
     });
 
     it("should place tool_result before normal user text when converting mixed content blocks", () => {
@@ -592,7 +877,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
 
         expect(events).toHaveLength(1);
         expect(events[0].event).toBe("message_start");
-        const parsedData = parseStreamEventData(events);
+        const parsedData = protocolConverterTestUtil.parseStreamEventData(events);
         expect(parsedData.type).toBe("message_start");
         expect(parsedData.message.role).toBe("assistant");
     });
@@ -615,8 +900,8 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
         }));
 
         expect(events.map((event) => event.event)).toEqual(["content_block_start", "content_block_delta"]);
-        const startData = parseStreamEventData(events, 0);
-        const deltaData = parseStreamEventData(events, 1);
+        const startData = protocolConverterTestUtil.parseStreamEventData(events, 0);
+        const deltaData = protocolConverterTestUtil.parseStreamEventData(events, 1);
         expect(startData.type).toBe("content_block_start");
         expect(deltaData.type).toBe("content_block_delta");
         expect(deltaData.delta.text).toBe("Hello");
@@ -640,8 +925,8 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
         }));
 
         expect(reasoningEvents.map((event) => event.event)).toEqual(["content_block_start", "content_block_delta"]);
-        expect(parseStreamEventData(reasoningEvents, 0).content_block.type).toBe("thinking");
-        expect(parseStreamEventData(reasoningEvents, 1).delta.thinking).toBe("thinking");
+        expect(protocolConverterTestUtil.parseStreamEventData(reasoningEvents, 0).content_block.type).toBe("thinking");
+        expect(protocolConverterTestUtil.parseStreamEventData(reasoningEvents, 1).delta.thinking).toBe("thinking");
 
         const textEvents = converter.convertStreamEvent(JSON.stringify({
             id: "chatcmpl-123",
@@ -656,8 +941,8 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
             "content_block_start",
             "content_block_delta",
         ]);
-        expect(parseStreamEventData(textEvents, 1).content_block.type).toBe("text");
-        expect(parseStreamEventData(textEvents, 2).delta.text).toBe("answer");
+        expect(protocolConverterTestUtil.parseStreamEventData(textEvents, 1).content_block.type).toBe("text");
+        expect(protocolConverterTestUtil.parseStreamEventData(textEvents, 2).delta.text).toBe("answer");
     });
 
     it("should convert tool call stream events", () => {
@@ -693,7 +978,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
         }));
 
         expect(startEvents.map((event) => event.event)).toEqual(["content_block_start"]);
-        const toolStart = parseStreamEventData(startEvents);
+        const toolStart = protocolConverterTestUtil.parseStreamEventData(startEvents);
         expect(toolStart.content_block).toMatchObject({
             type: "tool_use",
             id: "call_123",
@@ -723,7 +1008,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
         }));
 
         expect(argEvents.map((event) => event.event)).toEqual(["content_block_delta"]);
-        const toolDelta = parseStreamEventData(argEvents);
+        const toolDelta = protocolConverterTestUtil.parseStreamEventData(argEvents);
         expect(toolDelta.delta).toEqual({
             type: "input_json_delta",
             partial_json: "{\"location\"",
@@ -767,7 +1052,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
 
         // Should have content_block_start with name "Bash"
         expect(startEvents1.map((e) => e.event)).toEqual(["content_block_start"]);
-        const startData1 = parseStreamEventData(startEvents1, 0);
+        const startData1 = protocolConverterTestUtil.parseStreamEventData(startEvents1, 0);
         expect(startData1.content_block.type).toBe("tool_use");
         expect(startData1.content_block.name).toBe("Bash");
         expect(startData1.content_block.id).toBe("chatcmpl-tool-xxx");
@@ -798,7 +1083,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
 
         // Should NOT create another content_block_start, only input_json_delta
         expect(startEvents2.map((e) => e.event)).toEqual(["content_block_delta"]);
-        const deltaData2 = parseStreamEventData(startEvents2, 0);
+        const deltaData2 = protocolConverterTestUtil.parseStreamEventData(startEvents2, 0);
         expect(deltaData2.delta.type).toBe("input_json_delta");
         expect(deltaData2.delta.partial_json).toBe('{"command": "ls"}');
 
@@ -828,7 +1113,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
 
         // Should still NOT create another content_block_start
         expect(startEvents3.map((e) => e.event)).toEqual(["content_block_delta"]);
-        const deltaData3 = parseStreamEventData(startEvents3, 0);
+        const deltaData3 = protocolConverterTestUtil.parseStreamEventData(startEvents3, 0);
         expect(deltaData3.delta.type).toBe("input_json_delta");
         expect(deltaData3.delta.partial_json).toBe(" doc");
     });
@@ -873,10 +1158,10 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
         const doneEvents = converter.convertStreamEvent("[DONE]");
 
         expect(doneEvents.map((event) => event.event)).toEqual(["message_delta", "message_stop"]);
-        expect(parseStreamEventData(doneEvents, 0).type).toBe("message_delta");
-        expect(parseStreamEventData(doneEvents, 0).usage.input_tokens).toBe(15);
-        expect(parseStreamEventData(doneEvents, 0).usage.output_tokens).toBe(5);
-        expect(parseStreamEventData(doneEvents, 1).type).toBe("message_stop");
+        expect(protocolConverterTestUtil.parseStreamEventData(doneEvents, 0).type).toBe("message_delta");
+        expect(protocolConverterTestUtil.parseStreamEventData(doneEvents, 0).usage.input_tokens).toBe(15);
+        expect(protocolConverterTestUtil.parseStreamEventData(doneEvents, 0).usage.output_tokens).toBe(5);
+        expect(protocolConverterTestUtil.parseStreamEventData(doneEvents, 1).type).toBe("message_stop");
     });
 
     it("should normalize input_tokens to non-cached in deferred usage chunk", () => {
@@ -898,7 +1183,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
             },
         }));
         const doneEvents2 = converter2.convertStreamEvent("[DONE]");
-        const usageDelta = parseStreamEventData(doneEvents2, 0);
+        const usageDelta = protocolConverterTestUtil.parseStreamEventData(doneEvents2, 0);
         expect(usageDelta.usage.input_tokens).toBe(100);
         expect(usageDelta.usage.output_tokens).toBe(50);
         expect(usageDelta.usage.cache_read_input_tokens).toBe(900);
@@ -923,7 +1208,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
         }));
 
         const events = converter.convertStreamEvent("[DONE]");
-        const messageDelta = parseStreamEventData(events, 0);
+        const messageDelta = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(events.map((event) => event.event)).toEqual(["message_delta", "message_stop"]);
         expect(messageDelta.delta.stop_reason).toBe("tool_use");
         expect(messageDelta.usage.output_tokens).toBe(20);
@@ -944,7 +1229,7 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
             },
         }));
         const events = converter2.convertStreamEvent("[DONE]");
-        const messageDelta = parseStreamEventData(events, 0);
+        const messageDelta = protocolConverterTestUtil.parseStreamEventData(events, 0);
         expect(messageDelta.usage.input_tokens).toBe(20);
         expect(messageDelta.usage.output_tokens).toBe(30);
         expect(messageDelta.usage.cache_read_input_tokens).toBe(480);

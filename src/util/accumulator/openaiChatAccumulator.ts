@@ -4,57 +4,16 @@
  * 与 anthropicAccumulator / responsesAccumulator 并列，各处理一种协议。
  */
 
-import type { OpenAIStreamError, ProtocolStreamEvent } from "../protocolConverter/protocolTypes";
+import type { ProtocolStreamEvent } from "../protocol/commonTypes";
+import type { OpenAIStreamChunk, OpenAIStreamError } from "../protocol/openaiTypes";
 import { AccumulatorBase } from "./accumulatorBase";
 import type { AccumulatedResponse } from "./accumulatorTypes";
-
-interface OpenAIChatChunk {
-    id?: string;
-    object?: string;
-    created?: number;
-    model?: string;
-    choices?: Array<{
-        index?: number;
-        delta?: {
-            role?: string;
-            content?: string;
-            reasoning_content?: string;
-            function_call?: {
-                name?: string;
-                arguments?: string;
-            };
-            tool_calls?: Array<{
-                index?: number;
-                id?: string;
-                type?: string;
-                function?: {
-                    name?: string;
-                    arguments?: string;
-                };
-            }>;
-        };
-        finish_reason?: string | null;
-    }>;
-    usage?: {
-        prompt_tokens?: number;
-        completion_tokens?: number;
-        total_tokens?: number;
-        prompt_tokens_details?: {
-            cached_tokens?: number;
-            // 有些上游用这个字段报缓存写入（对应 Anthropic 的 cache_creation_input_tokens）
-            cache_write_tokens?: number;
-        };
-        completion_tokens_details?: {
-            reasoning_tokens?: number;
-        };
-    };
-}
 
 /**
  * 上游在流内报错。错误放在 error 字段、或整条就是一个错误对象，两种都是实际上游的写法。
  * error 字段判 != null 而不是判真假：正常的 chunk 里会带 error: null。
  */
-function isOpenAIStreamError(event: OpenAIChatChunk | OpenAIStreamError): event is OpenAIStreamError {
+function isOpenAIStreamError(event: OpenAIStreamChunk | OpenAIStreamError): event is OpenAIStreamError {
     if ("error" in event) {
         return event.error != null;
     }
@@ -80,7 +39,7 @@ export class OpenAIChatAccumulator extends AccumulatorBase {
             return;
         }
 
-        let parsed: OpenAIChatChunk | OpenAIStreamError;
+        let parsed: OpenAIStreamChunk | OpenAIStreamError;
         try {
             parsed = JSON.parse(data);
         } catch (e) {
@@ -114,7 +73,7 @@ export class OpenAIChatAccumulator extends AccumulatorBase {
     /**
      * 处理 OpenAI 格式的消息
      */
-    private handleOpenAIMessage(msg: OpenAIChatChunk): void {
+    private handleOpenAIMessage(msg: OpenAIStreamChunk): void {
         // 保存基本信息（只保存一次）
         if (msg.id) this.response.id = msg.id;
         if (msg.object) this.response.object = msg.object;
@@ -208,7 +167,7 @@ export class OpenAIChatAccumulator extends AccumulatorBase {
      * (注意 ?? 只回退 null/undefined——当前若为 0 也会被当作「已提供」而采用)。
      * 合并后,读取方(getUsage 等)统一从 this.response.usage 取值。
      */
-    private accumulateUsage(rawUsage: OpenAIChatChunk["usage"]): void {
+    private accumulateUsage(rawUsage: OpenAIStreamChunk["usage"]): void {
         const promptDetails = rawUsage?.prompt_tokens_details;
         const prev = this.response.usage;
         this.response.usage = {

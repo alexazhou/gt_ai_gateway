@@ -83,7 +83,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch, createVNode } from 'vue';
+import { reactive, ref, watch, createVNode, type VNode } from 'vue';
 import { message, Modal } from 'ant-design-vue/es';
 import {
     ImportOutlined,
@@ -97,7 +97,12 @@ import {
     updateClientConfigBackup,
 } from '@/api/clientConfig';
 import { ClientName } from '@/types/clientConfig';
-import type { ClientConfigStatus, ClientConfigBackupInfo, CurrentClientConfig } from '@/types/clientConfig';
+import type {
+    ClientConfigStatus,
+    ClientConfigBackupInfo,
+    CurrentClientConfig,
+    CreateClientConfigRequest,
+} from '@/types/clientConfig';
 import { getBaseURL } from '@/utils/request';
 import ConfigDialog from '@/components/clientConfig/ConfigDialog.vue';
 import RenameDialog from '@/components/clientConfig/RenameDialog.vue';
@@ -161,13 +166,13 @@ function openConfigDialog(backup?: ClientConfigBackupInfo, mode?: 'create' | 'ed
     configDialogVisible.value = true;
 }
 
-async function handleConfigSave(request: any): Promise<void> {
+async function handleConfigSave(request: CreateClientConfigRequest): Promise<void> {
     const backup = configDialogBackup.value;
 
     if (backup) {
         if (backup.enabled) {
             const clientName = props.client.displayName || '客户端';
-            let restartHint: any = `注意：切换后，请退出 ${clientName} 再重新打开，客户端将会使用新配置。`;
+            let restartHint: string | VNode[] = `注意：切换后，请退出 ${clientName} 再重新打开，客户端将会使用新配置。`;
             if (props.client.client === ClientName.CODEX) {
                 restartHint = [
                     createVNode('div', { style: 'font-weight: 500; margin-bottom: 4px;' }, '注意：'),
@@ -189,11 +194,10 @@ async function handleConfigSave(request: any): Promise<void> {
                 cancelText: '取消',
                 async onOk() {
                     await updateClientConfigBackup({
-                        client: request.client,
-                        backupId: backup.id,
                         ...request,
+                        backupId: backup.id,
                     });
-                    await applyClientConfig({ client: request.client as ClientName, backupId: backup.id });
+                    await applyClientConfig({ client: request.client, backupId: backup.id });
                     
                     message.success('配置已保存并生效');
                     configDialogVisible.value = false;
@@ -204,9 +208,8 @@ async function handleConfigSave(request: any): Promise<void> {
         }
 
         await updateClientConfigBackup({
-            client: request.client,
-            backupId: backup.id,
             ...request,
+            backupId: backup.id,
         });
         message.success('配置已更新');
         onRefresh();
@@ -319,7 +322,7 @@ function applyConfig(backupId: number): void {
     }
 
     const clientName = props.client.displayName || '客户端';
-    let restartHint: any = `注意：切换后，请退出 ${clientName} 再重新打开，客户端将会使用新配置。`;
+    let restartHint: string | VNode[] = `注意：切换后，请退出 ${clientName} 再重新打开，客户端将会使用新配置。`;
     if (props.client.client === ClientName.CODEX) {
         restartHint = [
             createVNode('div', { style: 'font-weight: 500; margin-bottom: 4px;' }, '注意：'),

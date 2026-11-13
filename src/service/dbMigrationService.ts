@@ -252,11 +252,11 @@ export async function clear(adapter: DBAdapter, env: string) {
     // 取白名单里真实存在的表：不存在的跳过，确认提示里也只列真会被删的
     let existing: Set<string>;
     try {
-        const rows = (await adapter.query<{ name: string }>(
+        const rows = await adapter.query<{ name: string }>(
             dialect === "mysql"
                 ? "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE()"
                 : "SELECT name FROM sqlite_master WHERE type='table'",
-        )) as any[];
+        );
         existing = new Set(rows.map((row) => row.name));
     } catch (e) {
         console.error("Failed to query tables:", e);
