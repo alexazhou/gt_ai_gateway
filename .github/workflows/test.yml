@@ -56,6 +56,46 @@ jobs:
       - name: Run tests (Node mode)
         run: npm run backend:test:node
 
+  # 轻量门：前端单测 + 后端纯单元测试（免 globalSetup，不占 9720/9999 端口、不建库）
+  # 不装 frontend 之外的东西、不跑 frontend:build —— tests/unit 里没有用例依赖 frontend/dist。
+  # 这两条之前是「无人看守」状态（前端测试根本不在 CI 里），加这个 job 就是给它们一个门。
+  test-unit:
+    name: Test (Unit - Frontend + Backend pure)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          token: ${{ github.token }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Cache node modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            node_modules
+            frontend/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'frontend/package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      - name: Run backend pure unit tests
+        run: npm run backend:test:unit
+
+      - name: Run frontend unit tests
+        run: npm run frontend:test
+
   test-coverage:
     name: Test (Coverage Gate)
     runs-on: ubuntu-latest

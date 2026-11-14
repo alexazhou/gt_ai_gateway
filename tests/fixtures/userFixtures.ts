@@ -8,10 +8,6 @@ import { randomUUID } from "crypto";
 const ADMIN_TOKEN = "admin-token-for-test";
 
 const USER_FIXTURES = {
-    basic: {
-        name: "Test User",
-        token: randomUUID(),
-    },
     admin: {
         name: "Admin User",
         token: ADMIN_TOKEN,
@@ -20,14 +16,6 @@ const USER_FIXTURES = {
     withCustomToken: {
         name: "Test User with Custom Token",
         token: "custom-token-123",
-    },
-    duplicateName1: {
-        name: "Duplicate User",
-        token: randomUUID(),
-    },
-    duplicateName2: {
-        name: "Duplicate User",
-        token: randomUUID(),
     },
     longName: {
         name: "A".repeat(255),
@@ -40,15 +28,7 @@ const USER_FIXTURES = {
     },
 };
 
-function createRandomUser(name?: string, token?: string) {
-    return {
-        name: name || `Test User ${Date.now()}`,
-        token: token || randomUUID(),
-    };
-}
-
 export default {
     USER_FIXTURES,
-    createRandomUser,
     ADMIN_TOKEN,
 };

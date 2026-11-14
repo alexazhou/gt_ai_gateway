@@ -93,23 +93,44 @@ npm run backend:test:node:mysql                                    # 即 TEST_MO
 
 ```
 tests/
-├── api/                    # API 接口测试
-│   ├── ai/                # AI Chat API 测试
-│   ├── model/             # Model API 测试
-│   ├── record/            # Record API 测试
-│   ├── system/            # System API 测试
-│   ├── user/              # User API 测试
-│   └── vendor/            # Vendor API 测试
-├── integration/           # 集成测试
-├── unit/                  # 单元测试
-├── config.ts             # 测试配置文件
-├── globalSetup.ts        # 全局测试生命周期钩子
-└── helpers/              # 测试辅助函数
-    ├── db.ts            # 数据库连接工具
-    ├── dbHelper.ts      # 数据库操作辅助
-    ├── mockHelper.ts    # Mock 数据生成器
-    ├── mockServer.ts    # Mock AI 服务器实现
-    └── requestHelper.ts # HTTP 请求封装
+├── api/                    # HTTP 接口测试（路由 / 中间件 / 鉴权 / 端到端链路）
+│   ├── ai/                #   AI Chat / Messages / Responses 接口
+│   ├── auth/              #   登录与鉴权矩阵
+│   ├── balance/           #   充值 / 账单 / 计费
+│   ├── config/            #   系统配置
+│   ├── frontend/          #   前端静态资源与 SPA 回退
+│   ├── gateway/           #   网关横切（CORS / 端到端业务流 / 协议转换流程）
+│   ├── inprocess/         #   进程内 app.request()（不经过子进程，进覆盖率统计）
+│   ├── model/             #   模型
+│   ├── permission/        #   权限
+│   ├── record/            #   请求记录
+│   ├── rule/              #   限流规则
+│   ├── stats/             #   统计
+│   ├── system/            #   系统
+│   ├── tenant/            #   租户
+│   ├── user/              #   用户
+│   └── vendor/            #   供应商
+├── integration/           # 集成测试（真库 + ORM 读写 + 跨模块协作）
+├── unit/                  # 单元测试（纯内存 / Mock；db / entry / middleware / model /
+│                          #   plugin / protocolConverter / script / security / service / util）
+├── fixtures/              # 业务实体测试数据与 Token 常量
+│   ├── userFixtures.ts    #   USER_FIXTURES（admin 等）/ ADMIN_TOKEN
+│   ├── vendorFixtures.ts  #   VENDOR_FIXTURES（openai() / anthropic() …）/ createRandomVendor
+│   └── modelFixtures.ts   #   modelFixtures.createRandomModel
+├── helpers/               # 测试辅助
+│   ├── dbHelper.ts        #   直连测试库（truncate / query / execute）
+│   ├── requestHelper.ts   #   HTTP 请求封装
+│   ├── mockHelper.ts      #   LLM 请求载荷与用户的快捷生成
+│   ├── mockServer.ts      #   Mock AI 服务器实现（9999）
+│   ├── mockProxyServer.ts #   Mock HTTP 代理（9997）
+│   ├── mockSocksServer.ts #   Mock SOCKS5 代理（9996）
+│   ├── ormTestHelper.ts   #   ORM 侧测试辅助
+│   ├── migrationTestDb.ts #   建迁移用临时库（交给生产 Adapter）
+│   ├── streamLogHelper.ts #   流式日志相关辅助
+│   └── upstreamCaptureHelper.ts # 上游请求捕获
+├── resource/              # 静态测试资源（SSE 样本日志等）
+├── config.ts              # 测试配置（TEST_MODE / 上游 / 日志路径）
+└── globalSetup.ts         # 全局生命周期钩子 + setupAdminUser
 ```
 
 ### 测试分类标准
@@ -127,8 +148,12 @@ tests/
 
 3. **API 测试 (`tests/api/`)**
    - 通过 `requestHelper` 调用测试服务器，验证接口状态码、响应结构、鉴权、数据持久化和端到端业务行为。
-   - API 测试的数据准备、业务操作和结果验证都应通过 API 完成，不直接访问数据库来插入、修改或判断业务数据。
-   - 除统一测试隔离所需的 `dbHelper.truncate()` 外，API 测试不应使用 `dbHelper.execute()`、`dbHelper.query()`、ORM model query 或原始 SQL 直接操作数据库。
+   - **常规的业务数据准备、业务操作和结果验证一律通过 API 完成**，不用数据库直连代替接口行为。
+   - 例外白名单（**只有 API 无法暴露这些状态时才允许** `dbHelper.query()` / `dbHelper.execute()` / ORM model query / 原始 SQL）：
+     1. 验证落库形态本身（如密文 / 序列化结构 / `end_at` 是否落值）；
+     2. 构造 API 造不出来的中间态（如超时未收尾的孤儿记录、特定 `start_at` 偏移）；
+     3. 预置无法通过接口设置的初始数据（如用户初始余额）。
+     除上述三类，API 测试只用 `dbHelper.truncate()` 做统一隔离。当前 `tests/api/` 下确有此需要的文件共 17 个，改动其中一个的直连用法前请先确认它落在这三类里。
    - Worker 模式下的集成覆盖通常通过 API 请求进入 `wrangler dev` 启动的真实 Worker 服务完成；测试进程本身不直接持有 Worker 的 `DB`、`OBJECT_BUCKET` 等 binding。
 
 4. **Node-only 测试 (`*.node.test.ts`)**
@@ -169,19 +194,41 @@ Mock AI 服务器用来模拟上游的 LLM API。位于 `tests/helpers/mockServe
 ### 典型测试数据流
 
 ```typescript
-describe('AI Chat API', () => {
+import { describe, it, expect, beforeAll } from "vitest";
+import requestHelper from "../../helpers/requestHelper";
+import mockHelper from "../../helpers/mockHelper";
+import vendorFixtures from "../../fixtures/vendorFixtures";
+import modelFixtures from "../../fixtures/modelFixtures";
+import dbHelper from "../../helpers/dbHelper";
+import { setupAdminUser } from "../../globalSetup";
+
+describe("AI Chat API", () => {
+  let adminToken: string
+  let userToken: string
+  let modelName: string
+
   beforeAll(async () => {
-    await truncateDatabase()                 // 1. 清空数据库
-    const user = await post('/user/create.json', generateUser())
-    testUserToken = user.body.token           // 2. 创建用户
-    const vendor = await post('/vendor/create.json', VENDOR_FIXTURES.openai)
-    vendorId = vendor.body.id                  // 3. 创建供应商
-    const model = await post('/model/create.json', createRandomModel(vendorId, 'gpt-3.5-turbo'))
-    modelName = model.body.name               // 4. 创建模型
+    await dbHelper.truncate()                              // 1. 清空数据表
+    adminToken = await setupAdminUser()                     // 2. 建管理员，拿到 adminToken
+    const user = await requestHelper.post(
+      "/user/create.json", mockHelper.generateUser(), adminToken,
+    )
+    userToken = user.body.token                             // 3. 建普通用户
+    const vendor = await requestHelper.post(
+      "/vendor/create.json", vendorFixtures.VENDOR_FIXTURES.openai(), adminToken,
+    )
+    modelName = `test-model-${Date.now()}`
+    await requestHelper.post(                               // 4. 建模型（单上游路由）
+      "/model/create.json",
+      modelFixtures.createRandomModel(vendor.body.id, modelName),
+      adminToken,
+    )
   })
 
-  it('should handle chat request', async () => {
-    const response = await post('/v1/chat/completions', { model: modelName }, testUserToken)
+  it("should handle chat request", async () => {
+    const response = await requestHelper.post(
+      "/llm/v1/chat/completions", { model: modelName }, userToken,
+    )
     expect(response.status).toBe(200)
   })
 })
