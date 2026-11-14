@@ -135,20 +135,24 @@ app.onError((err, c) => {
 });
 
 // System
+// status.json 需注入 tenantScope：is_system_admin 由作用域解析结果给出
 app.get("/welcome", systemController.welcome);
-app.get("/status.json", authMiddleware.requireAdmin, systemController.status);
+app.get("/status.json", authMiddleware.requireAdmin, tenantScopeMiddleware.tenantScope, systemController.status);
 app.get("/update.json", authMiddleware.requireAdmin, systemController.checkUpdate);
+// 全局配置：写入仅 main 租户视角可用（与「设置」页入口一致）；读取对所有租户 admin 开放
+// —— 侧边栏的遥测 / 更新检查与模型表单的计费开关都会无条件读该配置，与当前视角无关。
 app.get("/config.json", authMiddleware.requireAdmin, configController.getConfig);
-app.put("/config.json", authMiddleware.requireAdmin, configController.updateConfig);
-app.get("/client-config/status.json", authMiddleware.requireAdmin, clientConfigController.status);
-app.get("/client-config/local.json", authMiddleware.requireAdmin, clientConfigController.readLocal);
-app.post("/client-config/create.json", authMiddleware.requireAdmin, clientConfigController.create);
-app.post("/client-config/backup.json", authMiddleware.requireAdmin, clientConfigController.backup);
-app.post("/client-config/backup/rename.json", authMiddleware.requireAdmin, clientConfigController.renameBackup);
-app.post("/client-config/backup/delete.json", authMiddleware.requireAdmin, clientConfigController.deleteBackup);
-app.post("/client-config/backup/update.json", authMiddleware.requireAdmin, clientConfigController.updateBackup);
-app.post("/client-config/apply.json", authMiddleware.requireAdmin, clientConfigController.apply);
-app.post("/client-config/sync-from-local.json", authMiddleware.requireAdmin, clientConfigController.syncFromLocal);
+app.put("/config.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, configController.updateConfig);
+// 客户端配置：同上，仅 main 租户视角可访问
+app.get("/client-config/status.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.status);
+app.get("/client-config/local.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.readLocal);
+app.post("/client-config/create.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.create);
+app.post("/client-config/backup.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.backup);
+app.post("/client-config/backup/rename.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.renameBackup);
+app.post("/client-config/backup/delete.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.deleteBackup);
+app.post("/client-config/backup/update.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.updateBackup);
+app.post("/client-config/apply.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.apply);
+app.post("/client-config/sync-from-local.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.syncFromLocal);
 
 // Vendor (需要管理员权限)
 app.get("/vendor/preset-urls.json", authMiddleware.requireAdmin, vendorController.getPresetUrls);
@@ -167,14 +171,15 @@ app.post("/vendor/:id/test.json", authMiddleware.requireAdmin, vendorController.
 app.put("/vendor/:id", authMiddleware.requireAdmin, vendorController.updateVendor);
 app.delete("/vendor/:id", authMiddleware.requireAdmin, vendorController.deleteVendor);
 
-// Tenant (root 专用；租户管理写操作需多租户功能开关开启)
+// Tenant (系统管理员专用：root，或归属 main 租户的 admin；租户管理写操作需多租户功能开关开启)
+// tenantScope 仅用于注入 isSystemAdmin，具体的系统管理员校验在 controller 内
 // 注：detail 路由用裸 /tenant/:id（与 /vendor/:id、/model/:id 一致）；Hono 对 :id.json 的
 // 参数解析有缺陷（param("id") 取不到值），故不加 .json 后缀
-app.get("/tenant.json", authMiddleware.requireAdmin, tenantController.listTenants);
-app.post("/tenant.json", authMiddleware.requireAdmin, tenantController.createTenant);
-app.get("/tenant/:id", authMiddleware.requireAdmin, tenantController.getTenant);
-app.put("/tenant/:id", authMiddleware.requireAdmin, tenantController.updateTenant);
-app.delete("/tenant/:id", authMiddleware.requireAdmin, tenantController.deleteTenant);
+app.get("/tenant.json", authMiddleware.requireAdmin, tenantScopeMiddleware.tenantScope, tenantController.listTenants);
+app.post("/tenant.json", authMiddleware.requireAdmin, tenantScopeMiddleware.tenantScope, tenantController.createTenant);
+app.get("/tenant/:id", authMiddleware.requireAdmin, tenantScopeMiddleware.tenantScope, tenantController.getTenant);
+app.put("/tenant/:id", authMiddleware.requireAdmin, tenantScopeMiddleware.tenantScope, tenantController.updateTenant);
+app.delete("/tenant/:id", authMiddleware.requireAdmin, tenantScopeMiddleware.tenantScope, tenantController.deleteTenant);
 
 // Rule (需要管理员权限)
 app.get("/rule/list.json", authMiddleware.requireAdmin, ruleController.listRules);

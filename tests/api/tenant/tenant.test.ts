@@ -67,8 +67,14 @@ describe("Tenant isolation API", () => {
         expect(names).toContain("tenant-c");
     });
 
-    it("admin 访问租户管理端点 → 403", async () => {
+    it("main 租户 admin（系统管理员）可访问租户管理端点", async () => {
         const res = await scoped("GET", "/tenant.json", adminToken);
+        expect(res.status).toBe(200);
+        expect(res.body.list.map((t: any) => t.name)).toContain("main");
+    });
+
+    it("非 main 租户 admin 访问租户管理端点 → 403", async () => {
+        const res = await scoped("GET", "/tenant.json", bAdminToken);
         expect(res.status).toBe(403);
     });
 
@@ -93,12 +99,22 @@ describe("Tenant isolation API", () => {
         expect(delC.status).toBe(200);
     });
 
-    it("admin 显式指定非自身租户 → 403；root 指定不存在租户 → 400", async () => {
-        const mismatch = await scoped("GET", "/user/list.json", adminToken, tenantBId);
+    it("非 main 租户 admin 显式指定非自身租户 → 403；指定不存在租户 → 400", async () => {
+        const list = await scoped("GET", "/tenant.json", ROOT_TOKEN);
+        const mainId = list.body.list.find((t: any) => t.name === "main").id;
+
+        // b-admin 指定 main 租户（非自身租户）→ 403
+        const mismatch = await scoped("GET", "/user/list.json", bAdminToken, mainId);
         expect(mismatch.status).toBe(403);
 
         const notFound = await scoped("GET", "/user/list.json", ROOT_TOKEN, 999999);
         expect(notFound.status).toBe(400);
+    });
+
+    it("main 租户 admin（系统管理员）可跨租户切视角，看到 b-admin", async () => {
+        const res = await scoped("GET", "/user/list.json", adminToken, tenantBId);
+        expect(res.status).toBe(200);
+        expect(res.body.list.map((u: any) => u.name)).toContain("b-admin");
     });
 
     it("admin 只见本租户数据：main admin 看不到 tenant-b 的用户", async () => {

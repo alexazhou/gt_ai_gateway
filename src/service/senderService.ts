@@ -355,10 +355,10 @@ async function sendRequest(
         c.set("inspectUpstream", true);
     }
 
-    // 租户作用域（LLM 路径由 llmApiMiddleware 注入；缺失时兜底不落租户）
-    const scope = c.get("tenantScope");
-    const tenantId = scope?.tenantId;
-    const mainTenantId = scope?.mainTenantId;
+    // 租户作用域：进入 sender 的两条路径都已注入 —— LLM 端点由 llmApiMiddleware 注入，
+    // 模型路由测试由 requireTenantAdmin 注入，故此处必存在（与 modelController 的取法一致）
+    const scope = c.get("tenantScope")!;
+    const tenantId = scope.tenantId;
 
     // 预检：仅全局计费开启时检查余额（module_billing_enabled 关闭则完全不拦）。
     // 口径：不做透支 —— 余额必须覆盖「最小可计费成本」(MIN_DEDUCTION_UNIT) 才放行。
@@ -470,8 +470,7 @@ async function sendRequest(
                     user,
                     modelConfig,
                     vendor,
-                    tenantId ?? -1,
-                    mainTenantId ?? tenantId ?? -1,
+                    scope,
                 );
             } catch (e) {
                 if (customError.isAppError(e, "AccessDeniedError")) {
