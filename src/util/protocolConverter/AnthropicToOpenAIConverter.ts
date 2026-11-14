@@ -35,6 +35,16 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
     private isFirstChunk = true;
     private pendingStopReason: string | null = null;
     /**
+     * 当前是否有一个 content block 处于「已 start、未 stop」的状态。
+     *
+     * Anthropic 的流是「start → delta* → stop」的块生命周期，块之间**必须**成对收口，
+     * index 也必须唯一（客户端按 index 反查块：官方 SDK 用 `content.at(index)`）。
+     * 之前靠 `sentFirstChunk || hasYieldedThinking` 判断「要不要先收口」，漏掉了
+     * 「上一个块是 tool_use」的情形 —— 并行 tool_call 时两个块共用同一 index 且中间没有 stop，
+     * 客户端会把后一个工具的参数拼到前一个工具上（见 #246）。
+     */
+    private blockOpen = false;
+    /**
      * 累积的原始 OpenAI usage（openai 可能把 usage 拆到多个 chunk，缓存在末尾的 usage-only chunk 才出现，
      * 因此只有等到 [DONE] 才能拿到完整 usage）。逐字段保存原始值，统一在 handleDoneEvent 时派生 Anthropic 字段。
      */
@@ -300,7 +310,22 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
         // message_delta(携带累积的 usage)+ message_stop。
         const usage = protocolConverterUtil.openAIUsageToAnthropic(this.rawUsage ?? {});
         const stopReason = this.pendingStopReason ?? "end_turn";
-        const events: AnthropicSSEEvent[] = [
+        const events: AnthropicSSEEvent[] = [];
+
+        // 上游可能不给 finish_reason 就直接 [DONE]（兼容上游确实这么干）：此时块还开着，
+        // 规范流程要求 message_delta / message_stop 之前所有块都已 content_block_stop。
+        if (this.blockOpen) {
+            events.push({
+                event: "content_block_stop",
+                data: JSON.stringify({
+                    type: "content_block_stop",
+                    index: this.contentBlockIndex,
+                }),
+            });
+            this.blockOpen = false;
+        }
+
+        events.push(
             {
                 event: "message_delta",
                 data: JSON.stringify({
@@ -313,7 +338,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                 event: "message_stop",
                 data: JSON.stringify({ type: "message_stop" }),
             },
-        ];
+        );
         this.pendingStopReason = null;
         return events;
     }
@@ -366,6 +391,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                             content_block: { type: "thinking", thinking: "" },
                         }),
                     });
+                    this.blockOpen = true;
                 }
                 events.push({
                     event: "content_block_delta",
@@ -387,6 +413,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                                 index: this.contentBlockIndex,
                             }),
                         });
+                        this.blockOpen = false;
                         this.contentBlockIndex++;
                     }
 
@@ -399,6 +426,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                             content_block: { type: "text", text: "" },
                         }),
                     });
+                    this.blockOpen = true;
                 }
 
                 events.push({
@@ -417,7 +445,9 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                     const isNewToolCall = tc.id && tc.id !== this.currentToolCallId;
 
                     if (isNewToolCall) {
-                        if (this.sentFirstChunk || this.hasYieldedThinking) {
+                        // 上一个块（文本 / thinking / **上一个 tool_use**）必须成对收口，再开新块；
+                        // 否则并行 tool_call 会共用同一 index（客户端按 index 反查块，参数会串到别的工具上）。
+                        if (this.blockOpen) {
                             events.push({
                                 event: "content_block_stop",
                                 data: JSON.stringify({
@@ -425,6 +455,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                                     index: this.contentBlockIndex,
                                 }),
                             });
+                            this.blockOpen = false;
                             this.contentBlockIndex++;
                             this.sentFirstChunk = false;
                             this.hasYieldedThinking = false;
@@ -444,6 +475,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                                 },
                             }),
                         });
+                        this.blockOpen = true;
                     }
 
                     if (tc.function?.arguments) {
@@ -463,7 +495,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
             }
 
             if (chunk.choices[0].finish_reason) {
-                if (this.sentFirstChunk || this.currentToolCallId || this.hasYieldedThinking) {
+                if (this.blockOpen) {
                     events.push({
                         event: "content_block_stop",
                         data: JSON.stringify({
@@ -471,6 +503,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                             index: this.contentBlockIndex,
                         }),
                     });
+                    this.blockOpen = false;
                 }
 
                 const stopReason = OPENAI_TO_ANTHROPIC_STOP_REASON[chunk.choices[0].finish_reason] || "end_turn";
