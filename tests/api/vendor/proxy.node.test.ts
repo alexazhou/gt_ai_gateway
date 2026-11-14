@@ -17,6 +17,10 @@ const MOCK_PROXY_URL = "http://localhost:9997";
 const MOCK_SOCKS_URL = "socks5://localhost:9996";
 const MOCK_SERVER_URL = "http://localhost:9999";
 const SOCKS_QUERY_URL = "http://localhost:10096";
+// 「代理不可达」用例要一个**确定没人监听**的端口：
+// 写死 19999 在并行/隔离跑全量时可能被别的东西（或挪走端口的 mock 上游）占上，
+// 用例就会因为"代理居然可达"而假红。需要时用 env 覆盖。
+const UNREACHABLE_PROXY_PORT = Number(process.env.TEST_UNREACHABLE_PROXY_PORT ?? 19999);
 
 
 async function getSocksConnections(): Promise<Array<{ host: string; port: number }>> {
@@ -165,7 +169,7 @@ describe("Vendor Proxy Configuration", () => {
                 token: "test-token",
                 urls: { openai: `${MOCK_SERVER_URL}/v1/chat/completions` },
                 config: {
-                    proxy: { type: "http", url: "http://localhost:19999" },
+                    proxy: { type: "http", url: `http://localhost:${UNREACHABLE_PROXY_PORT}` },
                 },
             },
             ROOT_TOKEN,

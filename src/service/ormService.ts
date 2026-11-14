@@ -1,5 +1,5 @@
 import { sutando } from "sutando";
-import { DatabaseAdapter, D1Adapter, SQLiteAdapter, MySQLAdapter } from "../util/dbAdapterUtil";
+import { DatabaseAdapter, D1Adapter, SQLiteAdapter, MySQLAdapter, type SqlStatement } from "../util/dbAdapterUtil";
 import { MySQLDBAdapter } from "../util/db/mysqlDBAdapter";
 import { SQLiteDBAdapter } from "../util/db/sqliteDBAdapter";
 import dbMigrationService from "./dbMigrationService";
@@ -109,21 +109,27 @@ class ORMService {
         this._updateD1Binding(db);
     }
 
+    /**
+     * 把当前请求的 env.DB 挂到 knex 的 D1 client 上（见上面对跨请求 I/O 的说明）。
+     *
+     * P2-14：原实现整段 try/catch 静默吞异常 —— 一旦 sutando 内部结构变化（升级后 manager/connector
+     * 路径改名），binding 更新会「成功但没生效」，随后每个请求都在查询期炸成
+     * "Cannot perform I/O on behalf of a different request"，根因完全不可见。
+     * 现在把「取不到 client」当成硬失败抛出：此时跨请求 I/O 必然出问题，早抛比晚炸好定位。
+     * 只有「拿到 client、赋值完成」才算成功，不再有静默分支。
+     */
     private _updateD1Binding(db: any): void {
-        try {
-            const instance = (sutando as any).getInstance();
-            const queryBuilder = instance.manager?.['default'];
-            if (queryBuilder) {
-                // QueryBuilder 是 Proxy，通过 connector 访问 Knex 实例
-                const knexInstance = queryBuilder.connector;
-                if (knexInstance?.client) {
-                    knexInstance.client.d1Driver = db;
-                    knexInstance.client.driver = db;
-                }
-            }
-        } catch (e) {
-            // 静默处理，避免更新失败影响请求
+        // 取 Knex 实例走 sutando.connection().connector（与 getKnex() 同一路径）。
+        // 原实现走 getInstance().manager["default"].connector 这条路径在当前 sutando 版本下取不到 client，
+        // 被 try/catch 吞掉后这段逻辑其实一直是 no-op —— 跨请求 I/O 的保护此前根本没生效。
+        const client = this.getKnex()?.client;
+        if (!client) {
+            throw new Error(
+                "[ormService] 无法更新 D1 binding：sutando knex client 未就绪（跨请求 I/O 会失败，请检查 sutando 版本/内部结构）",
+            );
         }
+        client.d1Driver = db;
+        client.driver = db;
     }
 
     private async _doConnectWorker(db: any): Promise<void> {
@@ -190,11 +196,30 @@ class ORMService {
         return this.mode === RunMode.WORKER;
     }
 
+    /**
+     * 适配器是否已就绪。
+     * `mode` 默认就是 WORKER，未 init 时 `isWorker` 已为 true 但 `dbAdapter` 会抛错，
+     * 需要判断「能否真的读写库」的地方（如共享限流/冷却存储的解析）要用这个。
+     */
+    get isReady(): boolean {
+        return this._dbAdapter !== null;
+    }
+
     get dbAdapter(): DatabaseAdapter {
         if (!this._dbAdapter) {
             throw new customError.AppError("ORMService not initialized", 500);
         }
         return this._dbAdapter;
+    }
+
+    /**
+     * 原子执行多条参数化语句（全部成功或全部回滚）。
+     * 驱动差异由适配器吸收：D1 走 batch、better-sqlite3 走 db.transaction、MySQL 走显式事务。
+     * 仅用于必须整体一致的写路径（如"记录结算 + 扣费"）。
+     */
+    async runAtomically(statements: SqlStatement[]): Promise<void> {
+        await this.dbAdapter.runAtomically(statements);
+        return;
     }
 
     getKnex(): any {

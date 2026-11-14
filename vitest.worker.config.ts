@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['tests/**/*.test.ts', 'src/**/*.test.ts'],
-    exclude: ['node_modules', '**/*.node.test.ts'],
+    exclude: ['node_modules', '**/*.node.test.ts', '**/*.mysql.test.ts'], // `*.mysql.test.ts` 只在 T7 本地 MySQL 门（vitest.mysql.config.ts）收集
     environment: 'node',
     globalSetup: ['./tests/globalSetup.ts'],
     // Run tests sequentially to avoid database and port conflicts
@@ -24,6 +24,14 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       include: ['src/**/*.ts'],
       exclude: ['node_modules', '**/*.test.ts', '**/*.spec.ts', 'tests/**'],
+      // 与 vitest.config.ts 同一套棘轮地板（P2-21），Worker 侧覆盖率天然更低，
+      // 这里只要求不明显回退；等 node 侧抬到 60% 后再统一收紧。
+      thresholds: {
+        statements: 50,
+        branches: 45,
+        functions: 50,
+        lines: 50,
+      },
     },
   },
 })

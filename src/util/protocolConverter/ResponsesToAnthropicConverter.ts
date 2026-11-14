@@ -23,6 +23,7 @@ import {
     thinkingConfigToAnthropic,
 } from "./thinkingConfig";
 import protocolConverterUtil, { type RawAnthropicUsage } from "./protocolConverterUtil";
+import { resolveAnthropicMaxTokens } from "./anthropicDefaults";
 
 type AnthropicToResponsesOutputItem =
     | { kind: "message"; outputIndex: number; id: string; text: string; closed: boolean }
@@ -117,7 +118,8 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
 
         const anthropicReq: AnthropicRequest = {
             model: req.model,
-            max_tokens: rawMaxTokens ?? 32768,
+            // P1-07：同 OpenAIToAnthropicConverter，缺省取保守值而非 32768
+            max_tokens: resolveAnthropicMaxTokens(rawMaxTokens),
             messages,
             stream: req.stream,
         };

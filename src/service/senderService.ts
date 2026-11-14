@@ -6,7 +6,8 @@ import { SgRecord } from "../model/sgRecord";
 import recordService from "./recordService";
 import type { MarkFailedOptions } from "./recordService";
 import requestActivityService from "./requestActivityService";
-import { SgRecordStatus, ApiFormat, VendorAuthMode, FailedCode, RequestActivityStage, ActivityLevel, ConfigKey } from "../constants";
+import { SgRecordStatus, ApiFormat, VendorAuthMode, FailedCode, RequestActivityStage, ActivityLevel, ConfigKey, MIN_DEDUCTION_UNIT } from "../constants";
+import billingUtil from "../util/protocolUtil/billingUtil";
 import pluginService from "./pluginService";
 import hostService from "./hostService";
 import { ConverterFactory } from "../util/protocolConverter/ConverterFactory";
@@ -17,6 +18,7 @@ import responseHandlerService from "./responseHandlerService";
 import fetchUtil from "../util/fetchUtil";
 import routingService, { type ModelRoutingResult } from "./routingService/core";
 import configService from "./configService";
+import { DEFAULT_ANTHROPIC_VERSION } from "../util/protocolConverter/anthropicDefaults";
 import upstreamHealthService from "./upstreamHealthService";
 import abortTimeoutUtil from "../util/abortTimeoutUtil";
 import RoutingContext from "./routingService/routingContext";
@@ -125,6 +127,9 @@ async function sendRequestToUpstream(
     // 并且必须排除客户端自带的鉴权 header，避免泄露或导致合并错误
     // 同时排除浏览器相关的元数据 header，避免上游校验失败
     const finalHeaders = new Headers();
+    // 客户端声明的 anthropic-version 透传给上游（不同版本的能力集不同，写死等于锁死上游版本）；
+    // 客户端没带时回落到我们适配过的默认版本
+    const clientAnthropicVersion = c.req.header("anthropic-version");
     const EXCLUDED_HEADERS = [
         "authorization",
         "x-api-key",
@@ -165,7 +170,7 @@ async function sendRequestToUpstream(
             finalHeaders.set("Authorization", vendor.token.startsWith("Bearer ") ? vendor.token : `Bearer ${vendor.token}`);
         } else {
             finalHeaders.set("x-api-key", vendor.token);
-            finalHeaders.set("anthropic-version", "2023-06-01");
+            finalHeaders.set("anthropic-version", clientAnthropicVersion || DEFAULT_ANTHROPIC_VERSION);
         }
     } else {
         finalHeaders.set("Authorization", vendor.token.startsWith("Bearer ") ? vendor.token : `Bearer ${vendor.token}`);
@@ -322,8 +327,11 @@ async function sendRequestToUpstream(
     }
     console.log("upstream response status:", upstreamRes.status);
 
+    // body 为 null 说明是无 body 状态码（204/205/304，P2-02），再按 SSE 读会在 getReader() 上抛 ——
+    // 交给非流式分支统一按「无 body 状态码」收口
     const isStream =
         upstreamRes.ok &&
+        upstreamRes.body !== null &&
         upstreamRes.headers.get("content-type")?.startsWith("text/event-stream");
 
     // 8. 按响应类型分发处理（三种协议统一走 responseHandlerService，按 clientFormat 选累加器/解析口径）
@@ -353,10 +361,12 @@ async function sendRequest(
     const mainTenantId = scope?.mainTenantId;
 
     // 预检：仅全局计费开启时检查余额（module_billing_enabled 关闭则完全不拦）。
-    // 余额为负的用户阻止请求，不向上游发起（负余额在完成时扣减产生，充值前不再放行）
-    // balance 为整数微元，负值即欠费；但未启用计费（价格未设置或为 0）的模型不拦截
+    // 口径：不做透支 —— 余额必须覆盖「最小可计费成本」(MIN_DEDUCTION_UNIT) 才放行。
+    // 修复前只拦 balance < 0，导致 0 余额用户可以并发发起任意多请求一起透支。
+    // balance 为整数微元；未启用计费（价格未设置或为 0）的模型不拦截
     const billingEnabled = await configService.isModuleBillingEnabled();
-    if (billingEnabled && user.balance < 0 && modelConfig.hasBilling()) {
+    const minChargeableUnits = billingUtil.toUnits(MIN_DEDUCTION_UNIT);
+    if (billingEnabled && modelConfig.hasBilling() && user.balance < minChargeableUnits) {
         await recordService.recordFailedRequest(
             user.id,
             modelConfig.name,
@@ -384,6 +394,10 @@ async function sendRequest(
     let lastFailureCode: string | null = null;
 
     while (true) {
+        // 路由选路的 isDown 是同步路径（读本 isolate 缓存），这里先按 TTL 从共享存储刷新一次，
+        // 让其他 isolate 刚标记的 DOWN 在本次选路就生效（Worker 跨 isolate 冷却，见 P0-3）
+        await upstreamHealthService.syncFromStore();
+
         let routingResult: ModelRoutingResult;
         try {
             routingResult = await routingService.selectUpstream(
@@ -394,8 +408,12 @@ async function sendRequest(
             );
         } catch (e) {
             // 路由阶段异常（如配置错误无启用上游）：同样是一次失败请求，不留 init 孤儿记录
+            // 候选全部不可用（配置漂移）也走这里，失败码与原「无可用上游」分支保持一致
+            const isNoUpstream = customError.isAppError(e)
+                && String(e.message).startsWith("No available upstream");
             await recordService.update(recordId, {
                 status: SgRecordStatus.FAILED,
+                ...(isNoUpstream ? { failed_code: FailedCode.NO_AVAILABLE_UPSTREAM } : {}),
                 end_at: new Date(),
             });
             throw e;
@@ -456,7 +474,7 @@ async function sendRequest(
                     mainTenantId ?? tenantId ?? -1,
                 );
             } catch (e) {
-                if (e instanceof customError.AccessDeniedError) {
+                if (customError.isAppError(e, "AccessDeniedError")) {
                     // 403：策略性拒绝与供应商无关，不 failover；标记 record FAILED 后抛出，交给 onError 渲染
                     await recordService.markFailed(recordId, FailedCode.ACCESS_DENIED, {
                         message: "命中规则被拦截",
@@ -468,7 +486,7 @@ async function sendRequest(
                     });
                     throw e;
                 }
-                if (e instanceof customError.RateLimitError) {
+                if (customError.isAppError(e, "RateLimitError")) {
                     // 429：视为「该上游繁忙」——failover 开启时把 429 存入 lastFailure 继续尝试下一上游
                     //（selectUpstream 已 markTried，自动跳过）；关闭时直接返回 429（返回前标记 record FAILED）
                     if (failoverEnabled) {
@@ -515,10 +533,12 @@ async function sendRequest(
                 throw e;
             }
 
-            if (e instanceof customError.AppError) {
+            if (customError.isAppError(e)) {
                 // AppError 是终态失败：进入上游前被拒绝（路由 / 插件 / 协议转换）或响应转换失败，
                 // 不会再尝试其他上游。必须在这里收尾，否则记录会停留在 init / processing。
-                await recordService.markFailed(recordId, FailedCode.UNKNOWN, {
+                // 失败归因优先用错误自带的 failedCode（如协议转换失败 → conversion_error），
+                // 否则才兜底 unknown_error，避免所有终态失败都糊成同一个码。
+                await recordService.markFailed(recordId, e.failedCode ?? FailedCode.UNKNOWN, {
                     message: "请求处理失败",
                     level: ActivityLevel.ERROR,
                     detail: {
@@ -536,7 +556,7 @@ async function sendRequest(
             // 4xx 请求侧错误不惩罚上游，避免健康上游被无辜跳过（本请求的循环防护由 routingContext 承担）
             const failureStatus = httpFailure ? e.response.status : null;
             if (upstreamHealthService.shouldMarkFailure(failureStatus)) {
-                upstreamHealthService.markFailure(vendor.id, vendorModelName, upstreamFormat);
+                await upstreamHealthService.markFailure(vendor.id, vendorModelName, upstreamFormat);
             }
 
             // failover 关闭：HTTP 错误直接回传响应，网络异常抛原始异常，不继续尝试

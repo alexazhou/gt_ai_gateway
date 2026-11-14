@@ -1,12 +1,12 @@
 import { Context, MiddlewareHandler } from "hono";
-import { UserType, UserStatus } from "../constants";
+import { UserType } from "../constants";
 import { SgUser } from "../model/sgUser";
 import SgTenant from "../model/sgTenant";
 import configService from "../service/configService";
-import userService from "../service/userService";
 import tenantManager from "../manager/tenantManager";
 import tenantService from "../service/tenantService";
 import customError from "../customError";
+import { authenticateAdmin } from "./authUtil";
 
 /**
  * 请求的租户作用域：数据隔离的解析结果。manager 据此在查询条件中收敛，禁止先全局按 ID 查询再在
@@ -87,23 +87,12 @@ const requireTenantAdmin: MiddlewareHandler = async (c, next) => {
         return await next();
     }
 
-    const authHeader = c.req.header("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return c.json({ error: "Authorization header is missing or invalid" }, 401);
-    }
-    const token = authHeader.split(" ")[1];
-    const user = await userService.getUserByToken(token, c.env.ROOT_TOKEN);
-    if (!user) {
-        return c.json({ error: "Invalid token" }, 401);
-    }
-    if (user.status === UserStatus.DISABLED) {
-        return c.json({ error: "User disabled" }, 403);
-    }
-    if (user.type !== UserType.ADMIN && user.type !== UserType.ROOT) {
-        return c.json({ error: "Admin access required" }, 403);
+    // 鉴权与 authMiddleware.requireAdmin 共用同一份实现（P2-18），避免两边口径漂移
+    const { user, response } = await authenticateAdmin(c);
+    if (response || !user) {
+        return response ?? c.json({ error: "Unauthorized" }, 401);
     }
 
-    c.set("user", user);
     const scope = await resolveScopeForUser(user, c.req.header("X-Tenant-ID"));
     c.set("tenantScope", scope);
     return await next();

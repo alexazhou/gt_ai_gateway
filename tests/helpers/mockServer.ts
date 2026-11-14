@@ -159,6 +159,58 @@ function captureRequest(
 }
 
 
+/**
+ * 非 JSON / 空响应体上游：HTTP 200 + 空 body / HTML 错误页 / 被截断的 JSON。
+ *
+ * 用途（P1-06 回归）：这类响应既转不了协议也算不出 usage，网关必须按 upstream_error
+ * 记 failed + cost=0，同时仍把响应体原样透传给客户端（HTTP 状态保持 200，不擅自改成 5xx）。
+ * 三种形态共用一套 URL 标记，协议侧只靠 vendor url 的路径后缀区分。
+ */
+function handleNonJsonUpstream(
+    url: string,
+    req: IncomingMessage,
+    res: ServerResponse,
+): boolean {
+    const isEmptyBody = url.includes("/empty-body");
+    const isHtmlBody = url.includes("/html-body");
+    const isTruncatedJson = url.includes("/truncated-json");
+    if (!isEmptyBody && !isHtmlBody && !isTruncatedJson) {
+        return false;
+    }
+
+    let body = "";
+    req.on("data", (chunk) => {
+        body += chunk.toString();
+    });
+
+    req.on("end", () => {
+        try {
+            captureRequest(req, body, body ? JSON.parse(body) : null);
+        } catch {
+            captureRequest(req, body, null);
+        }
+
+        if (isEmptyBody) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end("");
+            return;
+        }
+
+        if (isHtmlBody) {
+            res.writeHead(200, { "Content-Type": "text/html" });
+            res.end("<html><body><h1>502 Bad Gateway</h1></body></html>");
+            return;
+        }
+
+        // 被截断的 JSON：解析必然失败
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end('{"id":"cmpl_truncated","object":"chat.completion","choices":[');
+    });
+
+    return true;
+}
+
+
 function handleTestRequest(
     url: string,
     req: IncomingMessage,
@@ -219,6 +271,12 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         return;
     }
 
+    // 非 JSON / 空体上游（P1-06 回归用例）：必须放在各协议通用路由之前匹配
+    // /empty-body  /html-body  /truncated-json
+    if (handleNonJsonUpstream(url, req, res)) {
+        return;
+    }
+
     // Log the request
     const requestMsg = `[MOCK] ${req.method} ${url}`;
     console.log(requestMsg);
@@ -241,6 +299,18 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleHangHeaders(req, res);
     } else if (url.includes("/chat/completions/trickle")) {
         handleOpenAIStreamTrickle(req, res);
+    } else if (url.includes("/chat/completions/no-terminator")) {
+        handleOpenAIStreamNoTerminator(req, res);
+    } else if (url.includes("/chat/completions/split-multibyte")) {
+        handleOpenAIStreamSplitMultibyte(req, res);
+    } else if (url.includes("/chat/completions/status-201")) {
+        handleOpenAIStatusResponse(req, res, 201);
+    } else if (url.includes("/chat/completions/status-204")) {
+        handleOpenAIStatusResponse(req, res, 204);
+    } else if (url.includes("/chat/completions/status-205")) {
+        handleOpenAIStatusResponse(req, res, 205);
+    } else if (url.includes("/chat/completions/status-304")) {
+        handleOpenAIStatusResponse(req, res, 304);
     } else if (url.includes("/chat/completions/bad-data")) {
         handleOpenAIStreamBadData(req, res);
     } else if (url.includes("/chat/completions/heartbeat")) {
@@ -282,6 +352,20 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
         handleAnthropicMessagesError(req, res);
     } else if (url.includes("/messages")) {
         handleAnthropicMessages(req, res);
+    } else if (req.method === "GET" && url.includes("/models-fail/models")) {
+        // P2-15：上游拉模型列表返回 5xx，且 body 里故意塞内部线索（网关不得回传给客户端）
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+            error: {
+                message: "INTERNAL_SECRET_upstream_db_password=letmein",
+                type: "internal_error",
+            },
+        }));
+    } else if (req.method === "GET" && url.includes("/models-hang/models")) {
+        // P2-15：上游拉模型列表永不响应（网关必须 10s 超时而不是挂死）
+        res.writeHead(200, { "Content-Type": "application/json" });
+        // 不 end：模拟上游卡死
+        setTimeout(() => { try { res.end(JSON.stringify({ data: [] })); } catch { /* closed */ } }, 30_000);
     } else if (req.method === "GET" && url.includes("/models")) {
         handleModelsList(req, res);
     } else {
@@ -1649,6 +1733,140 @@ function handleOpenAIStreamTrickle(req: IncomingMessage, res: ServerResponse): v
                 clearInterval(interval);
             }
         }, 400);
+    });
+}
+
+
+/**
+ * P1-05：上游持续写「永远不出现空行」的数据。
+ *
+ * 帧分隔符是空行，所以这些数据在网关侧永远切不出完整事件，全部堆在 remainingBuffer 里。
+ * 未加缓冲上限时 isolate 内存会被这条坏流吃爆（线上表现为 Worker 内存超限被杀、
+ * 记录停在 processing）；加上限后应在阈值内按 sse_parse_error 收尾并断开上游。
+ *
+ * 节奏：每 20ms 写一条 256 字节的 data 行（≈12KB/s），上限设 4KB 时几百毫秒就能撞线；
+ * 即使网关不中止，最多写 200 条（48KB）后停手，避免把 mock 自己耗死。
+ */
+function handleOpenAIStreamNoTerminator(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+        const payload = `data: {"id":"chatcmpl-flood","object":"chat.completion.chunk","model":"${data.model || "gpt-3.5-turbo"}","choices":[{"index":0,"delta":{"content":"${"x".repeat(200)}"}}]}`;
+        let sent = 0;
+        const interval = setInterval(() => {
+            if (res.writableEnded || (res as any).destroyed) {
+                clearInterval(interval);
+                return;
+            }
+            if (sent >= 200) {
+                // 不 end：坏流就该一直开着。网关侧若正确中止会主动断开
+                clearInterval(interval);
+                return;
+            }
+            // 注意：故意不写 \n\n，让网关永远切不出帧
+            res.write(payload + "\n");
+            sent++;
+        }, 20);
+        res.on("close", () => clearInterval(interval));
+    });
+}
+
+/**
+ * P1-04：多字节 UTF-8 被 chunk 边界切开。
+ *
+ * 按**字节**切片写（而不是按字符），保证每个中文三字节字符都可能被切成 1+2 / 2+1，
+ * 网关的 `TextDecoder({stream:true})` 必须把半个字符留住、下个 chunk 补齐；
+ * 最后一帧结束后直接 EOF（不发 [DONE]），检验 EOF 分支的收尾是否丢尾部字符。
+ */
+function handleOpenAIStreamSplitMultibyte(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+
+        const content = "中文流式内容测试ABC";
+        const event = {
+            id: "chatcmpl-multibyte",
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: data.model || "gpt-3.5-turbo",
+            choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: "stop" }],
+        };
+        // 两帧：内容帧 + DONE 帧，整体按字节切片投喂
+        const raw = Buffer.from(`data: ${JSON.stringify(event)}\n\ndata: [DONE]\n\n`, "utf-8");
+        const sliceSizes = [17, 1, 2, 3, 5, 7, 11, 13];
+        let offset = 0;
+        let i = 0;
+        const interval = setInterval(() => {
+            if (res.writableEnded || (res as any).destroyed) {
+                clearInterval(interval);
+                return;
+            }
+            if (offset >= raw.length) {
+                clearInterval(interval);
+                res.end();
+                return;
+            }
+            const size = sliceSizes[i % sliceSizes.length];
+            const end = Math.min(offset + size, raw.length);
+            res.write(raw.subarray(offset, end));
+            offset = end;
+            i++;
+        }, 15);
+        res.on("close", () => clearInterval(interval));
+    });
+}
+
+
+/**
+ * P2-02：上游返回「非 200 的 2xx」（201 / 204）。
+ *
+ * 修复前判定用的是 `status === 200`，于是 201/202/204 被当成失败：
+ * 记录落 FAILED、不计费（漏计费），而客户端其实拿到了正常响应。
+ * 201 带完整 body + usage（能同时验证计费），204 没有 body（验证空体也能算成功）。
+ */
+function handleOpenAIStatusResponse(
+    req: IncomingMessage,
+    res: ServerResponse,
+    status: 201 | 204 | 205 | 304,
+): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+        captureRequest(req, body, data);
+
+        // 204/205/304 按 HTTP 语义不允许带 body（带体客户端会等 body 或直接报错）
+        if (status === 204 || status === 205 || status === 304) {
+            res.writeHead(status);
+            res.end();
+            return;
+        }
+
+        res.writeHead(status, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+            id: "chatcmpl-status-201",
+            object: "chat.completion",
+            created: Math.floor(Date.now() / 1000),
+            model: data.model || "gpt-3.5-turbo",
+            choices: [{
+                index: 0,
+                message: { role: "assistant", content: "created" },
+                finish_reason: "stop",
+            }],
+            usage: { prompt_tokens: 10, completion_tokens: 15, total_tokens: 25 },
+        }));
     });
 }
 

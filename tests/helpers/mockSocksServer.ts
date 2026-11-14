@@ -192,7 +192,10 @@ async function startMockSocks(port: number = DEFAULT_SOCKS_PORT): Promise<Return
         });
 
         server.listen(port, onBothReady);
-        queryServer.listen(DEFAULT_QUERY_PORT, onBothReady);
+        // 查询端口的默认值保持不变；允许用环境变量挪开，
+        // 便于在同一台机器上用不同端口并行跑多份测试（默认 10096 常被判为"端口被占"）。
+        const queryPort = parseInt(process.env.TEST_SOCKS_QUERY_PORT || String(DEFAULT_QUERY_PORT), 10);
+        queryServer.listen(queryPort, onBothReady);
     });
 }
 
