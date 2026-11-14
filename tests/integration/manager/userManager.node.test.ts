@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import userManager from "../../src/manager/userManager";
-import dbHelper from "../helpers/dbHelper";
-import ormTestHelper from "../helpers/ormTestHelper";
+import userManager from "../../../src/manager/userManager";
+import dbHelper from "../../helpers/dbHelper";
+import ormTestHelper from "../../helpers/ormTestHelper";
 
 
 describe("userManager (node, real db)", () => {

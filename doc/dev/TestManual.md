@@ -110,9 +110,12 @@ tests/
 │   ├── tenant/            #   租户
 │   ├── user/              #   用户
 │   └── vendor/            #   供应商
+├── lifecycle/             # 系统生命周期测试（DB 迁移 / Schema 演进 / 服务启动 / 引擎探活）
 ├── integration/           # 集成测试（真库 + ORM 读写 + 跨模块协作）
-├── unit/                  # 单元测试（纯内存 / Mock；db / entry / middleware / model /
-│                          #   plugin / protocolConverter / script / security / service / util）
+│   ├── manager/           #   Manager 层 ORM 读写（*Manager.node.test.ts）
+│   └── service/           #   Service 与真库业务协作（*Service.node.test.ts 等）
+├── unit/                  # 单元测试（纯内存 / Mock；entry / middleware / model / plugin /
+│                          #   protocolConverter / script / security / service / util）
 ├── fixtures/              # 业务实体测试数据与 Token 常量
 │   ├── userFixtures.ts    #   USER_FIXTURES（admin 等）/ ADMIN_TOKEN
 │   ├── vendorFixtures.ts  #   VENDOR_FIXTURES（openai() / anthropic() …）/ createRandomVendor
@@ -141,12 +144,17 @@ tests/
    - 不依赖测试服务器、HTTP API、Cloudflare D1/R2 binding、文件系统持久化或外部进程。
    - 如需隔离依赖，应使用 mock/stub/fake，而不是连接真实资源。
 
-2. **集成测试 (`tests/integration/`)**
+2. **生命周期测试 (`tests/lifecycle/`)**
+   - 验证数据库迁移（33 个 `migrate_*`）、Schema 约束演进、服务启动模式（`MIGRATION_MODE`）、
+     DB 引擎探活这类系统级行为；它们通常自建空库、跑迁移或拉独立子进程。
+   - 单独运行：`npm run backend:test:lifecycle`（仍挂 `globalSetup`，与全量门同一套环境）。
+
+3. **集成测试 (`tests/integration/`)**
    - 只要测试需要访问真实数据库、ORM 连接、migration 后的表结构、对象存储、文件系统持久化或多个 service 的真实协作，就应归类为集成测试。
    - service 层测试如果需要读写 DB，也属于集成测试，不应放在 `tests/unit/`。
    - 通过 HTTP API 验证完整业务流程的测试，可以放在 `tests/integration/`；面向具体 REST 接口契约的测试放在 `tests/api/`。
 
-3. **API 测试 (`tests/api/`)**
+4. **API 测试 (`tests/api/`)**
    - 通过 `requestHelper` 调用测试服务器，验证接口状态码、响应结构、鉴权、数据持久化和端到端业务行为。
    - **常规的业务数据准备、业务操作和结果验证一律通过 API 完成**，不用数据库直连代替接口行为。
    - 例外白名单（**只有 API 无法暴露这些状态时才允许** `dbHelper.query()` / `dbHelper.execute()` / ORM model query / 原始 SQL）：
@@ -156,9 +164,9 @@ tests/
      除上述三类，API 测试只用 `dbHelper.truncate()` 做统一隔离。当前 `tests/api/` 下确有此需要的文件共 17 个，改动其中一个的直连用法前请先确认它落在这三类里。
    - Worker 模式下的集成覆盖通常通过 API 请求进入 `wrangler dev` 启动的真实 Worker 服务完成；测试进程本身不直接持有 Worker 的 `DB`、`OBJECT_BUCKET` 等 binding。
 
-4. **Node-only 测试 (`*.node.test.ts`)**
+5. **Node-only 测试 (`*.node.test.ts`)**
    - 文件名后缀只表示该测试依赖 Node.js 本地能力，worker 模式测试套件会排除这些用例。
-   - Node-only 不等于单元测试。若测试访问 DB 或 ORM，应放在 `tests/integration/`，例如 `tests/integration/example.node.test.ts`。
+   - Node-only 不等于单元测试。若测试访问 DB 或 ORM，应放在 `tests/integration/`，例如 `tests/integration/service/recordService.node.test.ts`。
 
 ### 测试用例
 

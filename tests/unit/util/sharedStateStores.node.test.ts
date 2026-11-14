@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { SqlRateLimitStore } from "../../../src/util/rule/sqlRateLimitStore";
 import { SqlUpstreamHealthStore } from "../../../src/util/health/sqlHealthStore";
-import type { SqlExecutor } from "../../../src/util/rule/sqlExecutor";
+import { createSqlExecutor } from "../../helpers/sqliteTestHelper";
 
 /**
  * P0-2 / P0-3 回归：共享存储层的 SQL 语义（node / better-sqlite3 真库）。
@@ -20,18 +20,6 @@ const MIGRATION_SQL = readFileSync(
     "utf-8",
 );
 
-function createExecutor(db: Database.Database): SqlExecutor {
-    return {
-        async run(sql: string, params: unknown[] = []) {
-            const result = db.prepare(sql).run(...(params as never[]));
-            return { changes: result.changes };
-        },
-        async all<T = Record<string, unknown>>(sql: string, params: unknown[] = []) {
-            return db.prepare(sql).all(...(params as never[])) as T[];
-        },
-    };
-}
-
 describe("SqlRateLimitStore（better-sqlite3 真库）", () => {
     let db: Database.Database;
     let store: SqlRateLimitStore;
@@ -40,7 +28,7 @@ describe("SqlRateLimitStore（better-sqlite3 真库）", () => {
     beforeEach(() => {
         db = new Database(":memory:");
         db.exec(MIGRATION_SQL);
-        store = new SqlRateLimitStore(createExecutor(db));
+        store = new SqlRateLimitStore(createSqlExecutor(db));
     });
 
     afterEach(() => {
@@ -123,7 +111,7 @@ describe("SqlUpstreamHealthStore（better-sqlite3 真库）", () => {
     beforeEach(() => {
         db = new Database(":memory:");
         db.exec(MIGRATION_SQL);
-        store = new SqlUpstreamHealthStore(createExecutor(db));
+        store = new SqlUpstreamHealthStore(createSqlExecutor(db));
     });
 
     afterEach(() => {

@@ -2,14 +2,14 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
-import clientConfigService from "../../src/service/clientConfigService/core";
-import ormService from "../../src/service/ormService";
-import SgClientConfig from "../../src/model/sgClientConfig";
-import { SgUser } from "../../src/model/sgUser";
-import { SgVendor } from "../../src/model/sgVendor";
-import { ClientName, ConnectionMode, RunMode, UserType, UserStatus } from "../../src/constants";
-import dbHelper from "../helpers/dbHelper";
-import ormTestHelper from "../helpers/ormTestHelper";
+import clientConfigService from "../../../src/service/clientConfigService/core";
+import ormService from "../../../src/service/ormService";
+import SgClientConfig from "../../../src/model/sgClientConfig";
+import { SgUser } from "../../../src/model/sgUser";
+import { SgVendor } from "../../../src/model/sgVendor";
+import { ClientName, ConnectionMode, RunMode, UserType, UserStatus } from "../../../src/constants";
+import dbHelper from "../../helpers/dbHelper";
+import ormTestHelper from "../../helpers/ormTestHelper";
 
 
 describe("clientConfigService", () => {

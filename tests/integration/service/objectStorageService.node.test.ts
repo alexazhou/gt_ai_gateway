@@ -1,10 +1,10 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import objectStorageService from "../../src/service/objectStorageService";
-import ormService from "../../src/service/ormService";
-import configService from "../../src/service/configService";
-import { ConfigKey, RunMode } from "../../src/constants";
-import dbHelper from "../helpers/dbHelper";
-import ormTestHelper from "../helpers/ormTestHelper";
+import objectStorageService from "../../../src/service/objectStorageService";
+import ormService from "../../../src/service/ormService";
+import configService from "../../../src/service/configService";
+import { ConfigKey, RunMode } from "../../../src/constants";
+import dbHelper from "../../helpers/dbHelper";
+import ormTestHelper from "../../helpers/ormTestHelper";
 
 function createMockR2Bucket(preloadKeys: string[] = []): R2Bucket {
     const objects = new Map<string, Uint8Array>(

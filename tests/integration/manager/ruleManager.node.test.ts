@@ -1,9 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import ruleManager from "../../src/manager/ruleManager";
-import tenantService from "../../src/service/tenantService";
-import type { TenantScope } from "../../src/middleware/tenantScopeMiddleware";
-import dbHelper from "../helpers/dbHelper";
-import ormTestHelper from "../helpers/ormTestHelper";
+import ruleManager from "../../../src/manager/ruleManager";
+import tenantService from "../../../src/service/tenantService";
+import type { TenantScope } from "../../../src/middleware/tenantScopeMiddleware";
+import dbHelper from "../../helpers/dbHelper";
+import ormTestHelper from "../../helpers/ormTestHelper";
 
 describe("ruleManager (node, real db)", () => {
     let mainScope: TenantScope;

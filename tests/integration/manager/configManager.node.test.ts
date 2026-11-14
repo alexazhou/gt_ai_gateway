@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import configManager from "../../src/manager/configManager";
-import dbHelper from "../helpers/dbHelper";
-import ormTestHelper from "../helpers/ormTestHelper";
+import configManager from "../../../src/manager/configManager";
+import dbHelper from "../../helpers/dbHelper";
+import ormTestHelper from "../../helpers/ormTestHelper";
 
 
 describe("configManager (node, real db)", () => {

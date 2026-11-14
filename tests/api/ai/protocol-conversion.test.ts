@@ -1054,4 +1054,94 @@ describe("AI Protocol Conversion API", () => {
         const record = recordsResponse.body.list[0];
         expect(record.upstream_format).toBeNull();
     }, 30000);
+
+    // 以下两条原在 tests/api/gateway/protocol-conversion.test.ts，与本地文件前段的用例重叠，
+    // 但独有「同模型连发 non-stream + stream 后按 getFinalizedRecords 校验两条记录的落库结构」
+    // 与 request_data.stream 分支断言，合入时保留。
+    it("should complete OpenAI client to Anthropic upstream conversion workflow", async () => {
+        const chatResponse = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({
+                model: openAIClientModelName,
+                stream: false,
+            }),
+            testUserToken,
+        );
+
+        expect(chatResponse.status).toBe(200);
+        expect(chatResponse.body.object).toBe("chat.completion");
+        expect(chatResponse.body.choices[0].message.content).toContain("mock Claude assistant");
+
+        const streamResponse = await requestHelper.post(
+            "/llm/v1/chat/completions",
+            mockHelper.generateOpenAIChatRequest({
+                model: openAIClientModelName,
+                stream: true,
+            }),
+            testUserToken,
+        );
+
+        expect(streamResponse.status).toBe(200);
+        expect(streamResponse.body).toContain("chat.completion.chunk");
+        expect(streamResponse.body).toContain("[DONE]");
+
+        const records = await requestHelper.getFinalizedRecords(adminToken, 2);
+        expect(records.length).toBeGreaterThan(0);
+
+        for (const record of records) {
+            expect(record.user_id).toBe(testUserId);
+            expect(record.model_id).toBe(openAIClientModelId);
+            expect(record.status).toBe("success");
+
+            const responseData = JSON.parse(record.response_data);
+            expect(responseData.choices[0].message.content).toContain("mock Claude assistant");
+        }
+    }, 60000);
+
+
+    it("should complete Anthropic client to OpenAI upstream conversion workflow", async () => {
+        const messageResponse = await requestHelper.postWithAnthropicStyleApiKey(
+            "/llm/v1/messages",
+            mockHelper.generateAnthropicMessageRequest({
+                model: anthropicClientModelName,
+                stream: false,
+            }),
+            testUserToken,
+        );
+
+        expect(messageResponse.status).toBe(200);
+        expect(messageResponse.body.type).toBe("message");
+        expect(messageResponse.body.content[0].text).toContain("mock AI assistant");
+
+        const streamResponse = await requestHelper.postWithAnthropicStyleApiKey(
+            "/llm/v1/messages",
+            mockHelper.generateAnthropicMessageRequest({
+                model: anthropicClientModelName,
+                stream: true,
+            }),
+            testUserToken,
+        );
+
+        expect(streamResponse.status).toBe(200);
+        expect(streamResponse.body).toContain("event: message_start");
+        expect(streamResponse.body).toContain("event: message_stop");
+
+        const records = await requestHelper.getFinalizedRecords(adminToken, 2);
+        expect(records.length).toBeGreaterThan(0);
+
+        for (const record of records) {
+            expect(record.user_id).toBe(testUserId);
+            expect(record.model_id).toBe(anthropicClientModelId);
+            expect(record.status).toBe("success");
+
+            const requestData = JSON.parse(record.request_data);
+            const responseData = JSON.parse(record.response_data);
+            if (requestData.stream) {
+                expect(responseData.choices[0].message.content).toContain("mock AI assistant");
+            } else {
+                expect(responseData.type).toBe("message");
+                expect(responseData.content[0].text).toContain("mock AI assistant");
+            }
+        }
+    }, 60000);
 });

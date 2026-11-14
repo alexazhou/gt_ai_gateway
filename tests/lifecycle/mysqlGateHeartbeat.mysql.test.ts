@@ -24,7 +24,7 @@
  * 这样既不会污染 sqlite 全量门的用例计数，也不会在 worker 门里假装通过。
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import config from "../../config";
+import config from "../config";
 
 const isMysql = config.DB_CONFIG.driver === "mysql";
 

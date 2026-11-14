@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { SqlRateLimitStore } from "../../../src/util/rule/sqlRateLimitStore";
-import type { SqlExecutor } from "../../../src/util/rule/sqlExecutor";
+import { createSqlExecutor } from "../../helpers/sqliteTestHelper";
 
 /**
  * P0-2 回归：「限流在 Worker 下失效」的跨 isolate 语义。
@@ -23,18 +23,6 @@ const MIGRATION_SQL = readFileSync(
 );
 
 const T0 = 1_700_000_000_000;
-
-function executorFor(db: Database.Database): SqlExecutor {
-    return {
-        async run(sql: string, params: unknown[] = []) {
-            const result = db.prepare(sql).run(...(params as never[]));
-            return { changes: result.changes };
-        },
-        async all<T = Record<string, unknown>>(sql: string, params: unknown[] = []) {
-            return db.prepare(sql).all(...(params as never[])) as T[];
-        },
-    };
-}
 
 /** rpm → 令牌桶参数（与 rateLimitService.tokenBucketParams 同口径：容量 = rpm，60s 补满） */
 function bucketParams(rpm: number): { capacity: number; refillPerMs: number } {
@@ -69,8 +57,8 @@ describe("限流跨 isolate（P0-2 回归）", () => {
         const dbB = new Database(file);
         connections.push(dbA, dbB);
         return [
-            new SqlRateLimitStore(executorFor(dbA)),
-            new SqlRateLimitStore(executorFor(dbB)),
+            new SqlRateLimitStore(createSqlExecutor(dbA)),
+            new SqlRateLimitStore(createSqlExecutor(dbB)),
         ];
     }
 
@@ -82,8 +70,8 @@ describe("限流跨 isolate（P0-2 回归）", () => {
         dbB.exec(MIGRATION_SQL);
         connections.push(dbA, dbB);
         return [
-            new SqlRateLimitStore(executorFor(dbA)),
-            new SqlRateLimitStore(executorFor(dbB)),
+            new SqlRateLimitStore(createSqlExecutor(dbA)),
+            new SqlRateLimitStore(createSqlExecutor(dbB)),
         ];
     }
 

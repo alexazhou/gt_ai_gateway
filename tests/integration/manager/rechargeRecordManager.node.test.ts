@@ -1,8 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import rechargeRecordManager from "../../src/manager/rechargeRecordManager";
-import userManager from "../../src/manager/userManager";
-import dbHelper from "../helpers/dbHelper";
-import ormTestHelper from "../helpers/ormTestHelper";
+import rechargeRecordManager from "../../../src/manager/rechargeRecordManager";
+import userManager from "../../../src/manager/userManager";
+import dbHelper from "../../helpers/dbHelper";
+import ormTestHelper from "../../helpers/ormTestHelper";
 
 
 describe("rechargeRecordManager (node, real db)", () => {

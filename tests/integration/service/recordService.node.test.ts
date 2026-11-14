@@ -1,11 +1,11 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { SgRecord } from "../../src/model/sgRecord";
-import recordService from "../../src/service/recordService";
-import objectStorageService from "../../src/service/objectStorageService";
-import { SgRecordStatus, ConfigKey } from "../../src/constants";
-import configService from "../../src/service/configService";
-import dbHelper from "../helpers/dbHelper";
-import ormTestHelper from "../helpers/ormTestHelper";
+import { SgRecord } from "../../../src/model/sgRecord";
+import recordService from "../../../src/service/recordService";
+import objectStorageService from "../../../src/service/objectStorageService";
+import { SgRecordStatus, ConfigKey } from "../../../src/constants";
+import configService from "../../../src/service/configService";
+import dbHelper from "../../helpers/dbHelper";
+import ormTestHelper from "../../helpers/ormTestHelper";
 
 
 describe("recordService (node, real db)", () => {

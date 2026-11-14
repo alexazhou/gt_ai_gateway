@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SQLiteDBAdapter } from "../../../src/util/db/sqliteDBAdapter";
+import { SQLiteDBAdapter } from "../../src/util/db/sqliteDBAdapter";
 
 /**
  * P1-11 验收门：迁移 SQL 里的 `;` 不能被切半。

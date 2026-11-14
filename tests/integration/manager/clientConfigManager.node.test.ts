@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import clientConfigManager from "../../src/manager/clientConfigManager";
-import dbHelper from "../helpers/dbHelper";
-import ormTestHelper from "../helpers/ormTestHelper";
+import clientConfigManager from "../../../src/manager/clientConfigManager";
+import dbHelper from "../../helpers/dbHelper";
+import ormTestHelper from "../../helpers/ormTestHelper";
 
 
 describe("clientConfigManager (node, real db)", () => {

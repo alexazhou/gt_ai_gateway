@@ -1,9 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { SgModel } from "../../src/model/sgModel";
-import { ModelRoutingMode } from "../../src/constants";
-import modelManager from "../../src/manager/modelManager";
-import dbHelper from "../helpers/dbHelper";
-import ormTestHelper from "../helpers/ormTestHelper";
+import { SgModel } from "../../../src/model/sgModel";
+import { ModelRoutingMode } from "../../../src/constants";
+import modelManager from "../../../src/manager/modelManager";
+import dbHelper from "../../helpers/dbHelper";
+import ormTestHelper from "../../helpers/ormTestHelper";
 
 
 describe("modelManager (node, real db)", () => {

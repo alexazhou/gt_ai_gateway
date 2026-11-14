@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
-import dbMigrationService from "../../../src/service/dbMigrationService";
+import dbMigrationService from "../../src/service/dbMigrationService";
 import {
     createMigrationTestDb,
     listTables,
     type MigrationTestDb,
-} from "../../helpers/migrationTestDb";
+} from "../helpers/migrationTestDb";
 
 /**
  * 启动时的迁移策略与只读检查。

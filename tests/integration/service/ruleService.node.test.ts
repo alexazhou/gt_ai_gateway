@@ -1,16 +1,16 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import ruleManager from "../../src/manager/ruleManager";
-import ruleService from "../../src/service/ruleService";
-import tenantService from "../../src/service/tenantService";
-import { RuleType, UserType } from "../../src/constants";
-import { SgUser } from "../../src/model/sgUser";
-import { SgModel } from "../../src/model/sgModel";
-import { SgVendor } from "../../src/model/sgVendor";
-import customError from "../../src/customError";
-import dbHelper from "../helpers/dbHelper";
-import ormTestHelper from "../helpers/ormTestHelper";
-import memoryRateLimitStore from "../../src/util/rule/memoryRateLimitStore";
-import type { TenantScope } from "../../src/middleware/tenantScopeMiddleware";
+import ruleManager from "../../../src/manager/ruleManager";
+import ruleService from "../../../src/service/ruleService";
+import tenantService from "../../../src/service/tenantService";
+import { RuleType, UserType } from "../../../src/constants";
+import { SgUser } from "../../../src/model/sgUser";
+import { SgModel } from "../../../src/model/sgModel";
+import { SgVendor } from "../../../src/model/sgVendor";
+import customError from "../../../src/customError";
+import dbHelper from "../../helpers/dbHelper";
+import ormTestHelper from "../../helpers/ormTestHelper";
+import memoryRateLimitStore from "../../../src/util/rule/memoryRateLimitStore";
+import type { TenantScope } from "../../../src/middleware/tenantScopeMiddleware";
 
 describe("ruleService (node, real db)", () => {
     let tenantId = 1;

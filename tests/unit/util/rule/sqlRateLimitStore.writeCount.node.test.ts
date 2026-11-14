@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { SqlRateLimitStore } from "../../../../src/util/rule/sqlRateLimitStore";
-import type { SqlExecutor } from "../../../../src/util/rule/sqlExecutor";
+import { createSqlExecutor, type ExecutedStatement } from "../../../helpers/sqliteTestHelper";
 
 /**
  * P2-25 验收门：`SqlRateLimitStore.consume()` 的写放大。
@@ -22,37 +22,10 @@ const MIGRATION_SQL = readFileSync(
     "utf-8",
 );
 
-interface StatementLog {
-    sql: string;
-    kind: "insert" | "update" | "select" | "delete";
-}
-
-function classify(sql: string): StatementLog["kind"] {
-    const head = sql.trimStart().slice(0, 12).toUpperCase();
-    if (head.startsWith("INSERT")) return "insert";
-    if (head.startsWith("UPDATE")) return "update";
-    if (head.startsWith("DELETE")) return "delete";
-    return "select";
-}
-
-function createCountingExecutor(db: Database.Database, log: StatementLog[]): SqlExecutor {
-    return {
-        async run(sql: string, params: unknown[] = []) {
-            log.push({ sql, kind: classify(sql) });
-            const result = db.prepare(sql).run(...(params as never[]));
-            return { changes: result.changes };
-        },
-        async all<T = Record<string, unknown>>(sql: string, params: unknown[] = []) {
-            log.push({ sql, kind: classify(sql) });
-            return db.prepare(sql).all(...(params as never[])) as T[];
-        },
-    };
-}
-
 describe("SqlRateLimitStore 写次数（P2-25）", () => {
     let db: Database.Database;
     let store: SqlRateLimitStore;
-    let log: StatementLog[];
+    let log: ExecutedStatement[];
 
     const T0 = 1_700_000_000_000;
     const RPM = 60;
@@ -65,7 +38,7 @@ describe("SqlRateLimitStore 写次数（P2-25）", () => {
         db = new Database(":memory:");
         db.exec(MIGRATION_SQL);
         log = [];
-        store = new SqlRateLimitStore(createCountingExecutor(db, log));
+        store = new SqlRateLimitStore(createSqlExecutor(db, log));
         // 关掉概率清扫，避免 1% 的 DELETE 打乱计数
         vi.spyOn(Math, "random").mockReturnValue(0.5);
     });

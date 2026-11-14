@@ -1,9 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { SgVendor } from "../../src/model/sgVendor";
-import vendorService from "../../src/service/vendorService";
-import { ApiFormat } from "../../src/constants";
-import dbHelper from "../helpers/dbHelper";
-import ormTestHelper from "../helpers/ormTestHelper";
+import { SgVendor } from "../../../src/model/sgVendor";
+import vendorService from "../../../src/service/vendorService";
+import { ApiFormat } from "../../../src/constants";
+import dbHelper from "../../helpers/dbHelper";
+import ormTestHelper from "../../helpers/ormTestHelper";
 
 
 describe("vendorService.findVendorByUrl", () => {

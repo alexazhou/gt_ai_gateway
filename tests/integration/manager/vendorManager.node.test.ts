@@ -1,9 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { SgVendor, SgVendorConfig } from "../../src/model/sgVendor";
-import vendorManager from "../../src/manager/vendorManager";
-import vendorModelManager from "../../src/manager/vendorModelManager";
-import dbHelper from "../helpers/dbHelper";
-import ormTestHelper from "../helpers/ormTestHelper";
+import { SgVendor, SgVendorConfig } from "../../../src/model/sgVendor";
+import vendorManager from "../../../src/manager/vendorManager";
+import vendorModelManager from "../../../src/manager/vendorModelManager";
+import dbHelper from "../../helpers/dbHelper";
+import ormTestHelper from "../../helpers/ormTestHelper";
 
 
 describe("vendorManager (node, real db)", () => {

@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach, beforeAll } from "vitest";
-import requestActivityService from "../../src/service/requestActivityService";
-import { RequestActivityStage, ActivityLevel } from "../../src/constants";
-import dbHelper from "../helpers/dbHelper";
-import ormTestHelper from "../helpers/ormTestHelper";
+import requestActivityService from "../../../src/service/requestActivityService";
+import { RequestActivityStage, ActivityLevel } from "../../../src/constants";
+import dbHelper from "../../helpers/dbHelper";
+import ormTestHelper from "../../helpers/ormTestHelper";
 
 
 describe("requestActivityService (node, real db)", () => {
@@ -65,20 +65,20 @@ describe("requestActivityService (node, real db)", () => {
 
     it("swallows write failures and does not throw", async () => {
         const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
-        const originalQuery = (await import("../../src/model/sgRequestActivity")).SgRequestActivity.query;
+        const originalQuery = (await import("../../../src/model/sgRequestActivity")).SgRequestActivity.query;
 
         // 让 append 内部抛错，验证 best-effort 不向外抛
         const throwingQuery = () => {
             throw new Error("db unavailable");
         };
-        (await import("../../src/model/sgRequestActivity")).SgRequestActivity.query = throwingQuery as any;
+        (await import("../../../src/model/sgRequestActivity")).SgRequestActivity.query = throwingQuery as any;
 
         try {
             await expect(
                 requestActivityService.append(1, RequestActivityStage.ROUTING, "路由选择"),
             ).resolves.toBeUndefined();
         } finally {
-            (await import("../../src/model/sgRequestActivity")).SgRequestActivity.query = originalQuery;
+            (await import("../../../src/model/sgRequestActivity")).SgRequestActivity.query = originalQuery;
             spy.mockRestore();
         }
     });

@@ -190,82 +190,44 @@ function runD1Command(args: string[]): string {
 }
 
 /**
- * Clear D1 local database - worker mode only
- * Uses wrangler d1 execute to DROP all tables (including _migrations),
- * so next run will re-apply all migrations from scratch.
+ * Drop 所有 D1 本地表（含 `_migrations`）——worker 模式专用
+ * 保留 `_migrations` 会让下一轮迁移被判定「已执行」而跳过，因此必须一起删掉，从零重跑。
  */
-function clearD1LocalDatabase(): void {
+async function clearD1LocalDatabase(): Promise<void> {
     console.log("[WORKER_SETUP] Clearing D1 test database via SQL...");
 
     try {
-        // Query all tables
-        const output = runD1Command([
-            "--json",
-            "--command",
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'd1_%'",
-        ]);
+        const tables = await listBusinessTables(false);
 
-        const match = output.match(/\[.*\]/s);
-        if (match) {
-            const parsed = JSON.parse(match[0]);
-            const tables =
-                Array.isArray(parsed) &&
-                    parsed.length > 0 &&
-                    Array.isArray(parsed[0]?.results)
-                    ? (parsed[0].results as { name: string }[])
-                    : [];
-
-            if (tables.length === 0) {
-                console.log("[WORKER_SETUP] No tables to drop");
-                return;
-            }
-
-            const dropStatements = tables.map(t => `DROP TABLE IF EXISTS ${t.name};`).join(" ");
-            runD1Command(["--command", dropStatements]);
-
-            console.log(`[WORKER_SETUP] Dropped ${tables.length} tables: ${tables.map(t => t.name).join(", ")}`);
-        } else {
-            console.log("[WORKER_SETUP] No tables found in database");
+        if (tables.length === 0) {
+            console.log("[WORKER_SETUP] No tables to drop");
+            return;
         }
+
+        runD1Command(["--command", tables.map((t) => `DROP TABLE IF EXISTS ${t.name};`).join(" ")]);
+        console.log(`[WORKER_SETUP] Dropped ${tables.length} tables: ${tables.map((t) => t.name).join(", ")}`);
     } catch (e) {
         console.error("[WORKER_SETUP] Failed to clear D1 test database:", e);
     }
 }
 
 /**
- * Clear D1 database tables (but keep schema) - worker mode only
+ * 清空 D1 本地表数据（保留表结构与 `_migrations`）——worker 模式专用
  */
-function clearD1Tables(): void {
+async function clearD1Tables(): Promise<void> {
     console.log("[WORKER_SETUP] Clearing D1 database tables...");
 
     try {
-        const output = runD1Command([
-            "--json",
-            "--command",
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'd1_%' AND name != '_migrations'",
-        ]);
+        const tables = await listBusinessTables(true);
 
-        const match = output.match(/\[.*\]/s);
-        if (match) {
-            const parsed = JSON.parse(match[0]);
-            const tables =
-                Array.isArray(parsed) &&
-                    parsed.length > 0 &&
-                    Array.isArray(parsed[0]?.results)
-                    ? (parsed[0].results as { name: string }[])
-                    : [];
-
-            if (tables.length === 0) {
-                console.log("[WORKER_SETUP] No tables to clear");
-                return;
-            }
-
-            // Combine all DELETE statements into a single command for better performance
-            const deleteStatements = tables.map(t => `DELETE FROM ${t.name};`).join(" ");
-            runD1Command(["--command", deleteStatements]);
-
-            console.log(`[WORKER_SETUP] Cleared ${tables.length} tables`);
+        if (tables.length === 0) {
+            console.log("[WORKER_SETUP] No tables to clear");
+            return;
         }
+
+        // Combine all DELETE statements into a single command for better performance
+        runD1Command(["--command", tables.map((t) => `DELETE FROM ${t.name};`).join(" ")]);
+        console.log(`[WORKER_SETUP] Cleared ${tables.length} tables`);
     } catch (e) {
         console.error("[WORKER_SETUP] Failed to clear D1 tables:", e);
     }
@@ -299,29 +261,50 @@ function runD1Migrations(): void {
 }
 
 /**
+ * 列出 MySQL 库内全部表（含 `_migrations` 与下划线开头的表）。
+ * `DATABASE()` 里看不到系统库表，故这里不做前缀过滤——重置 schema 需要「一张不剩」。
+ */
+async function listAllMysqlTables(): Promise<{ name: string }[]> {
+    const [rows] = await getMysqlPool().query(
+        "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE()",
+    );
+    return (rows as any[]).map((r: any) => ({ name: r.name }));
+}
+
+/**
  * 列出业务表名（按驱动分支）：mysql 用 information_schema，sqlite/d1 用 sqlite_master
- * 返回 { name }[]，供 cleanup / truncate 使用
+ * 返回 { name }[]，供 cleanup / truncate / clearD1* 使用。
+ *
+ * `excludeMigrations`：是否排除 `_migrations`
+ * - 批量清数据（truncate / clearD1Tables）→ true，保留迁移记录
+ * - 重置 schema（cleanup / clearD1LocalDatabase）→ false，连迁移记录一起删，下一轮重跑迁移
+ *
+ * 注意：mysql 分支下划线开头的表（含 `_migrations`）统一不算业务表，故该参数在 mysql 下无额外作用；
+ * 需要连 `_migrations` 一起删的场景请直接用 `listAllMysqlTables()`。
  */
 async function listBusinessTables(excludeMigrations: boolean): Promise<{ name: string }[]> {
     if (isMysql) {
-        const exclude = excludeMigrations ? " AND table_name != '_migrations'" : "";
-        const [rows] = await getMysqlPool().query(
-            `SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name NOT LIKE '\\_%'${exclude}`,
-        );
-        return (rows as any[]).map((r: any) => ({ name: r.name }));
+        const tables = await listAllMysqlTables();
+        return tables.filter((t) => !t.name.startsWith("_"));
     }
-    const sqliteListSql = `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'd1_%'${excludeMigrations ? " AND name != '_migrations'" : ""}`;
+
+    const sqliteListSql = `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'd1_%'`;
+    let rows: { name: string }[];
+
     if (isWorkerMode) {
         const output = runD1Command(["--json", "--command", sqliteListSql]);
         const match = output.match(/\[.*\]/s);
-        if (match) {
-            const parsed = JSON.parse(match[0]);
-            const rows = Array.isArray(parsed) && Array.isArray(parsed[0]?.results) ? parsed[0].results : [];
-            return (rows as { name: string }[]).map((r) => ({ name: r.name }));
-        }
-        return [];
+        if (!match) return [];
+        const parsed = JSON.parse(match[0]);
+        rows = (Array.isArray(parsed) && Array.isArray(parsed[0]?.results) ? parsed[0].results : []) as {
+            name: string;
+        }[];
+    } else {
+        rows = localDb!.prepare(sqliteListSql).all() as { name: string }[];
     }
-    return (localDb!.prepare(sqliteListSql).all() as { name: string }[]).map((r) => ({ name: r.name }));
+
+    const names = excludeMigrations ? rows.filter((r) => r.name !== "_migrations") : rows;
+    return names.map((r) => ({ name: r.name }));
 }
 
 /**
@@ -331,7 +314,7 @@ async function listBusinessTables(excludeMigrations: boolean): Promise<{ name: s
 async function initDatabase(): Promise<void> {
     if (isWorkerMode) {
         console.log("[INIT_DATABASE] Worker mode: D1 database managed by wrangler");
-        clearD1LocalDatabase();
+        await clearD1LocalDatabase();
         runD1Migrations();
     } else if (isMysql) {
         // MySQL：无文件可删，先 DROP 全部表（含 _migrations），保证每次从空库重新迁移
@@ -351,18 +334,20 @@ async function initDatabase(): Promise<void> {
 }
 
 /**
- * DROP 掉 MySQL 库中所有业务表（含 _migrations），用于每次测试前重置 schema
+ * DROP 掉 MySQL 库中所有表（含 `_migrations`），用于每次测试前重置 schema
  */
 async function dropAllMysqlTables(): Promise<void> {
+    const pool = getMysqlPool();
     // 关闭外键检查，避免因表间外键（如 recharge_records -> user）导致 DROP 顺序报错
-    await getMysqlPool().query("SET FOREIGN_KEY_CHECKS = 0");
-    const [tables] = await getMysqlPool().query(
-        "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE()",
-    );
-    for (const t of tables as any[]) {
-        await getMysqlPool().query(`DROP TABLE IF EXISTS ${t.name}`);
+    await pool.query("SET FOREIGN_KEY_CHECKS = 0");
+    try {
+        // 必须连 _migrations 一起删：否则下一轮迁移会被判定「已执行」而跳过，表不存在导致全量测试失败
+        for (const t of await listAllMysqlTables()) {
+            await pool.query(`DROP TABLE IF EXISTS ${t.name}`);
+        }
+    } finally {
+        await pool.query("SET FOREIGN_KEY_CHECKS = 1");
     }
-    await getMysqlPool().query("SET FOREIGN_KEY_CHECKS = 1");
 }
 
 /**
@@ -376,7 +361,7 @@ async function clearDatabase(shouldCleanup: boolean = true): Promise<void> {
 
     if (isWorkerMode) {
         console.log("[CLEAR_DATABASE] Worker mode: Cleaning up D1 local database...");
-        clearD1LocalDatabase();
+        await clearD1LocalDatabase();
         console.log("[CLEAR_DATABASE] D1 local database cleaned up");
     } else {
         console.log("Cleaning up test database...");
@@ -491,7 +476,7 @@ async function truncate(): Promise<void> {
 
     if (isWorkerMode) {
         // In worker mode, clear D1 tables only (admin user created via API)
-        clearD1Tables();
+        await clearD1Tables();
         await seedMainTenant();
 
         // Clear in-memory config cache so tests don't leak state across runs

@@ -8,9 +8,11 @@
  *
  * 边界（重要）：
  * - 只是**新增**入口，`vitest.config.ts` / `vitest.worker.config.ts` 一字不改，四道门的收集语义不变。
- * - `exclude` 里 4 个文件是当前 `tests/unit/` 下会落盘建库、跑迁移或连真实 MySQL 的用例，
- *   它们随目录分层（`tests/lifecycle/`、`tests/integration/service/`）迁走后，本清单可整段删掉。
- * - 用例一旦要依赖 globalSetup 提供的东西（测试库 / 服务端口 / 管理员），就不该留在 `tests/unit/`。
+ * - 依赖真实 MySQL 容器的用例（`*.mysql.test.ts`）一律不收：它们归 T7 本地 MySQL 门。
+ * - 用例一旦要落盘建库、跑迁移，或依赖 globalSetup 提供的东西（测试库 / 服务端口 / 管理员），
+ *   就不该留在 `tests/unit/` —— 这类用例已按目录分层迁到 `tests/lifecycle/` 与 `tests/integration/`。
+ *   这里保留 mysql 的全局排除是为了保持本门的「不落盘 / 不建库」纯度：以后谁再往 `tests/unit/`
+ *   放 `*.mysql.test.ts`，会被本门直接挡在外面，而不是先跑绿再发现它污染了磁盘。
  */
 import { defineConfig } from "vitest/config";
 
@@ -18,17 +20,7 @@ export default defineConfig({
     test: {
         globals: true,
         include: ["tests/unit/**/*.test.ts"],
-        exclude: [
-            "node_modules",
-            // 跑全部 33 个迁移：真库 + 落盘临时库
-            "tests/unit/service/dbMigrationService.test.ts",
-            // 建临时 SQLite 文件验证迁移器底层 exec
-            "tests/unit/db/sqliteDBAdapterExec.node.test.ts",
-            // 连真实 MySQL 容器做引擎探活（只在 T7 本地 MySQL 门收集）
-            "tests/unit/db/mysqlGateHeartbeat.mysql.test.ts",
-            // 建临时目录 + 共享 SQLite 文件验证跨连接并发
-            "tests/unit/service/rateLimitStore.crossIsolate.node.test.ts",
-        ],
+        exclude: ["node_modules", "**/*.mysql.test.ts"],
         environment: "node",
         pool: "forks",
         // 纯单元测试之间没有共享状态，放开并行才能做到秒级

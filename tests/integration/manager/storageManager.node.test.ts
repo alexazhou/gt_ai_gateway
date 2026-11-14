@@ -1,8 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import storageManager, { normalizeBytes, toDatabaseBytes } from "../../src/manager/storageManager";
-import { SgStorageRecord } from "../../src/model/sgStorageRecord";
-import dbHelper from "../helpers/dbHelper";
-import ormTestHelper from "../helpers/ormTestHelper";
+import storageManager, { normalizeBytes, toDatabaseBytes } from "../../../src/manager/storageManager";
+import { SgStorageRecord } from "../../../src/model/sgStorageRecord";
+import dbHelper from "../../helpers/dbHelper";
+import ormTestHelper from "../../helpers/ormTestHelper";
 
 
 describe("storageManager (node, real db)", () => {
