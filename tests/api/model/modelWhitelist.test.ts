@@ -115,8 +115,13 @@ describe("P1-09 PUT /model/:id 字段白名单", () => {
         );
 
         expect(response.status, "白名单实现应静默忽略未知字段，而不是把 SQL 打崩").toBe(200);
-        // 表结构里没有这一列 → 查一下不应存在（PRAGMA 取列名，避免 SQL 报错中断用例）
-        const columns = await dbHelper.query<any>("PRAGMA table_info(model)");
+        // 表结构里没有这一列 → 查一下不应存在（SQLite 用 PRAGMA，MySQL 查 information_schema）
+        const isMysql = process.env.DB_DRIVER === "mysql";
+        const columns = await dbHelper.query<any>(
+            isMysql
+                ? "SELECT COLUMN_NAME AS name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'model'"
+                : "PRAGMA table_info(model)",
+        );
         const names = columns.map((c) => c.name);
         expect(names).not.toContain("hacked_column");
         expect(names).toContain("created_at");

@@ -46,10 +46,14 @@ function readAppLog(): string {
     }
 }
 
+const isMysql = process.env.DB_DRIVER === "mysql";
+
 /** 反向守卫用例会把表删掉，还原前后都要能判断它到底在不在 */
 async function activityTableExists(): Promise<boolean> {
     const rows = await dbHelper.query<any>(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'request_activity'",
+        isMysql
+            ? "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'request_activity'"
+            : "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'request_activity'",
     );
     return rows.length > 0;
 }
@@ -74,11 +78,17 @@ describe("record 孤儿回收批量化（P2-10）", () => {
         // 提前抓 request_activity 的建表语句（供反向守卫用例删表后还原）。
         // 放在 beforeAll、在任何 HTTP 请求之前做，避免「CLI 查询紧跟 HTTP」触发
         // wrangler dev 的连接重连竞态（见文件末尾注释）。
-        const ddlRows = await dbHelper.query<any>(
-            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'request_activity'",
-        );
-        expect(ddlRows.length, "request_activity 表应存在").toBeGreaterThan(0);
-        activityTableDdl = String(ddlRows[0].sql ?? "");
+        if (isMysql) {
+            const ddlRows = await dbHelper.query<any>("SHOW CREATE TABLE request_activity");
+            expect(ddlRows.length, "request_activity 表应存在").toBeGreaterThan(0);
+            activityTableDdl = String(ddlRows[0]["Create Table"] ?? "");
+        } else {
+            const ddlRows = await dbHelper.query<any>(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'request_activity'",
+            );
+            expect(ddlRows.length, "request_activity 表应存在").toBeGreaterThan(0);
+            activityTableDdl = String(ddlRows[0].sql ?? "");
+        }
         expect(activityTableDdl.toLowerCase()).toContain("create table");
     }, 60000);
 
@@ -89,11 +99,15 @@ describe("record 孤儿回收批量化（P2-10）", () => {
      * 每条语句都要起一次 wrangler CLI（约 1s），逐条插 250 行会拖到 4 分钟以上。
      * 用字面量而不是绑定参数，是因为 D1 单语句绑定变量有上限（绑 200+ 会报 too many SQL variables）。
      */
-    async function insertProcessingRecords(count: number, startOffset: string) {
+    async function insertProcessingRecords(count: number, offsetMinutes: number) {
+        const startExpr = isMysql
+            ? `DATE_ADD(NOW(), INTERVAL ${offsetMinutes} MINUTE)`
+            : `datetime('now','localtime','${offsetMinutes} minutes')`;
+        const nowExpr = isMysql ? "NOW()" : "datetime('now','localtime')";
         const values: string[] = [];
         for (let i = 0; i < count; i += 1) {
             values.push(
-                `(${adminUserId}, 1, 'processing', datetime('now','localtime','${startOffset}'), NULL, ${tenantId}, datetime('now','localtime'), datetime('now','localtime'))`,
+                `(${adminUserId}, 1, 'processing', ${startExpr}, NULL, ${tenantId}, ${nowExpr}, ${nowExpr})`,
             );
         }
         await dbHelper.execute(
@@ -106,9 +120,9 @@ describe("record 孤儿回收批量化（P2-10）", () => {
     // 往返，会打爆 Worker 的 subrequest 配额，表现成 ECONNRESET 而不是报错）。
     // 原 worker 侧 it.fails 看门狗已转正式断言 —— 两模式跑同一份断言。
     it("超过一批（200）的孤儿全部被回收，且结束时间落值", async () => {
-        await insertProcessingRecords(ORPHAN_COUNT, "-2 hours");
+        await insertProcessingRecords(ORPHAN_COUNT, -120);
         // 新鲜 processing（1 分钟前开始）不该被当成孤儿
-        await insertProcessingRecords(FRESH_COUNT, "-1 minutes");
+        await insertProcessingRecords(FRESH_COUNT, -1);
 
         const response = await requestHelper.post("/record/recover-orphans.json", {}, adminToken);
         expect(response.status).toBe(200);
@@ -119,17 +133,23 @@ describe("record 孤儿回收批量化（P2-10）", () => {
         // 而「连续多次 CLI 之后紧跟的 HTTP 请求」会被 wrangler dev 的连接重连竞态打断
         // （诊断实测：与接口无关，任意接口都会 ECONNRESET；CLI 后等 1s 即恢复 —— 属测量方式
         // 问题，不是产品缺陷）。所以这里合并查询，减少 CLI 次数。
+        const orphanThresholdExpr = isMysql
+            ? "DATE_SUB(NOW(), INTERVAL 10 MINUTE)"
+            : "datetime('now','localtime','-10 minutes')";
+        const freshThresholdExpr = isMysql
+            ? "DATE_SUB(NOW(), INTERVAL 5 MINUTE)"
+            : "datetime('now','localtime','-5 minutes')";
         const summary = await dbHelper.query<any>(
             `SELECT
                 (SELECT COUNT(*) FROM record
                   WHERE status IN ('init','processing') AND end_at IS NULL
-                    AND start_at < datetime('now','localtime','-10 minutes')) AS still_orphan,
+                    AND start_at < ${orphanThresholdExpr}) AS still_orphan,
                 (SELECT COUNT(*) FROM record
                   WHERE status = 'failed' AND failed_code = 'recovered_orphan'
                     AND end_at IS NOT NULL) AS recovered,
                 (SELECT COUNT(*) FROM record
                   WHERE status IN ('init','processing')
-                    AND start_at >= datetime('now','localtime','-5 minutes')) AS fresh,
+                    AND start_at >= ${freshThresholdExpr}) AS fresh,
                 (SELECT COUNT(*) FROM request_activity ra JOIN record r ON r.id = ra.record_id
                   WHERE r.failed_code = 'recovered_orphan'
                     AND ra.activities LIKE '%孤儿记录回收%') AS activities`,
@@ -191,7 +211,7 @@ describe("record 孤儿回收批量化（P2-10）", () => {
 
         await dbHelper.execute("DROP TABLE request_activity");
         try {
-            await insertProcessingRecords(FAILURE_COUNT, "-3 hours");
+            await insertProcessingRecords(FAILURE_COUNT, -180);
 
             const response = await requestHelper.post("/record/recover-orphans.json", {}, adminToken);
             expect(response.status, "活动写失败不能让回收接口 500").toBe(200);

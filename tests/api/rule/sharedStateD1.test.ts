@@ -23,6 +23,7 @@ import userFixtures from "../../fixtures/userFixtures";
 
 const adminToken = userFixtures.ADMIN_TOKEN;
 const isWorker = config.TEST_MODE === "worker";
+const isMysql = process.env.DB_DRIVER === "mysql";
 
 let seq = 0;
 function unique(prefix: string): string {
@@ -109,7 +110,7 @@ beforeEach(async () => {
     await setupAdminUser();
 });
 
-describe("共享状态的 SQL 方言（node=SQLite / worker=真 D1 同批 SQL）", () => {
+describe.skipIf(isMysql)("共享状态的 SQL 方言（node=SQLite / worker=真 D1 同批 SQL）", () => {
 
     it("标量 MIN/MAX 不是聚合函数：逐行返回而非聚合一行", async () => {
         const rows = await dbHelper.query<{ m: number; z: number; neg: number }>(
