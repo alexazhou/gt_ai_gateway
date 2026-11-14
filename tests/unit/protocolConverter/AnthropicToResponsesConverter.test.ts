@@ -1162,3 +1162,70 @@ describe("AnthropicToResponsesConverter - convertStreamEvent (Responses SSE → 
 
 // ============================================================
 // ConverterFactory - Responses ↔ Anthropic 路由
+// ============================================================
+// 覆盖率补口：块定位回退（item_id 兜底）、缺省事件、未知块
+// ============================================================
+
+describe("AnthropicToResponsesConverter - 补口判定点（块定位与缺省事件）", () => {
+    let converter: AnthropicToResponsesConverter;
+
+    beforeEach(() => {
+        converter = ConverterFactory.create(ApiFormat.ANTHROPIC, ApiFormat.RESPONSES, "gpt-4.1") as AnthropicToResponsesConverter;
+        converter.convertStreamEvent(
+            JSON.stringify({ type: "response.created", response: { id: "resp_1", status: "in_progress", output: [] } }),
+        );
+    });
+
+    it("output_index 对不上但 item_id 命中 → 仍落到同一个块（按 item_id 兜底）", () => {
+        const openEvents = converter.convertStreamEvent(
+            JSON.stringify({
+                type: "response.output_item.added",
+                output_index: 0,
+                item: { id: "fc_1", type: "function_call", status: "in_progress", arguments: "", call_id: "call_1", name: "f" },
+            }),
+        );
+        const openedIndex = protocolConverterTestUtil.parseStreamEventData(openEvents, 0).index;
+
+        // 上游把 output_index 写错（7），只有 item_id 是对的
+        const deltaEvents = converter.convertStreamEvent(
+            JSON.stringify({
+                type: "response.function_call_arguments.delta",
+                item_id: "fc_1",
+                output_index: 7,
+                delta: '{"a":1}',
+            }),
+        );
+
+        expect(deltaEvents).toHaveLength(1);
+        expect(protocolConverterTestUtil.parseStreamEventData(deltaEvents, 0).index).toBe(openedIndex);
+        expect(protocolConverterTestUtil.parseStreamEventData(deltaEvents, 0).delta.partial_json).toBe('{"a":1}');
+    });
+
+    it("item_id 也没给且 output_index 无对应块 → 不抛错、不下发事件（不伪造空 delta）", () => {
+        const events = converter.convertStreamEvent(
+            JSON.stringify({ type: "response.output_text.delta", output_index: 9, delta: "无主增量" }),
+        );
+        const argEvents = converter.convertStreamEvent(
+            JSON.stringify({ type: "response.function_call_arguments.delta", output_index: 9, delta: "{}" }),
+        );
+        const reasoningEvents = converter.convertStreamEvent(
+            JSON.stringify({ type: "response.reasoning_summary_text.delta", output_index: 9, summary_index: 3, delta: "x" }),
+        );
+
+        expect(events).toEqual([]);
+        expect(argEvents).toEqual([]);
+        expect(reasoningEvents).toEqual([]);
+    });
+
+    it("output_text.done / content_part.done 本身不产生事件（收尾交给 output_item.done）", () => {
+        const textDone = converter.convertStreamEvent(
+            JSON.stringify({ type: "response.output_text.done", output_index: 0, content_index: 0, text: "done" }),
+        );
+        const partDone = converter.convertStreamEvent(
+            JSON.stringify({ type: "response.content_part.done", output_index: 0, content_index: 0 }),
+        );
+
+        expect(textDone).toEqual([]);
+        expect(partDone).toEqual([]);
+    });
+});

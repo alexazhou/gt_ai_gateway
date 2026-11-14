@@ -434,3 +434,59 @@ describe("OpenAIToResponsesConverter", () => {
         });
     });
 });
+
+// ============================================================
+// 覆盖率补口：数组型 system 内容 → instructions
+// ============================================================
+
+describe("OpenAIToResponsesConverter - 补口判定点", () => {
+    it("system 的 content 是数组 → 只取 text 分片拼成 instructions（图片不塞进 system）", () => {
+        const converter = new OpenAIToResponsesConverter("gpt-4");
+
+        const req = converter.convertRequest({
+            model: "gpt-4",
+            messages: [
+                {
+                    role: "system",
+                    content: [
+                        { type: "text", text: "规则一" },
+                        { type: "image_url", image_url: { url: "https://x/y.png" } },
+                        { type: "text", text: "规则二" },
+                    ],
+                },
+                { role: "user", content: "hi" },
+            ],
+        } as unknown as OpenAIRequest);
+
+        expect(req.instructions).toBe("规则一\n规则二");
+    });
+
+    it("多条 system 消息 → instructions 以换行拼接，顺序保持", () => {
+        const converter = new OpenAIToResponsesConverter("gpt-4");
+
+        const req = converter.convertRequest({
+            model: "gpt-4",
+            messages: [
+                { role: "system", content: "第一条" },
+                { role: "system", content: [{ type: "text", text: "第二条" }] },
+                { role: "user", content: "hi" },
+            ],
+        } as unknown as OpenAIRequest);
+
+        expect(req.instructions).toBe("第一条\n第二条");
+    });
+
+    it("system 内容为空数组 → instructions 保持 undefined（不落一个空字符串下去）", () => {
+        const converter = new OpenAIToResponsesConverter("gpt-4");
+
+        const req = converter.convertRequest({
+            model: "gpt-4",
+            messages: [
+                { role: "system", content: [] },
+                { role: "user", content: "hi" },
+            ],
+        } as unknown as OpenAIRequest);
+
+        expect(req.instructions).toBeUndefined();
+    });
+});

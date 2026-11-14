@@ -845,3 +845,112 @@ describe("OpenAIToAnthropicConverter - tool_choice / response_format 组合（P1
         expect(result.max_tokens).toBeLessThanOrEqual(SAFE_MAX_TOKENS_UPPER_BOUND);
     });
 });
+
+// ============================================================
+// 覆盖率补口：不支持的 content part / 数组型文本内容 / 空 image_url
+// ============================================================
+
+describe("OpenAIToAnthropicConverter - 补口判定点", () => {
+    let converter: OpenAIToAnthropicConverter;
+
+    beforeEach(() => {
+        converter = ConverterFactory.create(ApiFormat.OPENAI, ApiFormat.ANTHROPIC) as OpenAIToAnthropicConverter;
+    });
+
+    it("user 的 content 含不支持的分片类型（input_audio）→ AppError 400，消息带类型名", () => {
+        const req = {
+            model: "gpt-4",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "听一下" },
+                        { type: "input_audio", input_audio: { data: "AAA", format: "wav" } },
+                    ],
+                },
+            ],
+        } as unknown as OpenAIRequest;
+
+        expect(() => converter.convertRequest(req)).toThrowError(
+            /Unsupported OpenAI content part type for protocol conversion: input_audio/,
+        );
+        try {
+            converter.convertRequest(req);
+            throw new Error("应当抛错");
+        } catch (e: any) {
+            expect(e.statusCode).toBe(400);
+        }
+    });
+
+    it("system 的 content 是数组 → 只取 text 分片并以换行拼接（图片等非文本分片不塞进 system）", () => {
+        const req = {
+            model: "gpt-4",
+            messages: [
+                {
+                    role: "system",
+                    content: [
+                        { type: "text", text: "规则一" },
+                        { type: "image_url", image_url: { url: "https://x/y.png" } },
+                        { type: "text", text: "规则二" },
+                    ],
+                },
+                { role: "user", content: "hi" },
+            ],
+        } as unknown as OpenAIRequest;
+
+        const result = converter.convertRequest(req) as AnthropicRequest;
+
+        expect(result.system).toBe("规则一\n规则二");
+    });
+
+    it("tool 消息的 content 是数组 → tool_result 里只拼文本分片", () => {
+        const req = {
+            model: "gpt-4",
+            messages: [
+                {
+                    role: "assistant",
+                    content: "",
+                    tool_calls: [{ id: "call_1", type: "function", function: { name: "f", arguments: "{}" } }],
+                },
+                {
+                    role: "tool",
+                    tool_call_id: "call_1",
+                    content: [
+                        { type: "text", text: "第 1 行" },
+                        { type: "text", text: "第 2 行" },
+                    ],
+                },
+            ],
+        } as unknown as OpenAIRequest;
+
+        const result = converter.convertRequest(req) as AnthropicRequest;
+        const toolResultMsg = result.messages[result.messages.length - 1];
+        const blocks = toolResultMsg.content as AnthropicContentBlock[];
+
+        expect(blocks[0]).toMatchObject({
+            type: "tool_result",
+            tool_use_id: "call_1",
+            content: "第 1 行\n第 2 行",
+        });
+    });
+
+    it("image_url 分片缺 url（空串 / 对象无 url）→ AppError 400，不生成无源图片块", () => {
+        for (const part of [
+            { type: "image_url", image_url: { url: "" } },
+            { type: "image_url", image_url: {} },
+        ]) {
+            const req = {
+                model: "gpt-4",
+                messages: [{ role: "user", content: [part] }],
+            } as unknown as OpenAIRequest;
+
+            expect(() => converter.convertRequest(req)).toThrowError(/image_url.url is required/);
+            try {
+                converter.convertRequest(req);
+                throw new Error("应当抛错");
+            } catch (e: any) {
+                expect(e.statusCode).toBe(400);
+            }
+        }
+    });
+});

@@ -1295,3 +1295,135 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
         expect(events).toEqual([{ event: "error", data: JSON.stringify(errorData) }]);
     });
 });
+
+// ============================================================
+// 覆盖率补口：assistant 纯文本 / tool_choice=auto / 未发 [DONE] 的收尾 / 连续 tool_call
+// ============================================================
+
+describe("AnthropicToOpenAIConverter - 补口判定点", () => {
+    let converter: AnthropicToOpenAIConverter;
+
+    beforeEach(() => {
+        converter = ConverterFactory.create(ApiFormat.ANTHROPIC, ApiFormat.OPENAI, "gpt-4") as AnthropicToOpenAIConverter;
+    });
+
+    it("assistant 的 content 是纯字符串 → 原样透传为一条 assistant 消息（不拆块、不丢）", () => {
+        const req = converter.convertRequest({
+            model: "claude-3",
+            max_tokens: 100,
+            messages: [
+                { role: "user", content: "你好" },
+                { role: "assistant", content: "上一次的回答" },
+                { role: "user", content: "继续" },
+            ],
+        } as AnthropicRequest) as OpenAIRequest;
+
+        expect(req.messages[1]).toEqual({ role: "assistant", content: "上一次的回答" });
+    });
+
+    it('tool_choice.type="auto" → "auto"（不落成 required/none）', () => {
+        const req = converter.convertRequest({
+            model: "claude-3",
+            max_tokens: 10,
+            messages: [{ role: "user", content: "hi" }],
+            tool_choice: { type: "auto" },
+        } as AnthropicRequest) as OpenAIRequest;
+
+        expect(req.tool_choice).toBe("auto");
+    });
+
+    it("上游给了 stop_reason 却没发 [DONE] → onUpstreamEnd() 补 message_delta + message_stop", () => {
+        converter.convertStreamEvent(
+            JSON.stringify({
+                id: "chatcmpl-1",
+                object: "chat.completion.chunk",
+                model: "gpt-4",
+                choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+            }),
+        );
+        converter.convertStreamEvent(
+            JSON.stringify({
+                id: "chatcmpl-1",
+                object: "chat.completion.chunk",
+                model: "gpt-4",
+                choices: [{ index: 0, delta: { content: "hi" }, finish_reason: "stop" }],
+            }),
+        );
+
+        const tail = converter.onUpstreamEnd();
+
+        expect(tail.map((e) => e.event)).toEqual(["message_delta", "message_stop"]);
+        expect(JSON.parse(tail[0].data).delta.stop_reason).toBe("end_turn");
+    });
+
+    it("上游已发过 [DONE] → onUpstreamEnd() 返回空，不重复补发收尾", () => {
+        converter.convertStreamEvent(
+            JSON.stringify({
+                id: "chatcmpl-1",
+                object: "chat.completion.chunk",
+                model: "gpt-4",
+                choices: [{ index: 0, delta: { content: "hi" }, finish_reason: null }],
+            }),
+        );
+        converter.convertStreamEvent(
+            JSON.stringify({
+                id: "chatcmpl-1",
+                object: "chat.completion.chunk",
+                model: "gpt-4",
+                choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            }),
+        );
+        const doneEvents = converter.convertStreamEvent("[DONE]");
+
+        expect(doneEvents.map((e) => e.event)).toEqual(["message_delta", "message_stop"]);
+        expect(converter.onUpstreamEnd()).toEqual([]);
+    });
+
+    it("文本块未收口时来 tool_call → 先 content_block_stop 再 start，索引递增", () => {
+        converter.convertStreamEvent(
+            JSON.stringify({
+                id: "chatcmpl-1",
+                object: "chat.completion.chunk",
+                model: "gpt-4",
+                choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+            }),
+        );
+        // 第一段文本 → content_block_start(index 0) + delta
+        const textEvents = converter.convertStreamEvent(
+            JSON.stringify({
+                id: "chatcmpl-1",
+                object: "chat.completion.chunk",
+                model: "gpt-4",
+                choices: [{ index: 0, delta: { content: "查一下天气" }, finish_reason: null }],
+            }),
+        );
+        expect(textEvents.map((e) => e.event)).toEqual(["content_block_start", "content_block_delta"]);
+
+        // 第一条 tool_call 到达：文本块必须收口
+        const firstTool = converter.convertStreamEvent(
+            JSON.stringify({
+                id: "chatcmpl-1",
+                object: "chat.completion.chunk",
+                model: "gpt-4",
+                choices: [
+                    {
+                        index: 0,
+                        delta: {
+                            tool_calls: [
+                                { index: 0, id: "call_1", type: "function", function: { name: "get_weather", arguments: "" } },
+                            ],
+                        },
+                        finish_reason: null,
+                    },
+                ],
+            }),
+        );
+        expect(firstTool.map((e) => e.event)).toEqual(["content_block_stop", "content_block_start"]);
+        expect(JSON.parse(firstTool[0].data).index).toBe(0);
+        const firstBlockStart = JSON.parse(firstTool[1].data);
+        expect(firstBlockStart.content_block.type).toBe("tool_use");
+        expect(firstBlockStart.index).toBe(1);
+        expect(firstBlockStart.content_block.id).toBe("call_1");
+        expect(firstBlockStart.content_block.name).toBe("get_weather");
+    });
+});

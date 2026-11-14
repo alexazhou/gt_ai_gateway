@@ -290,3 +290,105 @@ describe("ResponsesAccumulator", () => {
         });
     });
 });
+
+// ============================================================
+// 覆盖率补口：done 事件覆盖增量、推理摘要槽位、缺 type 的 item
+// ============================================================
+
+function run(events: Array<Record<string, unknown>>) {
+    const acc = new responsesAccumulator.ResponsesAccumulator();
+    for (const e of events) acc.addEvent({ data: JSON.stringify(e) });
+    return acc;
+}
+
+describe("ResponsesAccumulator - done 事件与槽位补齐", () => {
+    it("function_call_arguments.done 用完整 arguments 覆盖（不是再拼一次，避免参数变成双份）", () => {
+        const acc = run([
+            { type: "response.output_item.added", output_index: 0, item: { id: "fc_1", type: "function_call", call_id: "c1", name: "f", arguments: "" } },
+            { type: "response.function_call_arguments.delta", output_index: 0, delta: '{"a":1' },
+            { type: "response.function_call_arguments.done", output_index: 0, arguments: '{"a":1,"b":2}' },
+        ]);
+
+        // done 带的是定稿参数：必须覆盖增量拼接的结果，而不是再拼一次
+        expect(acc.getResponse().output[0].arguments).toBe('{"a":1,"b":2}');
+    });
+
+    it("function_call_arguments.done 没带 arguments（undefined）→ 保留已累积的增量", () => {
+        const acc = run([
+            { type: "response.output_item.added", output_index: 0, item: { id: "fc_1", type: "function_call", call_id: "c1", name: "f", arguments: "" } },
+            { type: "response.function_call_arguments.delta", output_index: 0, delta: '{"a":1' },
+            { type: "response.function_call_arguments.done", output_index: 0 },
+        ]);
+
+        expect(acc.getResponse().output[0].arguments).toBe('{"a":1');
+    });
+
+    it("reasoning_summary_text.done 用完整文本覆盖增量累积", () => {
+        const acc = run([
+            { type: "response.output_item.added", output_index: 0, item: { id: "rs_1", type: "reasoning", summary: [] } },
+            { type: "response.reasoning_summary_part.added", output_index: 0, summary_index: 0, part: { type: "summary_text", text: "" } },
+            { type: "response.reasoning_summary_text.delta", output_index: 0, summary_index: 0, delta: "先说一半" },
+            { type: "response.reasoning_summary_text.done", output_index: 0, summary_index: 0, text: "完整摘要" },
+        ]);
+
+        expect(acc.getResponse().output[0].summary?.[0].text).toBe("完整摘要");
+    });
+
+    it("reasoning_summary_part.added 带 part → 立刻写入槽位（不必等 done 事件）", () => {
+        const acc = run([
+            { type: "response.output_item.added", output_index: 0, item: { id: "rs_1", type: "reasoning", summary: [] } },
+            {
+                type: "response.reasoning_summary_part.added",
+                output_index: 0,
+                summary_index: 0,
+                part: { type: "summary_text", text: "开场" },
+            },
+        ]);
+
+        // 只发了 part.added，没有后续 delta/done：槽位必须已经是 part 里的内容
+        expect(acc.getResponse().output[0].summary?.[0]).toMatchObject({ type: "summary_text", text: "开场" });
+    });
+
+    it("reasoning_summary_part.done 用完整 part 覆盖槽位（type 与 text 都写回）", () => {
+        const acc = run([
+            { type: "response.output_item.added", output_index: 0, item: { id: "rs_1", type: "reasoning", summary: [] } },
+            { type: "response.reasoning_summary_part.added", output_index: 0, summary_index: 0, part: { type: "summary_text", text: "增量" } },
+            { type: "response.reasoning_summary_part.done", output_index: 0, summary_index: 0, part: { type: "summary_text", text: "定稿" } },
+        ]);
+
+        expect(acc.getResponse().output[0].summary?.[0]).toMatchObject({ type: "summary_text", text: "定稿" });
+    });
+
+    it("reasoning_summary_part 事件不带 part → 只保证槽位存在，不覆盖已有文本", () => {
+        const acc = run([
+            { type: "response.output_item.added", output_index: 0, item: { id: "rs_1", type: "reasoning", summary: [{ type: "summary_text", text: "已有" }] } },
+            { type: "response.reasoning_summary_part.added", output_index: 0, summary_index: 0 },
+            { type: "response.reasoning_summary_part.done", output_index: 0, summary_index: 0 },
+        ]);
+
+        expect(acc.getResponse().output[0].summary?.[0].text).toBe("已有");
+    });
+
+    it("output_text.done 的 content_index 超出当前数组 → 补齐空槽位再写入，不丢文本", () => {
+        const acc = run([
+            { type: "response.output_item.added", output_index: 0, item: { id: "msg_1", type: "message", role: "assistant", content: [] } },
+            { type: "response.output_text.done", output_index: 0, content_index: 2, text: "第三段" },
+        ]);
+
+        const content = acc.getResponse().output[0].content!;
+        expect(content).toHaveLength(3);
+        expect(content[2].text).toBe("第三段");
+    });
+
+    it("output_item.added 缺 type 但带 content → 内容照收（不按非 message 丢掉）", () => {
+        const acc = run([
+            {
+                type: "response.output_item.added",
+                output_index: 0,
+                item: { id: "item_x", content: [{ type: "output_text", text: "上游漏给 type" }] },
+            },
+        ]);
+
+        expect(acc.getResponse().output[0].content?.[0].text).toBe("上游漏给 type");
+    });
+});

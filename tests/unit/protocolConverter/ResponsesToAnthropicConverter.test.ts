@@ -25,6 +25,7 @@ import type {
     ResponsesRequest,
 } from "../../../src/util/protocol/responsesTypes";
 import protocolConverterTestUtil from "./protocolConverterTestUtil";
+import protocolConverterUtil from "../../../src/util/protocolConverter/protocolConverterUtil";
 
 // ============================================================
 // ResponsesToAnthropicConverter - 请求转换
@@ -1085,3 +1086,142 @@ describe("ResponsesToAnthropicConverter - convertStreamEvent (Anthropic SSE → 
 
 // ============================================================
 // AnthropicToResponsesConverter - 请求转换
+// ============================================================
+// 覆盖率补口：非法 max_output_tokens / 图片 / reasoning 并入上一条 assistant / tool_use 收尾
+// ============================================================
+
+describe("ResponsesToAnthropicConverter - 补口判定点", () => {
+    let converter: ResponsesToAnthropicConverter;
+
+    beforeEach(() => {
+        converter = ConverterFactory.create(ApiFormat.RESPONSES, ApiFormat.ANTHROPIC, "claude-3") as ResponsesToAnthropicConverter;
+    });
+
+    it("max_output_tokens 非正整数（0 / 负数 / 字符串 / NaN）→ AppError 400，不透传给上游", () => {
+        for (const bad of [0, -1, "1000", Number.NaN, Number.POSITIVE_INFINITY]) {
+            const req = {
+                model: "gpt-4",
+                input: "hi",
+                max_output_tokens: bad,
+            } as unknown as ResponsesRequest;
+
+            expect(() => converter.convertRequest(req)).toThrowError(/max_output_tokens must be a positive number/);
+            try {
+                converter.convertRequest(req);
+                throw new Error("应当抛错");
+            } catch (e: any) {
+                expect(e.statusCode).toBe(400);
+            }
+        }
+    });
+
+    it("input 里的 input_image 分片 → image 块（不静默丢图）", () => {
+        const req = {
+            model: "gpt-4",
+            input: [
+                {
+                    type: "message",
+                    role: "user",
+                    content: [
+                        { type: "input_text", text: "看这张图" },
+                        { type: "input_image", image_url: "https://x/y.png" },
+                    ],
+                },
+            ],
+        } as unknown as ResponsesRequest;
+
+        const result = converter.convertRequest(req);
+        const blocks = result.messages[0].content as AnthropicContentBlock[];
+
+        expect(blocks[0]).toMatchObject({ type: "text", text: "看这张图" });
+        expect(blocks[1]).toMatchObject({ type: "image", source: { type: "url", url: "https://x/y.png" } });
+    });
+
+    it("reasoning 项（网关自签 encrypted_content）→ thinking 块并入上一条 assistant 消息，不新起一轮", () => {
+        const encrypted = protocolConverterUtil.sealThinkingSignature("anthropic", "sig_1", { thinking: "先想一下" });
+        const req = {
+            model: "gpt-4",
+            input: [
+                { type: "message", role: "user", content: [{ type: "input_text", text: "算一下" }] },
+                { type: "function_call", call_id: "call_1", name: "calc", arguments: '{"a":1}' },
+                { type: "reasoning", encrypted_content: encrypted, summary: [] },
+            ],
+        } as unknown as ResponsesRequest;
+
+        const result = converter.convertRequest(req);
+
+        expect(result.messages).toHaveLength(2);
+        const assistantMsg = result.messages[1];
+        expect(assistantMsg.role).toBe("assistant");
+        const blocks = assistantMsg.content as AnthropicContentBlock[];
+        expect(blocks[0]).toMatchObject({ type: "tool_use", id: "call_1", name: "calc" });
+        expect(blocks[1]).toMatchObject({ type: "thinking", thinking: "先想一下", signature: "sig_1" });
+    });
+
+    it("流式：tool_use 块收尾 → function_call_arguments.done + output_item.done(type=function_call)", () => {
+        converter.convertStreamEvent(
+            JSON.stringify({ type: "message_start", message: { id: "msg_1", role: "assistant", model: "claude-3" } }),
+        );
+        converter.convertStreamEvent(
+            JSON.stringify({
+                type: "content_block_start",
+                index: 0,
+                content_block: { type: "tool_use", id: "toolu_1", name: "get_weather", input: {} },
+            }),
+        );
+        converter.convertStreamEvent(
+            JSON.stringify({
+                type: "content_block_delta",
+                index: 0,
+                delta: { type: "input_json_delta", partial_json: '{"city":"Tokyo"}' },
+            }),
+        );
+        const closeEvents = converter.convertStreamEvent(
+            JSON.stringify({ type: "content_block_stop", index: 0 }),
+        );
+
+        const argsDone = closeEvents
+            .map((e) => JSON.parse(e.data))
+            .find((d) => d.type === "response.function_call_arguments.done");
+        const itemDone = closeEvents
+            .map((e) => JSON.parse(e.data))
+            .find((d) => d.type === "response.output_item.done");
+
+        expect(argsDone).toBeDefined();
+        expect(argsDone.arguments).toBe('{"city":"Tokyo"}');
+        expect(itemDone).toBeDefined();
+        expect(itemDone.item).toMatchObject({
+            type: "function_call",
+            status: "completed",
+            arguments: '{"city":"Tokyo"}',
+            call_id: "toolu_1",
+            name: "get_weather",
+        });
+    });
+
+    it("流式：tool_use 没有参数增量 → arguments 兜底为 {}（不产出空字符串参数）", () => {
+        converter.convertStreamEvent(
+            JSON.stringify({ type: "message_start", message: { id: "msg_1", role: "assistant", model: "claude-3" } }),
+        );
+        converter.convertStreamEvent(
+            JSON.stringify({
+                type: "content_block_start",
+                index: 0,
+                content_block: { type: "tool_use", id: "toolu_2", name: "noop", input: {} },
+            }),
+        );
+        const closeEvents = converter.convertStreamEvent(JSON.stringify({ type: "content_block_stop", index: 0 }));
+
+        const itemDone = closeEvents
+            .map((e) => JSON.parse(e.data))
+            .find((d) => d.type === "response.output_item.done");
+
+        const argsDone = closeEvents
+            .map((e) => JSON.parse(e.data))
+            .find((d) => d.type === "response.function_call_arguments.done");
+
+        // 两处都要兜底成 {}：事件里的 arguments 与 item 上的 arguments 不能是空串
+        expect(argsDone.arguments).toBe("{}");
+        expect(itemDone.item.arguments).toBe("{}");
+    });
+});
