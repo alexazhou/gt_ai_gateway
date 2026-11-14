@@ -1,6 +1,6 @@
 {
   "name": "gt-ai-gateway",
-  "version": "1.9.0",
+  "version": "1.9.1-beta1",
   "scripts": {
     "prepare": "bash script/install-githooks.sh || echo \"[prepare] 钩子安装已跳过（无 bash 或安装失败），请手工检查\"",
     "frontend:build": "cd frontend && npm run build",
