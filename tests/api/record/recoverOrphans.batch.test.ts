@@ -219,13 +219,16 @@ describe("record 孤儿回收批量化（P2-10）", () => {
                 .toBeGreaterThanOrEqual(FAILURE_COUNT);
 
             // 记录确实收尾了（表已被删，所以这里只查 record）
+            const orphanThresholdExpr = isMysql
+                ? "DATE_SUB(NOW(), INTERVAL 10 MINUTE)"
+                : "datetime('now','localtime','-10 minutes')";
             const summary = await dbHelper.query<any>(
                 `SELECT
                     (SELECT COUNT(*) FROM record
                       WHERE status = 'failed' AND failed_code = 'recovered_orphan' AND end_at IS NOT NULL) AS recovered,
                     (SELECT COUNT(*) FROM record
                       WHERE status IN ('init','processing') AND end_at IS NULL
-                        AND start_at < datetime('now','localtime','-10 minutes')) AS still_orphan`,
+                        AND start_at < ${orphanThresholdExpr}) AS still_orphan`,
             );
             const row = summary[0] ?? {};
             expect(Number(row.recovered)).toBeGreaterThanOrEqual(baseline.recovered + FAILURE_COUNT);
