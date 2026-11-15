@@ -107,6 +107,10 @@ run_suite() {
   python3 - "$tmp/mock.log" <<'PY'
 import json, sys
 rows = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+# 顺序必须规范化：`gtgw dashboard` 是**并发**请求 dashboard.json 与 recent.json，
+# 服务端收到它们的先后在现代码/CI 上不固定（本机偶然稳定，CI 上直接让两轮 diff 红了一次）。
+# 请求集合才是要断言的东西，顺序不是，所以按 (path, method) 排序后再打印。
+rows.sort(key=lambda r: (r["path"], r["method"]))
 print(f"requests={len(rows)}")
 for r in rows:
     print(f'  {r["method"]} {r["path"]} token={r["token"]}')
