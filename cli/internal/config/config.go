@@ -20,6 +20,9 @@ const (
 	EnvTenant = "GTGW_TENANT"
 	// EnvXDGConfigHome 覆写 POSIX 配置根目录（step1 §存储位置）。
 	EnvXDGConfigHome = "XDG_CONFIG_HOME"
+	// EnvTauriConfig 显式指定桌面端 config.json 路径，绕开按平台探测默认路径。
+	// CI / 测试夹具用：让 `login --from-tauri` 这条链路在任何机器上都可复现。
+	EnvTauriConfig = "GTGW_TAURI_CONFIG"
 )
 
 // 配置来源（写入 Resolved.Sources，便于判据「断言实际生效的值来自哪一层」）。
