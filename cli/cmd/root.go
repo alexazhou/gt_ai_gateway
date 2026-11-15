@@ -167,21 +167,39 @@ func (a *App) Execute(ctx context.Context, args []string) int {
 	return client.ExitOK
 }
 
+// errorBodyPreviewLimit 是「未知错误形态」时暴露原文的最大字节数（rune 截断）。
+const errorBodyPreviewLimit = 512
+
 // printError 把错误写到 stderr：--json 模式下输出结构化 JSON，否则输出人类可读文本。
+//
+// 不允许吞掉原始响应体：后端错误体有三种已知形态（业务错 {error,code?}、500 带 request_id、
+// 401/403 只有 {error}），但网关前面可能挂着反向代理/网关自身的 502 HTML 页。
+// 一旦解析不出结构化字段，必须把 body 截断后暴露出来，否则运维只会看到一句没有信息的错误。
 func (a *App) printError(err error) {
 	p := a.Printer()
+	apiErr, isAPI := err.(*client.APIError)
+
 	if !p.JSON {
 		fmt.Fprintf(a.errOut, "Error: %s\n", err.Error())
+		if isAPI && !apiErr.HasStructuredMessage() {
+			if preview := apiErr.BodyPreview(errorBodyPreviewLimit); preview != "" {
+				fmt.Fprintf(a.errOut, "原始响应体（前 %d 字节）：%s\n", errorBodyPreviewLimit, preview)
+			}
+		}
 		return
 	}
+
 	extra := map[string]any{}
-	if apiErr, ok := err.(*client.APIError); ok {
+	if isAPI {
 		extra["status"] = apiErr.StatusCode
 		if apiErr.Code != "" {
 			extra["code"] = apiErr.Code
 		}
 		if apiErr.RequestID != "" {
 			extra["request_id"] = apiErr.RequestID
+		}
+		if preview := apiErr.BodyPreview(errorBodyPreviewLimit); preview != "" {
+			extra["body"] = preview
 		}
 	}
 	p.JSONError(err, extra)

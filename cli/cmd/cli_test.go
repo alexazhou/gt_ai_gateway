@@ -549,3 +549,51 @@ func TestTenantHeaderFromFlag(t *testing.T) {
 		t.Fatalf("X-Tenant-ID = %q, 期望 tenant-b", got)
 	}
 }
+
+// TestUnknownErrorShapeSurfacesRawBody 验证未知错误形态（如反代 502 HTML）不吞原始 body：
+// 人类模式把截断后的原文打到 stderr；--json 模式把状态码与 body 放进结构化 JSON（仍走 stderr），stdout 保持干净。
+func TestUnknownErrorShapeSurfacesRawBody(t *testing.T) {
+	gw := newMockGateway(t, map[string]http.HandlerFunc{
+		"/status.json": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("<html><body>502 Bad Gateway (nginx)</body></html>"))
+		},
+	})
+
+	t.Run("人类模式", func(t *testing.T) {
+		app, out, errOut, _ := newTestApp(t)
+		code := runCLI(app, "status", "--url", gw.URL, "--token", testToken)
+		if code != 1 {
+			t.Fatalf("退出码 = %d, 期望 1", code)
+		}
+		if out.Len() != 0 {
+			t.Fatalf("失败时 stdout 应为空：%q", out.String())
+		}
+		if !strings.Contains(errOut.String(), "原始响应体") || !strings.Contains(errOut.String(), "502 Bad Gateway") {
+			t.Fatalf("stderr 未暴露原始 body：%q", errOut.String())
+		}
+	})
+
+	t.Run("--json 模式", func(t *testing.T) {
+		app, out, errOut, _ := newTestApp(t)
+		code := runCLI(app, "status", "--json", "--url", gw.URL, "--token", testToken)
+		if code != 1 {
+			t.Fatalf("退出码 = %d, 期望 1", code)
+		}
+		if out.Len() != 0 {
+			t.Fatalf("--json 失败时 stdout 必须为空：%q", out.String())
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(errOut.Bytes(), &payload); err != nil {
+			t.Fatalf("stderr 不是合法 JSON：%q", errOut.String())
+		}
+		if payload["status"].(float64) != http.StatusBadGateway {
+			t.Fatalf("status = %v, 期望 502", payload["status"])
+		}
+		body, _ := payload["body"].(string)
+		if !strings.Contains(body, "502 Bad Gateway") {
+			t.Fatalf("body 字段未包含原始响应：%v", payload)
+		}
+	})
+}

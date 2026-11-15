@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestExitCodeMapping(t *testing.T) {
@@ -184,5 +186,125 @@ func TestJSONResponseBodySurvivesForRawOutput(t *testing.T) {
 	}
 	if decoded["status"] != "ok" {
 		t.Fatalf("decoded = %v", decoded)
+	}
+}
+
+// TestAPIErrorThreeKnownShapes 覆盖后端三种已知错误形态（业务错 / 500 带 request_id / 401·403 只有 error）。
+func TestAPIErrorThreeKnownShapes(t *testing.T) {
+	cases := []struct {
+		name        string
+		status      int
+		body        string
+		wantMessage string
+		wantCode    string
+		wantReqID   string
+		wantExit    int
+	}{
+		{
+			name:        "业务错误 {error,code}",
+			status:      http.StatusBadRequest,
+			body:        `{"error":"参数不合法","code":"bad_request"}`,
+			wantMessage: "参数不合法",
+			wantCode:    "bad_request",
+			wantExit:    ExitError,
+		},
+		{
+			name:        "500 带 request_id",
+			status:      http.StatusInternalServerError,
+			body:        `{"error":"内部错误","code":"internal_error","request_id":"err_abc123"}`,
+			wantMessage: "内部错误",
+			wantCode:    "internal_error",
+			wantReqID:   "err_abc123",
+			wantExit:    ExitError,
+		},
+		{
+			name:        "401 只有 {error}",
+			status:      http.StatusUnauthorized,
+			body:        `{"error":"Invalid token"}`,
+			wantMessage: "Invalid token",
+			wantExit:    ExitAuth,
+		},
+		{
+			name:        "403 只有 {error}",
+			status:      http.StatusForbidden,
+			body:        `{"error":"Admin access required"}`,
+			wantMessage: "Admin access required",
+			wantExit:    ExitAuth,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(c.status)
+				_, _ = w.Write([]byte(c.body))
+			}))
+			defer srv.Close()
+
+			cl, err := New(Options{BaseURL: srv.URL, Token: "t"})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			_, err = cl.GetJSON(context.Background(), "/status.json", nil)
+			apiErr, ok := err.(*APIError)
+			if !ok {
+				t.Fatalf("错误类型 = %T, 期望 *APIError", err)
+			}
+			if apiErr.Message != c.wantMessage || apiErr.Code != c.wantCode || apiErr.RequestID != c.wantReqID {
+				t.Fatalf("解析结果 = %+v", apiErr)
+			}
+			if !apiErr.HasStructuredMessage() {
+				t.Fatal("已知形态应判定为结构化错误")
+			}
+			if got := ExitCodeOf(err); got != c.wantExit {
+				t.Fatalf("退出码 = %d, 期望 %d", got, c.wantExit)
+			}
+		})
+	}
+}
+
+// TestAPIErrorUnknownShapeKeepsBody 验证「未知错误形态」不吞原始 body。
+func TestAPIErrorUnknownShapeKeepsBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("<html><body>502 Bad Gateway (nginx)</body></html>"))
+	}))
+	defer srv.Close()
+
+	cl, err := New(Options{BaseURL: srv.URL, Token: "t"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = cl.GetJSON(context.Background(), "/status.json", nil)
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("错误类型 = %T", err)
+	}
+	if apiErr.HasStructuredMessage() {
+		t.Fatal("HTML 响应体不应被判定为结构化错误")
+	}
+	preview := apiErr.BodyPreview(512)
+	if !strings.Contains(preview, "502 Bad Gateway") {
+		t.Fatalf("预览丢失原始 body：%q", preview)
+	}
+}
+
+func TestBodyPreviewTruncates(t *testing.T) {
+	long := strings.Repeat("错", 1000) // 1000 个多字节字符
+	e := &APIError{StatusCode: 500, Body: []byte(long)}
+	preview := e.BodyPreview(512)
+	if !strings.HasSuffix(strings.SplitN(preview, "…", 2)[0], "") {
+		t.Fatalf("预览格式异常：%q", preview)
+	}
+	if !strings.Contains(preview, "已截断") {
+		t.Fatalf("长 body 应带截断提示：%q", preview)
+	}
+	// 按 rune 截断，不能切出半个 UTF-8 字符
+	head := strings.SplitN(preview, "…", 2)[0]
+	if got := len([]rune(head)); got != 512 {
+		t.Fatalf("截断后 rune 数 = %d, 期望 512", got)
+	}
+	if !utf8.ValidString(head) {
+		t.Fatalf("截断破坏了 UTF-8：%q", head)
 	}
 }

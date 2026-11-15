@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -85,7 +86,35 @@ func (e *APIError) Error() string {
 	if e.Message != "" {
 		return fmt.Sprintf("服务端返回 %d：%s", e.StatusCode, e.Message)
 	}
-	return fmt.Sprintf("服务端返回 %d：%s", e.StatusCode, strings.TrimSpace(string(e.Body)))
+	// 未解析出结构化错误信息时，不要在这里把整段 body 塞进 message：
+	// 调用方的输出层会用 BodyPreview 截断展示，避免超长 HTML/堆栈把 stderr 刷爆。
+	return fmt.Sprintf("服务端返回 %d（响应体不是结构化错误 JSON，原始内容见下）", e.StatusCode)
+}
+
+// BodyPreview 返回响应体前 n 字节的预览（用于「未知错误形态」时把原文暴露给用户）。
+// 触发条件：响应体不是后端约定的结构化错误 JSON，此时不预览就会只剩一句空错误。
+func (e *APIError) BodyPreview(n int) string {
+	body := strings.TrimSpace(string(e.Body))
+	if body == "" {
+		return ""
+	}
+	if n <= 0 {
+		n = 512
+	}
+	if len(body) <= n {
+		return body
+	}
+	// 按 rune 截断，避免把 UTF-8 多字节字符切成半个
+	runes := []rune(body)
+	if len(runes) <= n {
+		return body
+	}
+	return string(runes[:n]) + "…（已截断，原始长度 " + strconv.Itoa(len(body)) + " 字节）"
+}
+
+// HasStructuredMessage 表示响应体解析出了后端约定的可读错误信息。
+func (e *APIError) HasStructuredMessage() bool {
+	return e.Message != "" || e.Code != "" || e.RequestID != ""
 }
 
 // ExitCode 实现 ExitCoder：401/403 归为鉴权错误。
