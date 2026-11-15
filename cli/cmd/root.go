@@ -154,6 +154,7 @@ func (a *App) NewRootCmd() *cobra.Command {
 		a.newBalanceCmd(),
 		a.newTenantCmd(),
 		a.newRuleCmd(),
+		a.newRecordCmd(),
 	)
 	return root
 }
