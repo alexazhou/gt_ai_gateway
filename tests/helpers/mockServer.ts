@@ -285,6 +285,8 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
     // Handle different endpoints (more specific paths must come before generic ones)
     if (url.includes("/chat/completions/incomplete")) {
         handleOpenAIStreamIncomplete(req, res);
+    } else if (url.includes("/chat/completions/no-finish-reason")) {
+        handleOpenAIStreamNoFinishReason(req, res);
     } else if (url.includes("/chat/completions/no-done-no-usage")) {
         handleOpenAIStreamNoDoneNoUsage(req, res);
     } else if (url.includes("/chat/completions/no-done")) {
@@ -1271,6 +1273,43 @@ function handleModelsList(_req: IncomingMessage, res: ServerResponse): void {
  * then closes the connection cleanly. 模拟「按 stream_options.include_usage 报文、但省略 [DONE]
  * 后直接以 chunked 终止块关闭」的上游：数据齐全，缺的只是冗余的终止标记。
  */
+/**
+ * #249 用：内容齐全、`[DONE]` 也发了，但**全程不发 finish_reason**。
+ *
+ * 这是 #246 D2 的真实上游形态（部分 OpenAI 兼容实现确实这么干）：网关必须自己兜底
+ * `stop_reason`（落 `end_turn`），而记录里要和「上游真给了 finish_reason」区分开，
+ * 靠的就是 result 活动的 `stop_reason_source`。
+ */
+function handleOpenAIStreamNoFinishReason(req: IncomingMessage, res: ServerResponse): void {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString(); });
+    req.on("end", () => {
+        const data = body ? JSON.parse(body) : {};
+
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+
+        const base = {
+            id: `chatcmpl-${Date.now()}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: data.model || "gpt-3.5-turbo",
+        };
+
+        res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { content: "Hello" }, finish_reason: null }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { content: " there" }, finish_reason: null }] })}\n\n`);
+        // usage-only chunk（尾随 choices: []），但**没有任何 finish_reason 帧**
+        res.write(`data: ${JSON.stringify({ ...base, choices: [], usage: { prompt_tokens: 9, completion_tokens: 2, total_tokens: 11 } })}\n\n`);
+        res.write("data: [DONE]\n\n");
+        res.end();
+    });
+}
+
+
 function handleOpenAIStreamNoDone(req: IncomingMessage, res: ServerResponse): void {
     let body = "";
     req.on("data", (chunk) => { body += chunk.toString(); });

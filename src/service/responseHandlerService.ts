@@ -8,6 +8,7 @@ import { SgUser } from "../model/sgUser";
 import { SgRecord } from "../model/sgRecord";
 import { ApiFormat, FailedCode, SgRecordStatus, RequestActivityStage, ActivityLevel, ConfigKey } from "../constants";
 import { BaseConverter } from "../util/protocolConverter/BaseConverter";
+import stopReasonSourceUtil from "../util/protocolUtil/stopReasonSourceUtil";
 import { AccumulatorBase } from "../util/accumulator/accumulatorBase";
 import recordService, { type MarkFailedOptions } from "./recordService";
 import billingSettlementService from "./billingSettlementService";
@@ -313,6 +314,7 @@ function finalizeStreamResult(
     user: SgUser,
     upstreamFormat: ApiFormat,
     state: StreamRunResult,
+    converter: BaseConverter | null,
 ): void {
     const { accumulator, upstreamUsage, failedCode, errorMessage } = state;
 
@@ -327,6 +329,7 @@ function finalizeStreamResult(
                 accumulator,
                 failedCode,
                 errorMessage,
+                converter,
             );
         } catch (e) {
             // 收尾失败必须"可见"：只 console.error 的话在 Worker 里等于静默丢账。
@@ -361,6 +364,7 @@ async function settleStreamResult(
     accumulator: AccumulatorBase,
     failedCode: string | null,
     errorMessage: string | null,
+    converter: BaseConverter | null,
 ): Promise<void> {
     // 已完整接收即视为成功：即使随后连接断开，也可能只是客户端拿到完整结果后提前关闭
     // （客户端断开 / 上游超时不置 errored，不该覆盖成功）；标志语义见 AccumulatorBase
@@ -397,7 +401,11 @@ async function settleStreamResult(
             activity: {
                 stage: RequestActivityStage.RESULT,
                 message: "请求成功",
-                details: { status: SgRecordStatus.SUCCESS, cost },
+                details: {
+                    status: SgRecordStatus.SUCCESS,
+                    cost,
+                    ...stopReasonSourceUtil.stopReasonDetailsForConverter(converter),
+                },
             },
         });
         return;
@@ -655,6 +663,10 @@ export async function handleNonStreamResponse(
                 status: recordStatus,
                 upstream_status: statusCode,
                 ...(recordStatus === SgRecordStatus.SUCCESS ? { cost } : {}),
+                // 失败记录没有可谈的 stop_reason 来源，只在成功时落标记
+                ...(recordStatus === SgRecordStatus.SUCCESS
+                    ? stopReasonSourceUtil.stopReasonDetailsForConverter(converter)
+                    : {}),
             },
             level: recordStatus === SgRecordStatus.SUCCESS ? ActivityLevel.INFO : ActivityLevel.ERROR,
         },
@@ -699,7 +711,7 @@ export async function handleStreamResponse(
             upstreamUsageCollector,
         });
         console.log(`[responseHandlerService] Stream ended, completed: ${state.accumulator.isCompleted()}, failedCode: ${state.failedCode}`);
-        finalizeStreamResult(c, record, model, user, upstreamFormat, state);
+        finalizeStreamResult(c, record, model, user, upstreamFormat, state, converter);
         // 等日志真正 flush：不 await 的话尾部内容可能丢（P2-12）
         await streamLogService.finishStreamLog(logStream);
     });
