@@ -144,7 +144,7 @@ func (a *App) newModelDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.confirmDestructive("删除模型 " + id); err != nil {
+			if err := a.requireDestructive("删除模型 " + id); err != nil {
 				return err
 			}
 			resp, err := a.apiCall(cmd, http.MethodDelete, "/model/"+id, nil)

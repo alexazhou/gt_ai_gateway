@@ -524,7 +524,8 @@ func TestP2CommandRoutes(t *testing.T) {
 		{name: "record get", args: []string{"record", "get", "7"}, method: http.MethodGet, path: "/record/7"},
 		{name: "record activity", args: []string{"record", "activity", "7"}, method: http.MethodGet, path: "/record/7/activity.json"},
 		{name: "record delete -y", args: []string{"record", "delete", "7", "-y"}, method: http.MethodDelete, path: "/record/7"},
-		{name: "record recover-orphans", args: []string{"record", "recover-orphans"}, method: http.MethodPost, path: "/record/recover-orphans.json"},
+		// recover-orphans 会写库，按 #258 安全要求纳入破坏性命令（需要 -y 且受回退闸门约束）
+		{name: "record recover-orphans -y", args: []string{"record", "recover-orphans", "-y"}, method: http.MethodPost, path: "/record/recover-orphans.json"},
 		{name: "record clear-payload -y", args: []string{"record", "clear-payload", "-y"}, method: http.MethodDelete, path: "/record/clear-payload"},
 		{name: "record clear-all -y", args: []string{"record", "clear-all", "-y"}, method: http.MethodDelete, path: "/record/clear-all"},
 	}

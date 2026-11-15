@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/alexazhou/gt_ai_gateway/cli/internal/client"
+	"github.com/alexazhou/gt_ai_gateway/cli/internal/config"
 	"github.com/alexazhou/gt_ai_gateway/cli/internal/prompt"
 )
 
@@ -96,12 +97,21 @@ func (a *App) apiCall(cmd *cobra.Command, method, path string, body any) (*clien
 }
 
 // apiCallWithTimeout 执行一次 HTTP 请求，并指定超时（连通性测试类用 120s）。
+//
+// 超时会追加「服务端可能已执行」提示：客户端超时与服务端完成是两件事
+// （#257 验收事故里三个 DELETE 客户端全部 exit 1，服务端全部 200）。
 func (a *App) apiCallWithTimeout(cmd *cobra.Command, method, path string, body any, timeout time.Duration) (*client.Response, error) {
 	cl, _, err := a.NewClient(timeout)
 	if err != nil {
 		return nil, err
 	}
-	return cl.Do(cmd.Context(), method, path, body)
+	resp, err := cl.Do(cmd.Context(), method, path, body)
+	return resp, withNonIdempotentHint(err)
+}
+
+// apiCallLong 用于长耗时清理类接口（默认 5 分钟，--timeout 可覆盖）。
+func (a *App) apiCallLong(cmd *cobra.Command, method, path string, body any) (*client.Response, error) {
+	return a.apiCallWithTimeout(cmd, method, path, body, client.CleanupTimeout)
 }
 
 // outList 输出列表响应：--json 原样透传，否则按 columns 渲染表格。
@@ -123,8 +133,16 @@ func (a *App) outObject(resp *client.Response) error {
 }
 
 // confirmDestructive 是危险操作的统一确认：未传 --yes 且非 TTY ⇒ 退出码 2，且请求不会发出。
+//
+// 回退连接（Tauri 自动回退）下把来源写进确认提示：事故的根因之一就是
+// 「用户以为在打 mock，其实连的是本机真实网关」。放行判定在 guardDestructive 里，
+// 这里只负责让确认文案带上来源。
 func (a *App) confirmDestructive(what string) error {
-	return prompt.Confirm(a.errOut, a.in, fmt.Sprintf("确定%s？", what), a.flagYes)
+	question := fmt.Sprintf("确定%s？", what)
+	if baseURL, source, err := a.connectionInfo(); err == nil && source == config.SourceTauri {
+		question = fmt.Sprintf("确定%s？（当前连接来自桌面端配置：%s）", what, baseURL)
+	}
+	return prompt.Confirm(a.errOut, a.in, question, a.flagYes)
 }
 
 // jsonBodyFromResponse 把已有对象解码成 map，用于「先 GET 再合并再 PUT」（model update）。

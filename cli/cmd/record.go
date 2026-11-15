@@ -138,7 +138,7 @@ func (a *App) newRecordDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.confirmDestructive("删除请求记录 " + id); err != nil {
+			if err := a.requireDestructive("删除请求记录 " + id); err != nil {
 				return err
 			}
 			resp, err := a.apiCall(cmd, http.MethodDelete, "/record/"+id, nil)
@@ -155,8 +155,12 @@ func (a *App) newRecordRecoverOrphansCmd() *cobra.Command {
 		Use:   "recover-orphans",
 		Short: "恢复孤儿请求记录（POST /record/recover-orphans.json）",
 		Args:  noArgs,
+		Long:  destructiveLongWithSafety("把「孤儿」请求记录重新挂回其用户/模型（POST /record/recover-orphans.json）。"),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			resp, err := a.apiCall(cmd, http.MethodPost, "/record/recover-orphans.json", nil)
+			if err := a.requireDestructive("恢复孤儿请求记录"); err != nil {
+				return err
+			}
+			resp, err := a.apiCallLong(cmd, http.MethodPost, "/record/recover-orphans.json", nil)
 			if err != nil {
 				return err
 			}
@@ -168,13 +172,16 @@ func (a *App) newRecordRecoverOrphansCmd() *cobra.Command {
 func (a *App) newRecordClearPayloadCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "clear-payload",
-		Short: "清空全部请求负载（DELETE /record/clear-payload）",
-		Args:  noArgs,
+		Short: "清空全部请求负载（DELETE /record/clear-payload，默认超时 5m）",
+		Long: destructiveLongWithSafety("清空所有请求记录的 payload（不可恢复）。\n" +
+			"长耗时：真实库实测约 194s，故默认超时 5 分钟；超时不代表服务端没执行。"),
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := a.confirmDestructive("清空所有请求记录的负载（payload 不可恢复）"); err != nil {
+			if err := a.requireDestructive("清空所有请求记录的负载（payload 不可恢复）"); err != nil {
 				return err
 			}
-			resp, err := a.apiCall(cmd, http.MethodDelete, "/record/clear-payload", nil)
+			// 长耗时：真实库实测 193.9s，默认 30s 必然超时（客户端失败而服务端仍成功）
+			resp, err := a.apiCallLong(cmd, http.MethodDelete, "/record/clear-payload", nil)
 			if err != nil {
 				return err
 			}
@@ -186,13 +193,14 @@ func (a *App) newRecordClearPayloadCmd() *cobra.Command {
 func (a *App) newRecordClearAllCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "clear-all",
-		Short: "清空全部请求记录（DELETE /record/clear-all）",
+		Short: "清空全部请求记录（DELETE /record/clear-all，默认超时 5m）",
+		Long:  destructiveLongWithSafety("清空全部请求记录（级联 payload 与 activity，不可恢复）。"),
 		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := a.confirmDestructive("清空所有请求记录（不可恢复）"); err != nil {
+			if err := a.requireDestructive("清空所有请求记录（不可恢复）"); err != nil {
 				return err
 			}
-			resp, err := a.apiCall(cmd, http.MethodDelete, "/record/clear-all", nil)
+			resp, err := a.apiCallLong(cmd, http.MethodDelete, "/record/clear-all", nil)
 			if err != nil {
 				return err
 			}

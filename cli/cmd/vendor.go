@@ -151,7 +151,7 @@ func (a *App) newVendorDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.confirmDestructive("删除供应商 " + id); err != nil {
+			if err := a.requireDestructive("删除供应商 " + id); err != nil {
 				return err
 			}
 			resp, err := a.apiCall(cmd, http.MethodDelete, "/vendor/"+id, nil)
@@ -429,7 +429,7 @@ func (a *App) newVendorModelDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.confirmDestructive("删除供应商 " + vendorID + " 的模型记录 " + modelRecordID); err != nil {
+			if err := a.requireDestructive("删除供应商 " + vendorID + " 的模型记录 " + modelRecordID); err != nil {
 				return err
 			}
 			resp, err := a.apiCall(cmd, http.MethodDelete, "/vendor/"+vendorID+"/model/"+modelRecordID, nil)

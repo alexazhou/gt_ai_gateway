@@ -160,7 +160,7 @@ func (a *App) newTenantDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.confirmDestructive("删除租户 " + id); err != nil {
+			if err := a.requireDestructive("删除租户 " + id); err != nil {
 				return err
 			}
 			resp, err := a.apiCall(cmd, http.MethodDelete, "/tenant/"+id, nil)
@@ -288,7 +288,7 @@ func (a *App) newRuleDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.confirmDestructive("删除规则 " + id); err != nil {
+			if err := a.requireDestructive("删除规则 " + id); err != nil {
 				return err
 			}
 			resp, err := a.apiCall(cmd, http.MethodDelete, "/rule/"+id, nil)
