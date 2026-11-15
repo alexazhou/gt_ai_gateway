@@ -31,11 +31,12 @@ fi
 # 探命令存在性只能看 root help 的命令清单：`record clear-payload --help` 在命令不存在时
 # 也会被 cobra 当 root help 处理并 exit 0（第一版踩过），不能用来判断。
 if ! "$BIN" --help 2>/dev/null | grep -qE '^  record[[:space:]]'; then
-  echo "[fallback-e2e] 当前二进制没有 \`record clear-payload\`（来自 P3），本分支可能未合入 P3" >&2
+  # 固定前缀供验收人 grep：区分「依赖缺失 exit 3」与「断言失败 exit 1」（详见 e2e-shell-env.sh 同处注释）
+  echo "SKIP-REASON: 需要 P3 命令 \`record clear-payload\`，当前树没有（feat/cli-p4 以 P1 为基点）" >&2
   exit 3
 fi
 if ! "$BIN" --help 2>&1 | grep -q -- '--allow-fallback-destructive'; then
-  echo "[fallback-e2e] 当前二进制没有 --allow-fallback-destructive（来自 P3 闸门）" >&2
+  echo "SKIP-REASON: 需要 P3 的全局 flag \`--allow-fallback-destructive\`，当前树没有" >&2
   exit 3
 fi
 
@@ -57,7 +58,9 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 
-request_count() { [ -f "$TMP/mock.log" ] && wc -l < "$TMP/mock.log" | tr -d ' ' || echo 0; }
+# 请求计数方式（验收人对齐用）：**数 mock 日志文件的行数**（mock_gateway.py 每处理一个请求追加一行 JSON）；
+# 不依赖任何"计数接口"，也不看 CLI 自己的说法 —— 唯一事实来源是服务端收到的请求条数。
+request_count() { if [ -f "$TMP/mock.log" ]; then wc -l < "$TMP/mock.log" | tr -d ' '; else echo 0; fi; }
 
 # 假桌面端配置：host/port 指向 mock，root_token 是 mock 认的 token
 printf '{"host":"127.0.0.1","port":%s,"root_token":"%s"}' "$PORT" "$TOKEN" > "$TMP/tauri.json"

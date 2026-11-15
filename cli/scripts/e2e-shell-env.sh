@@ -32,7 +32,9 @@ fi
 # 注意**不能**用 `integration env --help` 探测：cobra 见到 --help 会打印 root help 并 exit 0，
 # 于是「命令不存在」会被误判成「命令存在」（本脚本第一版就踩了这个坑）。
 if ! "$BIN" --help 2>/dev/null | grep -qE '^  integration[[:space:]]'; then
-  echo "[shell-env] 当前二进制没有 \`gtgw integration env\`（该命令来自 P3，本分支可能未合入）" >&2
+  # 固定前缀 SKIP-REASON：验收人在 CI 日志里 grep 它，就能区分「依赖缺失 exit 3」与「断言失败 exit 1/2」。
+  # 注意这不是 skip：本脚本以退出码 3 结束，CI 里该 job 会显示失败（红），不会被当成成功吞掉。
+  echo "SKIP-REASON: 需要 P3 命令 \`gtgw integration env\`，当前树没有（feat/cli-p4 以 P1 为基点）" >&2
   echo "[shell-env] 这不是 skip：脚本存在的前提就是「四 shell 实测」，缺依赖时以 3 退出" >&2
   exit 3
 fi
