@@ -149,6 +149,11 @@ func (a *App) NewRootCmd() *cobra.Command {
 		a.newConfigCmd(),
 		// 资源域（P2）
 		a.newVendorCmd(),
+		a.newModelCmd(),
+		a.newUserCmd(),
+		a.newBalanceCmd(),
+		a.newTenantCmd(),
+		a.newRuleCmd(),
 	)
 	return root
 }
