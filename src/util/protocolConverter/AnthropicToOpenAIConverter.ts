@@ -280,7 +280,11 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
             contentBlocks.push({ type: "text", text: "" });
         }
 
-        const stopReason = OPENAI_TO_ANTHROPIC_STOP_REASON[upstreamRes.choices[0]?.finish_reason || "stop"] || "end_turn";
+        const upstreamFinishReason = upstreamRes.choices[0]?.finish_reason ?? null;
+        const stopReason = OPENAI_TO_ANTHROPIC_STOP_REASON[upstreamFinishReason || "stop"] || "end_turn";
+        // 来源标记：上游给了 finish_reason 才算 upstream；缺失时下面的 `|| "stop"` 与
+        // 映射默认值都是我方补的，记 synthesized（只用于记账，不影响输出取值）。
+        this.stopReasonSource = upstreamFinishReason ? "upstream" : "synthesized";
         const finalId = requestId || upstreamRes.id;
 
         return {
@@ -309,6 +313,9 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
         // 尾随 usage-only chunk)一定都已到达,统一在这里聚合发出最终的
         // message_delta(携带累积的 usage)+ message_stop。
         const usage = protocolConverterUtil.openAIUsageToAnthropic(this.rawUsage ?? {});
+        // 来源标记：pendingStopReason 非空 = 上游给过 finish_reason（值经映射表换算）；
+        // 为空 = 上游漏发收尾信号，下面的 `?? "end_turn"` 是我方兜底（#246 的 D2 路径）。
+        this.stopReasonSource = this.pendingStopReason !== null ? "upstream" : "synthesized";
         const stopReason = this.pendingStopReason ?? "end_turn";
         const events: AnthropicSSEEvent[] = [];
 
