@@ -228,18 +228,18 @@
     {
       "method": "GET",
       "path": "/record/clear-orphans/stats.json",
-      "command": null,
-      "phase": null,
-      "reason": "P3：`record clear-orphans` 多片游标循环的分母快照接口",
-      "category": "P3"
+      "command": "gtgw record clear-orphans",
+      "phase": "P3",
+      "reason": null,
+      "category": "covered"
     },
     {
       "method": "POST",
       "path": "/record/clear-orphans/step",
-      "command": null,
-      "phase": null,
-      "reason": "P3：`record clear-orphans` 逐片推进接口（服务端无状态，靠客户端游标）",
-      "category": "P3"
+      "command": "gtgw record clear-orphans",
+      "phase": "P3",
+      "reason": null,
+      "category": "covered"
     },
     {
       "method": "DELETE",
@@ -252,10 +252,10 @@
     {
       "method": "GET",
       "path": "/record/latest.json",
-      "command": null,
-      "phase": null,
-      "reason": "P3：供 `record watch` 定时轮询使用，本单（P2）只做 record 基础能力",
-      "category": "P3"
+      "command": "gtgw record watch",
+      "phase": "P3",
+      "reason": null,
+      "category": "covered"
     },
     {
       "method": "GET",
