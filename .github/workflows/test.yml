@@ -310,7 +310,7 @@ jobs:
           # 判据与本地 script/githook/pre-commit 共用同一个脚本（#271）：
           # 两处不再各写一份，避免「改一处漏一处」。checks: 索引 mode 全 100755、
           # 清单内名字不缺、pathspec 0 匹配判红（0 匹配时旧断言会静默变绿）。
-          bash script/check_cli_script_modes.sh
+          bash script/check_exec_bits.sh
 
       - name: Setup Go
         uses: actions/setup-go@v5
