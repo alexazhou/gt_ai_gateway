@@ -38,6 +38,31 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 # 复制后端源代码
 COPY . .
 
+# 0. CLI 构建阶段 (gtgw：Go 静态单文件，随镜像一起分发)
+# 用 --platform=$BUILDPLATFORM + TARGETOS/TARGETARCH 交叉编译，让 go build 跑在构建机原生架构上，
+# 而不是让 QEMU 去仿真 arm64 的 go 编译器（后者慢 5~10 倍，且容易在 buildx 下偶发 OOM）。
+# 版本号唯一来源是仓库根 package.json，与 release/CI 的注入口径一致。
+FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS cli-builder
+WORKDIR /src/cli
+
+# buildx 自动注入的目标平台
+ARG TARGETOS
+ARG TARGETARCH
+
+# 先只拷贝依赖清单，命中层缓存；package.json 供下面取 version
+COPY package.json /src/package.json
+COPY cli/go.mod cli/go.sum ./
+RUN go mod download
+
+COPY cli/ ./
+# CGO_ENABLED=0 ⇒ 纯静态：不依赖目标镜像的 libc，alpine(musl) 与 debian(glibc) 都能直接跑
+RUN VERSION="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' /src/package.json | head -1)" && \
+    echo "cli version = $VERSION ($TARGETOS/$TARGETARCH)" && \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -trimpath -buildvcs=false \
+      -ldflags "-s -w -X main.version=$VERSION" \
+      -o /out/gtgw .
+
 # 3. 生产环境镜像阶段
 FROM node:24-alpine
 WORKDIR /app
@@ -61,6 +86,13 @@ COPY --from=builder /app/src ./src
 COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY --from=builder /app/script ./script
 COPY --from=builder /app/resource ./resource
+
+
+# gtgw CLI：从 cli-builder 阶段取静态二进制
+# 注意：与上面的约定一致，必须用单行 COPY（多行格式在 buildx 跨架构构建时会报文件找不到）
+COPY --from=cli-builder /out/gtgw /usr/local/bin/gtgw
+# 构建期自检：二进制能在最终镜像里跑起来（静态，无需额外运行库）；失败就让构建红
+RUN gtgw --version
 
 # 暴露端口
 EXPOSE 8787
