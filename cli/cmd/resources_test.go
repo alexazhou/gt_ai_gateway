@@ -762,3 +762,75 @@ func TestRecordActivityEmptyTimeline(t *testing.T) {
 		t.Fatalf("stderr 应提示没有活动日志，实际：%q", errOut.String())
 	}
 }
+
+// TestUserCreateLegacyTokenFlagRejected 固化 #257 的裁决：
+// `user create --token sk-admin-xxx` 会被误读成「设置该用户的 Token」，从而把管理员 Token
+// 写进用户记录 —— 这是最坏的静默错误。改名后**不做兼容**：旧 flag 一出现就退出码 2、零请求。
+func TestUserCreateLegacyTokenFlagRejected(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "create", args: []string{"user", "create", "--name", "alice", "--token", "sk-admin-oops"}},
+		{name: "update", args: []string{"user", "update", "41", "--token", "sk-admin-oops"}},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			gw := newResourceGateway(t, nil)
+			app, _, errOut := newEnvTestApp(t, gw.URL, testToken)
+			if code := runCLI(app, c.args...); code != 2 {
+				t.Fatalf("退出码 = %d, 期望 2（stderr=%s）", code, errOut.String())
+			}
+			if paths := gw.rec.paths(); len(paths) != 0 {
+				t.Fatalf("旧 --token 被拒绝了却发出了请求：%v", paths)
+			}
+			if !strings.Contains(errOut.String(), "--user-token") {
+				t.Fatalf("错误提示应指出新名字 --user-token，实际：%q", errOut.String())
+			}
+		})
+	}
+}
+
+// TestUserCreateUserTokenFlag `--user-token` 是**用户自己的 Token**：
+// 它进请求体 body.token，而鉴权头用的是环境变量里的管理员 Token。
+func TestUserCreateUserTokenFlag(t *testing.T) {
+	gw := newResourceGateway(t, nil)
+	app, _, errOut := newEnvTestApp(t, gw.URL, testToken)
+	if code := runCLI(app, "user", "create", "--name", "alice", "--user-token", "sk-user-1"); code != 0 {
+		t.Fatalf("退出码 = %d, 期望 0（stderr=%s）", code, errOut.String())
+	}
+	last := gw.rec.last()
+	if last.Method != http.MethodPost || last.Path != "/user/create.json" {
+		t.Fatalf("请求 = %s %s", last.Method, last.Path)
+	}
+	// 鉴权头用环境变量里的管理员 Token，而不是 --user-token
+	if auth := last.Header.Get("Authorization"); auth != "Bearer "+testToken {
+		t.Fatalf("Authorization = %q, 期望管理员 Token（env）", auth)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(last.Body, &body); err != nil {
+		t.Fatalf("请求体不是合法 JSON：%v", err)
+	}
+	if body["token"] != "sk-user-1" {
+		t.Fatalf("body.token = %v, 期望 --user-token 的值 sk-user-1", body["token"])
+	}
+}
+
+// TestUserUpdateUserTokenEmptyRegenerates `--user-token ""` 仍要把 token 字段作为空串发出去
+// （后端语义：重新生成 UUID），所以断言字段存在且为空，而不是「没给就不发」。
+func TestUserUpdateUserTokenEmptyRegenerates(t *testing.T) {
+	gw := newResourceGateway(t, nil)
+	app, _, errOut := newEnvTestApp(t, gw.URL, testToken)
+	if code := runCLI(app, "user", "update", "41", "--user-token", ""); code != 0 {
+		t.Fatalf("退出码 = %d, 期望 0（stderr=%s）", code, errOut.String())
+	}
+	body := decodeLastBody(t, gw)
+	val, ok := body["token"]
+	if !ok {
+		t.Fatalf("body 应包含 token 字段（空串表示让服务端重新生成）：%v", body)
+	}
+	if val != "" {
+		t.Fatalf("body.token = %v, 期望空串", val)
+	}
+}

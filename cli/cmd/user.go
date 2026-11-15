@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/alexazhou/gt_ai_gateway/cli/internal/client"
+	"github.com/alexazhou/gt_ai_gateway/cli/internal/config"
 )
 
 // userColumns 对应 userController 列表返回的用户字段。
@@ -74,18 +75,39 @@ func (a *App) newUserGetCmd() *cobra.Command {
 	}
 }
 
+// rejectLegacyUserToken 显式拒绝旧的 --token，不做静默兼容。
+//
+// 原因（#257 裁决）：`gtgw user create --token sk-admin-xxx` 会被理解成
+// 「设置这个用户的 Token」，实际却把**管理员 Token 写进用户记录**——静默、且不可逆。
+// 所以这个 flag 一出现就报参数错误（退出码 2），并且**不发任何请求**。
+// 注意：因为这条命令声明了同名局部 flag，全局 --token（管理员 Token）在这些命令上依然被遮蔽，
+// 管理员凭据请用 GTGW_TOKEN 环境变量或 profile。
+func rejectLegacyUserToken(cmd *cobra.Command) error {
+	if !cmd.Flags().Changed("token") {
+		return nil
+	}
+	return client.Usagef("--token 已改名为 --user-token（该值会写进用户记录，避免误把管理员 Token 写进去）；"+
+		"管理员 Token 请用 %s 环境变量或 profile 提供", config.EnvToken)
+}
+
 func (a *App) newUserCreateCmd() *cobra.Command {
 	body := &bodySource{}
-	var name, token, userType string
+	var name, userToken, userType, legacyToken string
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "创建用户（POST /user/create.json）",
 		Long: `两种传参：
-  --file <path> / --key k=v   完整请求体
-  --name / --token / --type   常用字段快捷方式（与 --file/--key 同时给出时以 --file/--key 为准）
-不传 token 时后端会自动生成一个 UUID。`,
+  --file <path> / --key k=v       完整请求体
+  --name / --user-token / --type  常用字段快捷方式（与 --file/--key 同时给出时以 --file/--key 为准）
+不传 --user-token 时后端会自动生成一个 UUID。
+
+注意：--user-token 是**用户自己的 Token**（会写进用户记录）。旧的 --token 已废弃并会直接报错，
+避免把管理员 Token 误当成用户 Token 写进去；管理员 Token 用 GTGW_TOKEN 环境变量或 profile。`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := rejectLegacyUserToken(cmd); err != nil {
+				return err
+			}
 			payload, err := body.buildOptional(a.in)
 			if err != nil {
 				return err
@@ -96,14 +118,14 @@ func (a *App) newUserCreateCmd() *cobra.Command {
 			if name != "" {
 				payload["name"] = name
 			}
-			if token != "" {
-				payload["token"] = token
+			if userToken != "" {
+				payload["token"] = userToken
 			}
 			if userType != "" {
 				payload["type"] = userType
 			}
 			if len(payload) == 0 {
-				return client.Usagef("缺少请求体：用 --file/--key 或 --name/--token/--type 指定要创建的用户")
+				return client.Usagef("缺少请求体：用 --file/--key 或 --name/--user-token/--type 指定要创建的用户")
 			}
 			resp, err := a.apiCall(cmd, http.MethodPost, "/user/create.json", payload)
 			if err != nil {
@@ -114,21 +136,26 @@ func (a *App) newUserCreateCmd() *cobra.Command {
 	}
 	body.addFlags(cmd)
 	cmd.Flags().StringVar(&name, "name", "", "用户名称")
-	cmd.Flags().StringVar(&token, "token", "", "用户 Token（不传则服务端生成）")
+	cmd.Flags().StringVar(&userToken, "user-token", "", "用户自己的 Token（不传则服务端生成）")
 	cmd.Flags().StringVar(&userType, "type", "", "用户类型：admin / normal（默认 normal）")
+	cmd.Flags().StringVar(&legacyToken, "token", "", "已废弃：请改用 --user-token")
+	_ = cmd.Flags().MarkHidden("token")
 	return cmd
 }
 
 func (a *App) newUserUpdateCmd() *cobra.Command {
 	body := &bodySource{}
-	var name, token, status, userType string
+	var name, userToken, status, userType, legacyToken string
 	cmd := &cobra.Command{
 		Use:   "update <id>",
 		Short: "更新用户（PUT /user/:id，仅提交给出的字段）",
 		Long: `后端只更新请求体里出现的字段（见 userController.updateUser）。
---token "" 表示让服务端重新生成一个 Token。`,
+--user-token "" 表示让服务端重新生成一个 Token（该值写进用户记录，不是管理员凭据）。`,
 		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectLegacyUserToken(cmd); err != nil {
+				return err
+			}
 			id, err := idArg("用户 id", args[0])
 			if err != nil {
 				return err
@@ -143,8 +170,8 @@ func (a *App) newUserUpdateCmd() *cobra.Command {
 			if cmd.Flags().Changed("name") {
 				payload["name"] = name
 			}
-			if cmd.Flags().Changed("token") {
-				payload["token"] = token
+			if cmd.Flags().Changed("user-token") {
+				payload["token"] = userToken
 			}
 			if cmd.Flags().Changed("status") {
 				payload["status"] = status
@@ -153,7 +180,7 @@ func (a *App) newUserUpdateCmd() *cobra.Command {
 				payload["type"] = userType
 			}
 			if len(payload) == 0 {
-				return client.Usagef("没有要修改的字段：用 --file/--key 或 --name/--token/--status/--type 指定")
+				return client.Usagef("没有要修改的字段：用 --file/--key 或 --name/--user-token/--status/--type 指定")
 			}
 			resp, err := a.apiCall(cmd, http.MethodPut, "/user/"+id, payload)
 			if err != nil {
@@ -164,9 +191,11 @@ func (a *App) newUserUpdateCmd() *cobra.Command {
 	}
 	body.addFlags(cmd)
 	cmd.Flags().StringVar(&name, "name", "", "用户名称")
-	cmd.Flags().StringVar(&token, "token", "", "用户 Token（传空串表示重新生成）")
+	cmd.Flags().StringVar(&userToken, "user-token", "", "用户自己的 Token（传空串表示重新生成）")
 	cmd.Flags().StringVar(&status, "status", "", "用户状态（如 enabled / disabled）")
 	cmd.Flags().StringVar(&userType, "type", "", "用户类型：admin / normal")
+	cmd.Flags().StringVar(&legacyToken, "token", "", "已废弃：请改用 --user-token")
+	_ = cmd.Flags().MarkHidden("token")
 	return cmd
 }
 
