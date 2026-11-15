@@ -380,7 +380,7 @@ describe("Billing API", () => {
     });
 
     describe("LLM Balance Gate", () => {
-        it("serves a request at 0 balance (deducts into negative) then blocks the next one", async () => {
+        it("blocks a 0-balance request up front (no overdraft)", async () => {
             // 新建余额为 0 的用户
             const freshUser = await requestHelper.post(
                 "/user/create.json",
@@ -390,38 +390,30 @@ describe("Billing API", () => {
             expect(freshUser.body.balance).toBe(0);
             const userToken = freshUser.body.token;
 
-            // 第一次请求：余额 0 未为负，预检放行，正常返回并扣成负余额
+            // 口径：不做透支 —— 余额必须覆盖最小可计费成本，0 余额首请求就被拦
             const first = await requestHelper.post(
                 "/llm/v1/chat/completions",
                 mockHelper.generateOpenAIChatRequest({ model: modelConfig.name, stream: false }),
                 userToken,
             );
-            expect(first.status).toBe(200);
+            expect(first.status).toBe(400);
+            expect(first.body.error.message).toBe("Insufficient balance");
 
-            // 扣款后余额为负
+            // 未扣费：余额保持 0，不产生负余额
             const userAfter = await requestHelper.get(
                 `/user/${freshUser.body.id}`,
                 adminToken,
             );
-            expect(userAfter.body.balance).toBeLessThan(0);
+            expect(userAfter.body.balance).toBe(0);
 
-            // 第二次请求：余额为负，预检阻止，不向上游发起
-            const second = await requestHelper.post(
-                "/llm/v1/chat/completions",
-                mockHelper.generateOpenAIChatRequest({ model: modelConfig.name, stream: false }),
-                userToken,
-            );
-            expect(second.status).toBe(400);
-            expect(second.body.error.message).toBe("Insufficient balance");
-
-            // 记录：第一次 success，第二次 failed（insufficient_balance）
+            // 记录：被拦的请求记 failed（insufficient_balance）
             const records = await requestHelper.get(
                 `/record/list.json?user_ids=${freshUser.body.id}`,
                 adminToken,
             );
-            expect(records.body.total).toBe(2);
-            const failedRecord = records.body.list.find((r: any) => r.status === "failed");
-            expect(failedRecord.failed_code).toBe("insufficient_balance");
+            expect(records.body.total).toBe(1);
+            expect(records.body.list[0].status).toBe("failed");
+            expect(records.body.list[0].failed_code).toBe("insufficient_balance");
         });
 
         it("does not block negative-balance users on free (non-billing) models", async () => {
@@ -442,13 +434,13 @@ describe("Billing API", () => {
                 adminToken,
             );
 
-            // 先用计费模型把余额打负
-            const paidFirst = await requestHelper.post(
-                "/llm/v1/chat/completions",
-                mockHelper.generateOpenAIChatRequest({ model: modelConfig.name, stream: false }),
-                user.body.token,
+            // 管理端负向调整制造"已有欠费"的用户（请求路径不放行透支，欠费由运维调整产生）
+            const adjusted = await requestHelper.post(
+                `/user/${user.body.id}/balance/adjust.json`,
+                { amount: -1, type: "adjustment", remark: "force negative balance" },
+                adminToken,
             );
-            expect(paidFirst.status).toBe(200);
+            expect(adjusted.status).toBe(200);
             const userAfter = await requestHelper.get(
                 `/user/${user.body.id}`,
                 adminToken,

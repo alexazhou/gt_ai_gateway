@@ -270,7 +270,7 @@ export class AnthropicAccumulator extends AccumulatorBase {
                 { index: 0, message: { content: "", thinking: "", signature: "" }, finish_reason: null },
             ],
         };
-        this.inputTokens = 0;
+        this.inputTokens = null;
         this.resetState();
     }
 }

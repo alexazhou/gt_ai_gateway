@@ -115,11 +115,11 @@ if (!this._cloudConnected) {
 | 文件 | 变更 |
 |------|------|
 | `src/service/ormService.ts` | 修复并发连接竞态条件 |
-| `tests/api/concurrent/concurrent.test.ts` | 新增并发请求测试 |
+| `tests/api/system/concurrent.test.ts` | 新增并发请求测试 |
 
 ## 测试验证
 
-并发测试用例（`tests/api/concurrent/concurrent.test.ts`）覆盖三个场景：
+并发测试用例（`tests/api/system/concurrent.test.ts`）覆盖三个场景：
 
 1. **多接口并发** — 同时请求 `/status.json`、`/vendor/list.json`、`/model/list.json`、`/record/latest.json`、`/user/list.json`
 2. **多轮连续并发** — 连续 3 轮，每轮 4 个并发请求
@@ -129,8 +129,8 @@ if (!this._cloudConnected) {
 
 ```bash
 # Node 模式
-npm test -- --run tests/api/concurrent/concurrent.test.ts
+npm test -- --run tests/api/system/concurrent.test.ts
 
 # Worker 模式
-TEST_MODE=worker npx vitest --config vitest.worker.config.ts --run tests/api/concurrent/concurrent.test.ts
+TEST_MODE=worker npx vitest --config vitest.worker.config.ts --run tests/api/system/concurrent.test.ts
 ```

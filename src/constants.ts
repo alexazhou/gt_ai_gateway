@@ -15,6 +15,8 @@ export enum FailedCode {
     UPSTREAM_ERROR = "upstream_error",
     // 网关解析上游 SSE 流失败（上游返回的内容不符合协议，无法解析）
     SSE_PARSE_ERROR = "sse_parse_error",
+    // 协议转换失败（请求侧：客户端请求无法转成上游格式；响应侧：上游响应无法转成客户端格式）
+    CONVERSION_ERROR = "conversion_error",
     NO_AVAILABLE_UPSTREAM = "no_available_upstream",
     INSUFFICIENT_BALANCE = "insufficient_balance",
     // 上游在响应头/响应体阶段僵死（长时间无数据），触发超时兜底
@@ -141,8 +143,14 @@ export enum ConfigKey {
     UPSTREAM_NON_STREAM_TIMEOUT_MS = "upstream_non_stream_timeout_ms",
     // 流式相邻 chunk 空闲超时（默认 180s）
     UPSTREAM_STREAM_IDLE_TIMEOUT_MS = "upstream_stream_idle_timeout_ms",
+    // 流式响应总时长上限（默认 30 分钟，0 = 不限）：兜底防止记录长期停在 processing
+    STREAM_MAX_DURATION_MS = "stream_max_duration_ms",
+    // 流式读缓冲上限（默认 8MB）：上游一直不吐空行时防止 isolate 内存被坏流吃爆
+    SSE_MAX_BUFFER_BYTES = "sse_max_buffer_bytes",
     // 孤儿记录回收阈值，距 start_at 超过该值且未结束的记录视为孤儿（默认 10 分钟）
     ORPHAN_RECOVER_THRESHOLD_MS = "orphan_recover_threshold_ms",
     // 多租户隔离开关：false = 逻辑单租户（所有请求固定 main）；true = 完整多租户隔离
     MULTI_TENANT_ENABLED = "multi_tenant_enabled",
+    // LLM 请求体上限（默认 32MB，0 = 不限）：防止超大 body 打满 isolate/进程内存
+    LLM_MAX_BODY_BYTES = "llm_max_body_bytes",
 }

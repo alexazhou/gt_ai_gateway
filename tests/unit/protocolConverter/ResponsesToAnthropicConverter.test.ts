@@ -25,6 +25,7 @@ import type {
     ResponsesRequest,
 } from "../../../src/util/protocol/responsesTypes";
 import protocolConverterTestUtil from "./protocolConverterTestUtil";
+import protocolConverterUtil from "../../../src/util/protocolConverter/protocolConverterUtil";
 
 // ============================================================
 // ResponsesToAnthropicConverter - 请求转换
@@ -333,14 +334,30 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         ]);
     });
 
-    it("should convert reasoning item to thinking block", () => {
+    it("should round-trip verified sealed reasoning encrypted_content and reject unverified foreign encrypted_content", () => {
+        const upstreamRes: AnthropicResponse = {
+            id: "msg_think_rt",
+            type: "message",
+            role: "assistant",
+            model: "claude-sonnet-4-20250514",
+            content: [
+                { type: "thinking", thinking: "Let me think...", signature: "sig_anthropic_real" },
+                { type: "text", text: "Here's my answer." },
+            ],
+            stop_reason: "end_turn",
+            usage: { input_tokens: 10, output_tokens: 5 },
+        };
+        const wrapped = converter.convertResponse(upstreamRes);
+        const reasoningItem = wrapped.output.find((o) => o.type === "reasoning") as any;
+        expect(reasoningItem.encrypted_content).toMatch(/^gw_sig_v1\./);
+
         const req: ResponsesRequest = {
-            model: "gpt-4.1",
+            model: "claude-sonnet-4-20250514",
             input: [
                 {
                     type: "reasoning",
                     summary: [{ type: "summary_text", text: "Let me think..." }],
-                    encrypted_content: "enc_abc",
+                    encrypted_content: reasoningItem.encrypted_content,
                 },
                 {
                     type: "message",
@@ -351,14 +368,26 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         };
 
         const result = converter.convertRequest(req);
-
         const thinkingMsg = result.messages.find(
             (m) => Array.isArray(m.content) && m.content.some((b: any) => b.type === "thinking"),
         );
         expect(thinkingMsg).toBeDefined();
         const thinkingBlock = (thinkingMsg!.content as AnthropicContentBlock[]).find((b) => b.type === "thinking")!;
         expect(thinkingBlock.thinking).toBe("Let me think...");
-        expect(thinkingBlock.signature).toBe("enc_abc");
+        expect(thinkingBlock.signature).toBe("sig_anthropic_real");
+
+        // 原生跨供应商或篡改密文必须被拒绝
+        const foreignReq: ResponsesRequest = {
+            model: "claude-sonnet-4-20250514",
+            input: [
+                {
+                    type: "reasoning",
+                    summary: [{ type: "summary_text", text: "Let me think..." }],
+                    encrypted_content: "openai_ciphertext",
+                },
+            ],
+        };
+        expect(() => converter.convertRequest(foreignReq)).toThrow(/Incompatible or unverified/);
     });
 
     it("should convert tools from Responses format to Anthropic format", () => {
@@ -444,7 +473,7 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         expect(result.tool_choice).toEqual({ type: "any" });
     });
 
-    it("should not set tool_choice when none", () => {
+    it("should set tool_choice to none when none", () => {
         const req: ResponsesRequest = {
             model: "gpt-4.1",
             input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Hello" }] }],
@@ -452,7 +481,7 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         };
 
         const result = converter.convertRequest(req);
-        expect(result.tool_choice).toBeUndefined();
+        expect(result.tool_choice).toEqual({ type: "none" });
     });
 
     it("should convert named function tool_choice", () => {
@@ -510,14 +539,14 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         expect(result.top_p).toBe(0.9);
     });
 
-    it("should default max_tokens to 32768 when max_output_tokens is not set", () => {
+    it("should default max_tokens to the safe default 4096 when max_output_tokens is not set (P1-07)", () => {
         const req: ResponsesRequest = {
             model: "gpt-4.1",
             input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Hello" }] }],
         };
 
         const result = converter.convertRequest(req);
-        expect(result.max_tokens).toBe(32768);
+        expect(result.max_tokens).toBe(4096);
     });
 
     it("should use max_output_tokens when set", () => {
@@ -707,7 +736,7 @@ describe("ResponsesToAnthropicConverter - convertResponse", () => {
         const reasoning = result.output.find((o) => o.type === "reasoning") as any;
         expect(reasoning).toBeDefined();
         expect(reasoning.summary[0].text).toBe("Let me reason about this...");
-        expect(reasoning.encrypted_content).toBe("sig_abc");
+        expect(reasoning.encrypted_content).toMatch(/^gw_sig_v1\./);
 
         const msg = result.output.find((o) => o.type === "message") as any;
         expect(msg.content[0].text).toBe("Here's my answer.");
@@ -1048,7 +1077,7 @@ describe("ResponsesToAnthropicConverter - convertStreamEvent (Anthropic SSE → 
         expect(completedEvent).toBeDefined();
         const completedData = JSON.parse(completedEvent!.data);
         const usage = completedData.response.usage;
-        expect(usage.input_tokens).toBe(10);
+        expect(usage.input_tokens).toBe(15);
         expect(usage.input_tokens_details.cached_tokens).toBe(5);
         expect(usage.output_tokens).toBe(20);
         expect(usage.total_tokens).toBe(35);
@@ -1057,3 +1086,142 @@ describe("ResponsesToAnthropicConverter - convertStreamEvent (Anthropic SSE → 
 
 // ============================================================
 // AnthropicToResponsesConverter - 请求转换
+// ============================================================
+// 覆盖率补口：非法 max_output_tokens / 图片 / reasoning 并入上一条 assistant / tool_use 收尾
+// ============================================================
+
+describe("ResponsesToAnthropicConverter - 补口判定点", () => {
+    let converter: ResponsesToAnthropicConverter;
+
+    beforeEach(() => {
+        converter = ConverterFactory.create(ApiFormat.RESPONSES, ApiFormat.ANTHROPIC, "claude-3") as ResponsesToAnthropicConverter;
+    });
+
+    it("max_output_tokens 非正整数（0 / 负数 / 字符串 / NaN）→ AppError 400，不透传给上游", () => {
+        for (const bad of [0, -1, "1000", Number.NaN, Number.POSITIVE_INFINITY]) {
+            const req = {
+                model: "gpt-4",
+                input: "hi",
+                max_output_tokens: bad,
+            } as unknown as ResponsesRequest;
+
+            expect(() => converter.convertRequest(req)).toThrowError(/max_output_tokens must be a positive number/);
+            try {
+                converter.convertRequest(req);
+                throw new Error("应当抛错");
+            } catch (e: any) {
+                expect(e.statusCode).toBe(400);
+            }
+        }
+    });
+
+    it("input 里的 input_image 分片 → image 块（不静默丢图）", () => {
+        const req = {
+            model: "gpt-4",
+            input: [
+                {
+                    type: "message",
+                    role: "user",
+                    content: [
+                        { type: "input_text", text: "看这张图" },
+                        { type: "input_image", image_url: "https://x/y.png" },
+                    ],
+                },
+            ],
+        } as unknown as ResponsesRequest;
+
+        const result = converter.convertRequest(req);
+        const blocks = result.messages[0].content as AnthropicContentBlock[];
+
+        expect(blocks[0]).toMatchObject({ type: "text", text: "看这张图" });
+        expect(blocks[1]).toMatchObject({ type: "image", source: { type: "url", url: "https://x/y.png" } });
+    });
+
+    it("reasoning 项（网关自签 encrypted_content）→ thinking 块并入上一条 assistant 消息，不新起一轮", () => {
+        const encrypted = protocolConverterUtil.sealThinkingSignature("anthropic", "sig_1", { thinking: "先想一下" });
+        const req = {
+            model: "gpt-4",
+            input: [
+                { type: "message", role: "user", content: [{ type: "input_text", text: "算一下" }] },
+                { type: "function_call", call_id: "call_1", name: "calc", arguments: '{"a":1}' },
+                { type: "reasoning", encrypted_content: encrypted, summary: [] },
+            ],
+        } as unknown as ResponsesRequest;
+
+        const result = converter.convertRequest(req);
+
+        expect(result.messages).toHaveLength(2);
+        const assistantMsg = result.messages[1];
+        expect(assistantMsg.role).toBe("assistant");
+        const blocks = assistantMsg.content as AnthropicContentBlock[];
+        expect(blocks[0]).toMatchObject({ type: "tool_use", id: "call_1", name: "calc" });
+        expect(blocks[1]).toMatchObject({ type: "thinking", thinking: "先想一下", signature: "sig_1" });
+    });
+
+    it("流式：tool_use 块收尾 → function_call_arguments.done + output_item.done(type=function_call)", () => {
+        converter.convertStreamEvent(
+            JSON.stringify({ type: "message_start", message: { id: "msg_1", role: "assistant", model: "claude-3" } }),
+        );
+        converter.convertStreamEvent(
+            JSON.stringify({
+                type: "content_block_start",
+                index: 0,
+                content_block: { type: "tool_use", id: "toolu_1", name: "get_weather", input: {} },
+            }),
+        );
+        converter.convertStreamEvent(
+            JSON.stringify({
+                type: "content_block_delta",
+                index: 0,
+                delta: { type: "input_json_delta", partial_json: '{"city":"Tokyo"}' },
+            }),
+        );
+        const closeEvents = converter.convertStreamEvent(
+            JSON.stringify({ type: "content_block_stop", index: 0 }),
+        );
+
+        const argsDone = closeEvents
+            .map((e) => JSON.parse(e.data))
+            .find((d) => d.type === "response.function_call_arguments.done");
+        const itemDone = closeEvents
+            .map((e) => JSON.parse(e.data))
+            .find((d) => d.type === "response.output_item.done");
+
+        expect(argsDone).toBeDefined();
+        expect(argsDone.arguments).toBe('{"city":"Tokyo"}');
+        expect(itemDone).toBeDefined();
+        expect(itemDone.item).toMatchObject({
+            type: "function_call",
+            status: "completed",
+            arguments: '{"city":"Tokyo"}',
+            call_id: "toolu_1",
+            name: "get_weather",
+        });
+    });
+
+    it("流式：tool_use 没有参数增量 → arguments 兜底为 {}（不产出空字符串参数）", () => {
+        converter.convertStreamEvent(
+            JSON.stringify({ type: "message_start", message: { id: "msg_1", role: "assistant", model: "claude-3" } }),
+        );
+        converter.convertStreamEvent(
+            JSON.stringify({
+                type: "content_block_start",
+                index: 0,
+                content_block: { type: "tool_use", id: "toolu_2", name: "noop", input: {} },
+            }),
+        );
+        const closeEvents = converter.convertStreamEvent(JSON.stringify({ type: "content_block_stop", index: 0 }));
+
+        const itemDone = closeEvents
+            .map((e) => JSON.parse(e.data))
+            .find((d) => d.type === "response.output_item.done");
+
+        const argsDone = closeEvents
+            .map((e) => JSON.parse(e.data))
+            .find((d) => d.type === "response.function_call_arguments.done");
+
+        // 两处都要兜底成 {}：事件里的 arguments 与 item 上的 arguments 不能是空串
+        expect(argsDone.arguments).toBe("{}");
+        expect(itemDone.item.arguments).toBe("{}");
+    });
+});

@@ -118,7 +118,10 @@ export interface ResponsesNonStreamResponse {
     id: string;
     object: "response";
     created_at: number;
-    status: "completed" | "failed" | "in_progress";
+    status: "completed" | "failed" | "in_progress" | "incomplete";
+    incomplete_details?: {
+        reason?: "max_output_tokens" | "content_filter" | string;
+    } | null;
     model: string;
     output: ResponsesOutputItem[];
     usage?: ResponsesUsage;
@@ -164,6 +167,10 @@ export interface ResponsesOutputReasoning {
 export interface ResponsesStreamResponse {
     id?: string;
     model?: string;
+    status?: "completed" | "failed" | "in_progress" | "incomplete" | string;
+    incomplete_details?: {
+        reason?: "max_output_tokens" | "content_filter" | string;
+    } | null;
     usage?: ResponsesStreamUsage;
     output?: Array<{ type?: string }>;
 }
@@ -178,6 +185,9 @@ export interface ResponsesStreamItem {
     status?: string;
     call_id?: string;
     name?: string;
+    arguments?: string;
+    encrypted_content?: string;
+    summary?: ResponsesSummaryPart[];
     content?: ResponsesStreamContentPart[];
 }
 
@@ -199,6 +209,7 @@ export type ResponsesStreamEvent =
     | ResponsesEventReasoningSummaryPartDone
     | ResponsesEventOutputItemDone
     | ResponsesEventResponseCompleted
+    | ResponsesEventResponseIncomplete
     | ResponsesEventError
     | ResponsesEventResponseFailed;
 
@@ -309,6 +320,11 @@ export interface ResponsesEventOutputItemDone extends ResponsesEventBase {
 
 export interface ResponsesEventResponseCompleted extends ResponsesEventBase {
     type: "response.completed";
+    response: ResponsesNonStreamResponse;
+}
+
+export interface ResponsesEventResponseIncomplete extends ResponsesEventBase {
+    type: "response.incomplete";
     response: ResponsesNonStreamResponse;
 }
 

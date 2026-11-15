@@ -31,13 +31,13 @@
                     <div class="setting-item">
                         <div class="setting-info">
                             <div class="setting-title">多租户隔离</div>
-                            <div class="setting-desc">启用后按租户隔离用户/模型/供应商；关闭时退回逻辑单租户（仅 main），仅 root 可修改</div>
+                            <div class="setting-desc">启用后按租户隔离用户/模型/供应商；关闭时退回逻辑单租户（仅 main），仅系统管理员（root 或 main 租户管理员）可修改</div>
                         </div>
                         <div class="setting-action">
                             <a-switch
                                 :checked="form.multi_tenant_enabled"
                                 @change="form.multi_tenant_enabled = $event as boolean"
-                                :disabled="saving || !authStore.isRoot"
+                                :disabled="saving || !authStore.isSystemAdmin"
                             />
                         </div>
                     </div>
@@ -118,7 +118,10 @@ async function saveConfig(): Promise<void> {
     try {
         const config = await updateConfig({
             ...(form.host_key ? { host_key: form.host_key } : {}),
-            multi_tenant_enabled: form.multi_tenant_enabled ? "true" : "false",
+            // 多租户开关仅系统管理员可改：非系统管理员不提交该字段（后端对「改值」同样会 403）
+            ...(authStore.isSystemAdmin
+                ? { multi_tenant_enabled: form.multi_tenant_enabled ? "true" : "false" }
+                : {}),
         });
 
         form.host_key = config.host_key || '';

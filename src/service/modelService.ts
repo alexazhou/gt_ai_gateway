@@ -26,6 +26,34 @@ function toBoolean(value: unknown): boolean {
 }
 
 
+/**
+ * updateModel 的可更新字段白名单。
+ *
+ * 原实现是 `const { id, tenant_id, ...rest } = inputModel.toData(); model.fill(rest)`，
+ * 等于把请求 body 里任意列都灌进模型 —— 客户端可篡改 created_at / updated_at（审计时间线失效），
+ * 也能写进任何未来新增的内部列。改为显式白名单：不认识的字段静默忽略。
+ */
+const MODEL_UPDATABLE_FIELDS = [
+    "name",
+    "enable",
+    "prices",
+    "routing_mode",
+    "routing_config",
+    "cross_tenant",
+] as const;
+
+
+function pickUpdatableFields(data: Record<string, unknown>): Record<string, unknown> {
+    const picked: Record<string, unknown> = {};
+    for (const field of MODEL_UPDATABLE_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(data, field)) {
+            picked[field] = data[field];
+        }
+    }
+    return picked;
+}
+
+
 async function createModel(model: SgModel, scope: TenantScope): Promise<SgModel> {
     // 归属由服务端写入，客户端 body 中的 tenant_id 忽略；cross_tenant 归一化
     model.tenant_id = scope.tenantId;
@@ -38,6 +66,8 @@ async function createModel(model: SgModel, scope: TenantScope): Promise<SgModel>
     assertModelScope(model, scope, false);
 
     model.validatePrices();
+    // 按模型名绑定 vendor_model 的补建挪到配置写入时（原在选路读路径里写库，见 P1-10）
+    await routingService.ensureVendorModels(model, model.tenant_id ?? undefined);
     await routingService.validateConfig(model, model.tenant_id ?? undefined);
     await modelManager.save(model);
     return model;
@@ -54,7 +84,7 @@ async function updateModel(inputModel: SgModel, scope: TenantScope): Promise<SgM
     // 共享模型只读校验：目标必须属于本视角租户
     assertModelScope(model, scope, true);
 
-    const { id: _id, tenant_id: _tenantId, ...updateData } = inputModel.toData();
+    const updateData = pickUpdatableFields(inputModel.toData() as Record<string, unknown>);
     model.fill(updateData);
     model.cross_tenant = toBoolean(model.cross_tenant);
 
@@ -68,6 +98,7 @@ async function updateModel(inputModel: SgModel, scope: TenantScope): Promise<SgM
     }
 
     model.validatePrices();
+    await routingService.ensureVendorModels(model, model.tenant_id ?? undefined);
     await routingService.validateConfig(model, model.tenant_id ?? undefined);
     await modelManager.save(model);
 

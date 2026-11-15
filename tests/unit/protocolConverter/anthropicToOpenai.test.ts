@@ -1295,3 +1295,311 @@ describe("AnthropicToOpenAIConverter - convertStreamEvent", () => {
         expect(events).toEqual([{ event: "error", data: JSON.stringify(errorData) }]);
     });
 });
+
+// ============================================================
+// 覆盖率补口：assistant 纯文本 / tool_choice=auto / 未发 [DONE] 的收尾 / 连续 tool_call
+// ============================================================
+
+describe("AnthropicToOpenAIConverter - 补口判定点", () => {
+    let converter: AnthropicToOpenAIConverter;
+
+    beforeEach(() => {
+        converter = ConverterFactory.create(ApiFormat.ANTHROPIC, ApiFormat.OPENAI, "gpt-4") as AnthropicToOpenAIConverter;
+    });
+
+    it("assistant 的 content 是纯字符串 → 原样透传为一条 assistant 消息（不拆块、不丢）", () => {
+        const req = converter.convertRequest({
+            model: "claude-3",
+            max_tokens: 100,
+            messages: [
+                { role: "user", content: "你好" },
+                { role: "assistant", content: "上一次的回答" },
+                { role: "user", content: "继续" },
+            ],
+        } as AnthropicRequest) as OpenAIRequest;
+
+        expect(req.messages[1]).toEqual({ role: "assistant", content: "上一次的回答" });
+    });
+
+    it('tool_choice.type="auto" → "auto"（不落成 required/none）', () => {
+        const req = converter.convertRequest({
+            model: "claude-3",
+            max_tokens: 10,
+            messages: [{ role: "user", content: "hi" }],
+            tool_choice: { type: "auto" },
+        } as AnthropicRequest) as OpenAIRequest;
+
+        expect(req.tool_choice).toBe("auto");
+    });
+
+    it("上游给了 stop_reason 却没发 [DONE] → onUpstreamEnd() 补 message_delta + message_stop", () => {
+        converter.convertStreamEvent(
+            JSON.stringify({
+                id: "chatcmpl-1",
+                object: "chat.completion.chunk",
+                model: "gpt-4",
+                choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+            }),
+        );
+        converter.convertStreamEvent(
+            JSON.stringify({
+                id: "chatcmpl-1",
+                object: "chat.completion.chunk",
+                model: "gpt-4",
+                choices: [{ index: 0, delta: { content: "hi" }, finish_reason: "stop" }],
+            }),
+        );
+
+        const tail = converter.onUpstreamEnd();
+
+        expect(tail.map((e) => e.event)).toEqual(["message_delta", "message_stop"]);
+        expect(JSON.parse(tail[0].data).delta.stop_reason).toBe("end_turn");
+    });
+
+    it("上游已发过 [DONE] → onUpstreamEnd() 返回空，不重复补发收尾", () => {
+        converter.convertStreamEvent(
+            JSON.stringify({
+                id: "chatcmpl-1",
+                object: "chat.completion.chunk",
+                model: "gpt-4",
+                choices: [{ index: 0, delta: { content: "hi" }, finish_reason: null }],
+            }),
+        );
+        converter.convertStreamEvent(
+            JSON.stringify({
+                id: "chatcmpl-1",
+                object: "chat.completion.chunk",
+                model: "gpt-4",
+                choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            }),
+        );
+        const doneEvents = converter.convertStreamEvent("[DONE]");
+
+        expect(doneEvents.map((e) => e.event)).toEqual(["message_delta", "message_stop"]);
+        expect(converter.onUpstreamEnd()).toEqual([]);
+    });
+
+    it("文本块未收口时来 tool_call → 先 content_block_stop 再 start，索引递增", () => {
+        converter.convertStreamEvent(
+            JSON.stringify({
+                id: "chatcmpl-1",
+                object: "chat.completion.chunk",
+                model: "gpt-4",
+                choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+            }),
+        );
+        // 第一段文本 → content_block_start(index 0) + delta
+        const textEvents = converter.convertStreamEvent(
+            JSON.stringify({
+                id: "chatcmpl-1",
+                object: "chat.completion.chunk",
+                model: "gpt-4",
+                choices: [{ index: 0, delta: { content: "查一下天气" }, finish_reason: null }],
+            }),
+        );
+        expect(textEvents.map((e) => e.event)).toEqual(["content_block_start", "content_block_delta"]);
+
+        // 第一条 tool_call 到达：文本块必须收口
+        const firstTool = converter.convertStreamEvent(
+            JSON.stringify({
+                id: "chatcmpl-1",
+                object: "chat.completion.chunk",
+                model: "gpt-4",
+                choices: [
+                    {
+                        index: 0,
+                        delta: {
+                            tool_calls: [
+                                { index: 0, id: "call_1", type: "function", function: { name: "get_weather", arguments: "" } },
+                            ],
+                        },
+                        finish_reason: null,
+                    },
+                ],
+            }),
+        );
+        expect(firstTool.map((e) => e.event)).toEqual(["content_block_stop", "content_block_start"]);
+        expect(JSON.parse(firstTool[0].data).index).toBe(0);
+        const firstBlockStart = JSON.parse(firstTool[1].data);
+        expect(firstBlockStart.content_block.type).toBe("tool_use");
+        expect(firstBlockStart.index).toBe(1);
+        expect(firstBlockStart.content_block.id).toBe("call_1");
+        expect(firstBlockStart.content_block.name).toBe("get_weather");
+    });
+});
+
+// ============================================================
+// #246：流式块生命周期（开合成对 / index 唯一 / 顺序正确）
+// ============================================================
+
+/**
+ * 块生命周期断言器：把一串 Anthropic SSE 事件按官方 SDK 的解析方式（start 入栈、delta 按 index 反查）
+ * 重放一遍，断言「每个块都成对开合、index 唯一、delta 只打在自己块上、message_delta 前全部收口」。
+ */
+function checkBlockLifecycle(events: ProtocolStreamEvent[]) {
+    const blocks: Array<{ index: number; type: string; id?: string; deltaBuf: string }> = [];
+    const problems: string[] = [];
+    const openIndices = new Set<number>();
+    const seenIndices = new Set<number>();
+    let closedAt: number[] = [];
+
+    for (const e of events) {
+        const d = JSON.parse(e.data);
+        if (d.type === "content_block_start") {
+            if (seenIndices.has(d.index)) problems.push(`index ${d.index} 被用了两次`);
+            if (openIndices.size > 0) problems.push(`还有块未收口 index=${[...openIndices].join(",")} 就开了 index=${d.index}`);
+            seenIndices.add(d.index);
+            openIndices.add(d.index);
+            // 客户端侧按 index 反查：块在数组里的位置必须等于 index
+            blocks[d.index] = {
+                index: d.index,
+                type: d.content_block.type,
+                id: d.content_block.id,
+                deltaBuf: "",
+            };
+        } else if (d.type === "content_block_delta") {
+            const b = blocks[d.index];
+            if (!b) {
+                problems.push(`delta 指向不存在的块 index=${d.index}`);
+                continue;
+            }
+            if (!openIndices.has(d.index)) problems.push(`块 index=${d.index} 已收口还在发 delta`);
+            if (d.delta.type === "input_json_delta" && b.type !== "tool_use") {
+                problems.push(`input_json_delta 打到 ${b.type} 块 index=${d.index}`);
+            }
+            if (d.delta.type === "text_delta" && b.type !== "text") {
+                problems.push(`text_delta 打到 ${b.type} 块 index=${d.index}`);
+            }
+            if (b.type === "tool_use") b.deltaBuf += d.delta.partial_json ?? "";
+        } else if (d.type === "content_block_stop") {
+            if (!openIndices.has(d.index)) problems.push(`重复收口 index=${d.index}`);
+            openIndices.delete(d.index);
+            closedAt.push(d.index);
+        } else if (d.type === "message_delta" || d.type === "message_stop") {
+            if (openIndices.size > 0) problems.push(`${d.type} 之前仍有块未收口 index=${[...openIndices].join(",")}`);
+        }
+    }
+
+    return { blocks, problems, closedAt, unclosed: [...openIndices] };
+}
+
+describe("#246 流式块生命周期", () => {
+    let converter: AnthropicToOpenAIConverter;
+
+    beforeEach(() => {
+        converter = ConverterFactory.create(ApiFormat.ANTHROPIC, ApiFormat.OPENAI, "gpt-4") as AnthropicToOpenAIConverter;
+    });
+
+    const chunk = (delta: Record<string, unknown>, finish: string | null = null) =>
+        JSON.stringify({
+            id: "chatcmpl-1",
+            object: "chat.completion.chunk",
+            model: "gpt-4",
+            choices: [{ index: 0, delta, finish_reason: finish }],
+        });
+
+    it("同一 chunk 两个 tool_call：块成对开合、index 唯一、参数不串到别的工具上", () => {
+        const events = [
+            ...converter.convertStreamEvent(chunk({ role: "assistant" })),
+            ...converter.convertStreamEvent(
+                chunk({
+                    tool_calls: [
+                        { index: 0, id: "call_A", type: "function", function: { name: "get_weather", arguments: '{"city":"Tokyo"}' } },
+                        { index: 1, id: "call_B", type: "function", function: { name: "get_time", arguments: '{"tz":"UTC"}' } },
+                    ],
+                }),
+            ),
+            ...converter.convertStreamEvent(chunk({}, "tool_calls")),
+            ...converter.convertStreamEvent("[DONE]"),
+        ];
+
+        const { blocks, problems, closedAt } = checkBlockLifecycle(events);
+
+        expect(problems).toEqual([]);
+        // 两个块、index 0/1，各自收口
+        expect(blocks.map((b) => b.index)).toEqual([0, 1]);
+        expect(blocks.map((b) => b.id)).toEqual(["call_A", "call_B"]);
+        expect(closedAt).toEqual([0, 1]);
+        // 关键：参数必须落在各自块上（修复前 call_A 会拿到 {"city":"Tokyo"}{"tz":"UTC"}）
+        expect(JSON.parse(blocks[0].deltaBuf)).toEqual({ city: "Tokyo" });
+        expect(JSON.parse(blocks[1].deltaBuf)).toEqual({ tz: "UTC" });
+    });
+
+    it("分两帧到达的两个 tool_call：同样成对开合、index 递增", () => {
+        const events = [
+            ...converter.convertStreamEvent(chunk({ role: "assistant" })),
+            ...converter.convertStreamEvent(
+                chunk({ tool_calls: [{ index: 0, id: "call_A", type: "function", function: { name: "a", arguments: '{"x":1}' } }] }),
+            ),
+            ...converter.convertStreamEvent(
+                chunk({ tool_calls: [{ index: 1, id: "call_B", type: "function", function: { name: "b", arguments: '{"y":2}' } }] }),
+            ),
+            ...converter.convertStreamEvent(chunk({}, "tool_calls")),
+            ...converter.convertStreamEvent("[DONE]"),
+        ];
+
+        const { blocks, problems, closedAt } = checkBlockLifecycle(events);
+
+        expect(problems).toEqual([]);
+        expect(blocks.map((b) => b.index)).toEqual([0, 1]);
+        expect(closedAt).toEqual([0, 1]);
+        expect(JSON.parse(blocks[0].deltaBuf)).toEqual({ x: 1 });
+        expect(JSON.parse(blocks[1].deltaBuf)).toEqual({ y: 2 });
+    });
+
+    it("文本块 + 两个 tool_call：index 依序 0/1/2，文本与工具各自收口", () => {
+        const events = [
+            ...converter.convertStreamEvent(chunk({ role: "assistant" })),
+            ...converter.convertStreamEvent(chunk({ content: "我先查两件事" })),
+            ...converter.convertStreamEvent(
+                chunk({
+                    tool_calls: [
+                        { index: 0, id: "call_A", type: "function", function: { name: "a", arguments: "{}" } },
+                        { index: 1, id: "call_B", type: "function", function: { name: "b", arguments: "{}" } },
+                    ],
+                }),
+            ),
+            ...converter.convertStreamEvent(chunk({}, "tool_calls")),
+            ...converter.convertStreamEvent("[DONE]"),
+        ];
+
+        const { blocks, problems, closedAt } = checkBlockLifecycle(events);
+
+        expect(problems).toEqual([]);
+        expect(blocks.map((b) => b.type)).toEqual(["text", "tool_use", "tool_use"]);
+        expect(blocks.map((b) => b.index)).toEqual([0, 1, 2]);
+        expect(closedAt).toEqual([0, 1, 2]);
+    });
+
+    it("上游不发 finish_reason 直接 [DONE]：块仍在 message_delta 之前收口", () => {
+        const events = [
+            ...converter.convertStreamEvent(chunk({ role: "assistant" })),
+            ...converter.convertStreamEvent(chunk({ content: "最后一段" })),
+            ...converter.convertStreamEvent("[DONE]"),
+            ...converter.onUpstreamEnd(),
+        ];
+
+        const { problems, closedAt } = checkBlockLifecycle(events);
+
+        expect(problems).toEqual([]);
+        expect(closedAt).toEqual([0]);
+        // 收口必须在 message_delta 之前
+        const types = events.map((e) => JSON.parse(e.data).type);
+        expect(types.indexOf("content_block_stop")).toBeLessThan(types.indexOf("message_delta"));
+    });
+
+    it("finish_reason 已收口后再 [DONE] → 不重复发 content_block_stop", () => {
+        const events = [
+            ...converter.convertStreamEvent(chunk({ role: "assistant" })),
+            ...converter.convertStreamEvent(chunk({ content: "hi" })),
+            ...converter.convertStreamEvent(chunk({}, "stop")),
+            ...converter.convertStreamEvent("[DONE]"),
+            ...converter.onUpstreamEnd(),
+        ];
+
+        const stops = events.filter((e) => JSON.parse(e.data).type === "content_block_stop");
+
+        expect(stops).toHaveLength(1);
+        expect(checkBlockLifecycle(events).problems).toEqual([]);
+    });
+});

@@ -785,7 +785,18 @@ describe("Stream Failure Handling", () => {
     });
 
 
-    describe.skipIf(config.TEST_MODE === "worker")("Client disconnect — upstream still running", () => {
+    describe("Client disconnect — upstream still running", () => {
+        /**
+         * Worker 本地（`wrangler dev`）不会把「客户端断开」传播到 `c.req.raw.signal`：
+         * 实测断开后记录一直停在 `processing`（每 1s 采样 8 次全不动），只能等 10 分钟孤儿扫描收尾。
+         * node 模式下同一条链路正常（signal → `markFailure(CLIENT_DISCONNECTED)`）。
+         *
+         * 因此 worker 侧这三条用 `it.fails` 当缺陷看门狗：记录"当前未收尾"的语义，
+         * 一旦运行时/兜底逻辑修好（记录变成 failed + client_disconnected），它们会转红，
+         * 提示把断言改回正式版本。见 ISSUES.md P2-23。
+         */
+        const itStreamDisconnect = config.TEST_MODE === "worker" ? it.fails : it;
+
         async function abortStreamAfterFirstChunk(
             endpoint: string,
             body: object,
@@ -814,7 +825,7 @@ describe("Stream Failure Handling", () => {
             await new Promise((resolve) => setTimeout(resolve, 800));
         }
 
-        it("should set failed_code=client_disconnected for OpenAI /llm/v1/chat/completions", async () => {
+        itStreamDisconnect("should set failed_code=client_disconnected for OpenAI /llm/v1/chat/completions", async () => {
             await abortStreamAfterFirstChunk("/llm/v1/chat/completions", {
                 model: openaiSlowModelName,
                 messages: [{ role: "user", content: "hi" }],
@@ -830,7 +841,7 @@ describe("Stream Failure Handling", () => {
             expect(record.response_data).toContain("客户端断开");
         }, 15000);
 
-        it("should set failed_code=client_disconnected for Anthropic /llm/v1/messages", async () => {
+        itStreamDisconnect("should set failed_code=client_disconnected for Anthropic /llm/v1/messages", async () => {
             await abortStreamAfterFirstChunk("/llm/v1/messages", {
                 model: anthropicSlowModelName,
                 messages: [{ role: "user", content: "hi" }],
@@ -847,7 +858,7 @@ describe("Stream Failure Handling", () => {
             expect(record.response_data).toContain("客户端断开");
         }, 15000);
 
-        it("should set failed_code=client_disconnected for Responses /llm/v1/responses", async () => {
+        itStreamDisconnect("should set failed_code=client_disconnected for Responses /llm/v1/responses", async () => {
             await abortStreamAfterFirstChunk("/llm/v1/responses", {
                 model: responsesSlowModelName,
                 input: "hi",

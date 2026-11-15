@@ -2,7 +2,7 @@ import { join } from "path";
 import { config } from "dotenv";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { readFileSync } from "fs";
+import { readFileSync, writeSync } from "fs";
 import ormService from "./service/ormService";
 import recordService from "./service/recordService";
 import hostService from "./service/hostService";
@@ -187,7 +187,7 @@ async function startServer() {
         // ROOT_TOKEN 掩码进日志（前 4 位 + *），避免明文
         console.log(`ROOT_TOKEN: ${maskUtil.maskToken(bindings.ROOT_TOKEN)}`);
         // Bypass Node.js stdout block-buffering for pipes by using writeSync
-        require('fs').writeSync(1, `Server listening on http://${hostname}:${port}\n`);
+        writeSync(1, `Server listening on http://${hostname}:${port}\n`);
     });
 }
 

@@ -124,7 +124,7 @@ const routes: RouteRecordRaw[] = [
                 path: 'tenant',
                 name: 'Tenant',
                 component: TenantIndex,
-                meta: { title: '租户管理', requiresRoot: true, requiresMainView: true },
+                meta: { title: '租户管理', requiresSystemAdmin: true, requiresMainView: true },
             },
             {
                 path: 'rule',
@@ -161,19 +161,19 @@ const routes: RouteRecordRaw[] = [
                 path: 'client-manager/:tab?',
                 name: 'ClientManager',
                 component: ClientManager,
-                meta: { title: '客户端管理' },
+                meta: { title: '客户端管理', requiresMainView: true },
             },
             {
                 path: 'advanced-settings',
                 name: 'AdvancedSettings',
                 component: AdvancedSettings,
-                meta: { title: '设置' },
+                meta: { title: '设置', requiresMainView: true },
             },
             {
                 path: 'developer',
                 name: 'Developer',
                 component: Developer,
-                meta: { title: '开发者设置' },
+                meta: { title: '开发者设置', requiresMainView: true },
             },
         ],
     },
@@ -200,8 +200,8 @@ router.beforeEach(async (to) => {
             }
         }
 
-        // requiresRoot 路由（如租户管理）仅 root 可访问
-        if (to.meta.requiresRoot && !authStore.isRoot) {
+        // requiresSystemAdmin 路由（如租户管理）仅系统管理员（root 或 main 租户 admin）可访问
+        if (to.meta.requiresSystemAdmin && !authStore.isSystemAdmin) {
             return { name: 'Dashboard' };
         }
 

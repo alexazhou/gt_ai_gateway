@@ -1,5 +1,16 @@
 import customError from "../../customError";
+import { FailedCode } from "../../constants";
 import type { ProtocolStreamEvent } from "../protocol/commonTypes";
+
+/**
+ * 记录里 `stop_reason` 的来源（供 request_activity 的 result 阶段标注，不影响客户端输出）：
+ * - `"upstream"`：上游确实给了 finish_reason，值来自上游（可能经转换器的映射表换算）；
+ * - `"synthesized"`：上游没给 finish_reason，stop_reason 由我方兜底生成。
+ *
+ * 只表达「有没有被我方兜底」，不表达取值的语义是否完美——映射表对未知取值的默认值
+ * 仍记 `"upstream"`（因为上游确实给了收尾信号）。
+ */
+export type StopReasonSource = "upstream" | "synthesized";
 
 export abstract class BaseConverter {
     protected requestModel: string;
@@ -7,6 +18,12 @@ export abstract class BaseConverter {
     protected contentBlockIndex = 0;
     /** Responses 流事件的 sequence_number 计数 */
     protected seq = 0;
+    /**
+     * 本次转换中记录里的 stop_reason 是谁给的：null = 还没走到能确定的收尾点。
+     * 由各转换器在「确认上游给了 finish_reason」或「我方兜底合成」的那一刻写入；
+     * 供 handler 收尾时写进 request_activity（见 responseHandlerService）。
+     */
+    protected stopReasonSource: StopReasonSource | null = null;
 
     constructor(requestModel: string = "unknown", responseId?: string) {
         this.requestModel = requestModel;
@@ -31,10 +48,17 @@ export abstract class BaseConverter {
             const converted = this.convertRequest(bodyJson);
             return JSON.stringify(converted);
         } catch (e) {
-            if (e instanceof customError.AppError) throw e;
+            // 转换器自己抛的 AppError（如"不支持的内容块类型"）保留文案与状态码，
+            // 但要补上 failed_code，避免终态失败在记录里被糊成 unknown_error。
+            if (customError.isAppError(e)) {
+                if (e.failedCode) throw e;
+                throw new customError.AppError(e.message, e.statusCode, e.code, FailedCode.CONVERSION_ERROR);
+            }
             throw new customError.AppError(
                 `Protocol conversion failed: ${e instanceof Error ? e.message : String(e)}`,
                 400,
+                undefined,
+                FailedCode.CONVERSION_ERROR,
             );
         }
     }
@@ -58,6 +82,16 @@ export abstract class BaseConverter {
      */
     protected nextSeq(): number {
         return ++this.seq;
+    }
+
+    /**
+     * 本次转换里记录中 stop_reason 的来源；null = 本转换器尚未走到能确定的收尾点
+     * （或该转换器/该路径不涉及 stop_reason 合成）。
+     *
+     * 只给收尾记账用，不参与任何响应输出。
+     */
+    public getStopReasonSource(): StopReasonSource | null {
+        return this.stopReasonSource;
     }
 
     /**

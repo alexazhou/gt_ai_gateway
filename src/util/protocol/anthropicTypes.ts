@@ -52,7 +52,7 @@ export interface AnthropicRequest {
     stop_sequences?: string[];
     tools?: AnthropicTool[];
     tool_choice?: {
-        type: "auto" | "any" | "tool";
+        type: "auto" | "any" | "none" | "tool";
         name?: string;
     };
     thinking?: AnthropicThinkingConfig;

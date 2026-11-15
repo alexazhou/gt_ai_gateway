@@ -74,6 +74,6 @@ describe("runInBackgroundUtil", () => {
         // Wait a microtask to ensure the catch block executes
         await new Promise(resolve => setTimeout(resolve, 0));
 
-        expect(consoleErrorSpy).toHaveBeenCalledWith("[runInBackground] Error in background task:", error);
+        expect(consoleErrorSpy).toHaveBeenCalledWith("[runInBackground] Background task failed:", error);
     });
 });

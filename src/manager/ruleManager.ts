@@ -29,8 +29,14 @@ function notifyInvalidate(): void {
 
 
 // 「本租户规则 ∪ main 租户共享规则」候选条件
-function ruleScopeCondition(tenantId: number, mainTenantId: number): string {
-    return `(tenant_id = ${Number(tenantId)} OR (tenant_id = ${Number(mainTenantId)} AND cross_tenant = 1))`;
+//
+// P2-08：原来把 tenantId / mainTenantId 内联进 SQL 模板串（当前值都是经解析的整数，不可注入，
+// 但这是「靠调用方保证安全」的写法，一旦上游多传个 string 就成了注入面）。改参数绑定，
+// 由驱动负责转义，安全性不再依赖调用约定。
+const RULE_SCOPE_SQL = "(tenant_id = ? OR (tenant_id = ? AND cross_tenant = 1))";
+
+function ruleScopeBindings(tenantId: number, mainTenantId: number): number[] {
+    return [Number(tenantId), Number(mainTenantId)];
 }
 
 
@@ -38,7 +44,7 @@ function ruleScopeCondition(tenantId: number, mainTenantId: number): string {
 async function listEnabled(tenantId: number, mainTenantId: number): Promise<SgRule[]> {
     const rules = await SgRule.query()
         .where("enabled", 1)
-        .whereRaw(ruleScopeCondition(tenantId, mainTenantId))
+        .whereRaw(RULE_SCOPE_SQL, ruleScopeBindings(tenantId, mainTenantId))
         .get();
     return rules.all();
 }
@@ -52,7 +58,7 @@ async function findById(ruleId: number): Promise<SgRule | null> {
 async function findByIdInTenant(ruleId: number, tenantId: number, mainTenantId: number): Promise<SgRule | null> {
     return await SgRule.query()
         .where("id", ruleId)
-        .whereRaw(ruleScopeCondition(tenantId, mainTenantId))
+        .whereRaw(RULE_SCOPE_SQL, ruleScopeBindings(tenantId, mainTenantId))
         .first();
 }
 
@@ -60,7 +66,7 @@ async function findByIdInTenant(ruleId: number, tenantId: number, mainTenantId: 
 async function listRules(options: RuleListOptions, scope?: TenantScope) {
     const query = SgRule.query().orderBy("id", "desc");
     if (scope) {
-        query.whereRaw(ruleScopeCondition(scope.tenantId, scope.mainTenantId));
+        query.whereRaw(RULE_SCOPE_SQL, ruleScopeBindings(scope.tenantId, scope.mainTenantId));
     }
     if (options.keyword) {
         query.where("name", "like", `%${options.keyword}%`);

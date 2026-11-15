@@ -19,7 +19,7 @@ import {
     buildThinkingConfigFromAnthropic,
     thinkingConfigToOpenAI,
 } from "./thinkingConfig";
-import protocolConverterUtil from "./protocolConverterUtil";
+import protocolConverterUtil, { type RawOpenAIUsage } from "./protocolConverterUtil";
 
 const OPENAI_TO_ANTHROPIC_STOP_REASON: Record<string, string> = {
     stop: "end_turn",
@@ -35,36 +35,30 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
     private isFirstChunk = true;
     private pendingStopReason: string | null = null;
     /**
-     * 累积的最终 usage(openai 可能把 usage 拆到多个 chunk,缓存在末尾的 usage-only chunk 才出现,
-     * 因此只有等到 [DONE] 才能拿到完整 usage)。统一在 handleDoneEvent 时聚合并发出。
+     * 当前是否有一个 content block 处于「已 start、未 stop」的状态。
+     *
+     * Anthropic 的流是「start → delta* → stop」的块生命周期，块之间**必须**成对收口，
+     * index 也必须唯一（客户端按 index 反查块：官方 SDK 用 `content.at(index)`）。
+     * 之前靠 `sentFirstChunk || hasYieldedThinking` 判断「要不要先收口」，漏掉了
+     * 「上一个块是 tool_use」的情形 —— 并行 tool_call 时两个块共用同一 index 且中间没有 stop，
+     * 客户端会把后一个工具的参数拼到前一个工具上（见 #246）。
      */
-    private pendingUsage: { inputTokens: number; outputTokens: number; cacheReadTokens: number } | null = null;
+    private blockOpen = false;
+    /**
+     * 累积的原始 OpenAI usage（openai 可能把 usage 拆到多个 chunk，缓存在末尾的 usage-only chunk 才出现，
+     * 因此只有等到 [DONE] 才能拿到完整 usage）。逐字段保存原始值，统一在 handleDoneEvent 时派生 Anthropic 字段。
+     */
+    private rawUsage: RawOpenAIUsage | null = null;
 
     /**
-     * 累积一次 openai usage 到 pendingUsage,后到的 chunk 字段优先。
-     * input_tokens 归一化为非缓存部分 = prompt_tokens - cached_tokens。
+     * 累积一次 openai usage 到 rawUsage，后到的 chunk 字段优先，显式 0 覆盖旧值。
      */
     private accumulateUsage(chunk: OpenAIChunk): void {
-        const usage = chunk.usage as (Record<string, unknown> & {
-            prompt_tokens?: number;
-            completion_tokens?: number;
-            prompt_tokens_details?: { cached_tokens?: number };
-        }) | undefined;
-        if (!usage) return;
-
-        const cachedTokens = usage.prompt_tokens_details?.cached_tokens;
-        if (!this.pendingUsage) {
-            this.pendingUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
+        if (!chunk.usage) return;
+        if (!this.rawUsage) {
+            this.rawUsage = {};
         }
-        if (usage.prompt_tokens !== undefined) {
-            this.pendingUsage.inputTokens = Math.max(0, (usage.prompt_tokens || 0) - (cachedTokens || 0));
-        }
-        if (usage.completion_tokens !== undefined) {
-            this.pendingUsage.outputTokens = usage.completion_tokens || 0;
-        }
-        if (cachedTokens !== undefined) {
-            this.pendingUsage.cacheReadTokens = cachedTokens;
-        }
+        protocolConverterUtil.mergeOpenAIUsage(this.rawUsage, chunk.usage);
     }
 
 
@@ -179,6 +173,9 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                 case "any":
                     openaiToolChoice = "required";
                     break;
+                case "none":
+                    openaiToolChoice = "none";
+                    break;
                 case "tool":
                     openaiToolChoice = {
                         type: "function",
@@ -283,7 +280,11 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
             contentBlocks.push({ type: "text", text: "" });
         }
 
-        const stopReason = OPENAI_TO_ANTHROPIC_STOP_REASON[upstreamRes.choices[0]?.finish_reason || "stop"] || "end_turn";
+        const upstreamFinishReason = upstreamRes.choices[0]?.finish_reason ?? null;
+        const stopReason = OPENAI_TO_ANTHROPIC_STOP_REASON[upstreamFinishReason || "stop"] || "end_turn";
+        // 来源标记：上游给了 finish_reason 才算 upstream；缺失时下面的 `|| "stop"` 与
+        // 映射默认值都是我方补的，记 synthesized（只用于记账，不影响输出取值）。
+        this.stopReasonSource = upstreamFinishReason ? "upstream" : "synthesized";
         const finalId = requestId || upstreamRes.id;
 
         return {
@@ -293,10 +294,9 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
             content: contentBlocks,
             model: upstreamRes.model,
             stop_reason: stopReason as AnthropicResponse["stop_reason"],
-            usage: {
-                input_tokens: upstreamRes.usage?.prompt_tokens || 0,
-                output_tokens: upstreamRes.usage?.completion_tokens || 0,
-            },
+            usage: protocolConverterUtil.openAIUsageToAnthropic(
+                protocolConverterUtil.mergeOpenAIUsage({}, upstreamRes.usage),
+            ),
         };
     }
 
@@ -312,26 +312,40 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
         // [DONE] 是上游 openai 流的明确收尾标记,此时所有 usage chunk(含缓存在内的
         // 尾随 usage-only chunk)一定都已到达,统一在这里聚合发出最终的
         // message_delta(携带累积的 usage)+ message_stop。
-        const usage = this.pendingUsage ?? { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
+        const usage = protocolConverterUtil.openAIUsageToAnthropic(this.rawUsage ?? {});
+        // 来源标记：pendingStopReason 非空 = 上游给过 finish_reason（值经映射表换算）；
+        // 为空 = 上游漏发收尾信号，下面的 `?? "end_turn"` 是我方兜底（#246 的 D2 路径）。
+        this.stopReasonSource = this.pendingStopReason !== null ? "upstream" : "synthesized";
         const stopReason = this.pendingStopReason ?? "end_turn";
-        const events: AnthropicSSEEvent[] = [
+        const events: AnthropicSSEEvent[] = [];
+
+        // 上游可能不给 finish_reason 就直接 [DONE]（兼容上游确实这么干）：此时块还开着，
+        // 规范流程要求 message_delta / message_stop 之前所有块都已 content_block_stop。
+        if (this.blockOpen) {
+            events.push({
+                event: "content_block_stop",
+                data: JSON.stringify({
+                    type: "content_block_stop",
+                    index: this.contentBlockIndex,
+                }),
+            });
+            this.blockOpen = false;
+        }
+
+        events.push(
             {
                 event: "message_delta",
                 data: JSON.stringify({
                     type: "message_delta",
                     delta: { stop_reason: stopReason, stop_sequence: null },
-                    usage: {
-                        input_tokens: usage.inputTokens,
-                        output_tokens: usage.outputTokens,
-                        ...(usage.cacheReadTokens ? { cache_read_input_tokens: usage.cacheReadTokens } : {}),
-                    },
+                    usage,
                 }),
             },
             {
                 event: "message_stop",
                 data: JSON.stringify({ type: "message_stop" }),
             },
-        ];
+        );
         this.pendingStopReason = null;
         return events;
     }
@@ -384,6 +398,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                             content_block: { type: "thinking", thinking: "" },
                         }),
                     });
+                    this.blockOpen = true;
                 }
                 events.push({
                     event: "content_block_delta",
@@ -405,6 +420,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                                 index: this.contentBlockIndex,
                             }),
                         });
+                        this.blockOpen = false;
                         this.contentBlockIndex++;
                     }
 
@@ -417,6 +433,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                             content_block: { type: "text", text: "" },
                         }),
                     });
+                    this.blockOpen = true;
                 }
 
                 events.push({
@@ -435,7 +452,9 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                     const isNewToolCall = tc.id && tc.id !== this.currentToolCallId;
 
                     if (isNewToolCall) {
-                        if (this.sentFirstChunk || this.hasYieldedThinking) {
+                        // 上一个块（文本 / thinking / **上一个 tool_use**）必须成对收口，再开新块；
+                        // 否则并行 tool_call 会共用同一 index（客户端按 index 反查块，参数会串到别的工具上）。
+                        if (this.blockOpen) {
                             events.push({
                                 event: "content_block_stop",
                                 data: JSON.stringify({
@@ -443,6 +462,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                                     index: this.contentBlockIndex,
                                 }),
                             });
+                            this.blockOpen = false;
                             this.contentBlockIndex++;
                             this.sentFirstChunk = false;
                             this.hasYieldedThinking = false;
@@ -462,6 +482,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                                 },
                             }),
                         });
+                        this.blockOpen = true;
                     }
 
                     if (tc.function?.arguments) {
@@ -481,7 +502,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
             }
 
             if (chunk.choices[0].finish_reason) {
-                if (this.sentFirstChunk || this.currentToolCallId || this.hasYieldedThinking) {
+                if (this.blockOpen) {
                     events.push({
                         event: "content_block_stop",
                         data: JSON.stringify({
@@ -489,20 +510,20 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                             index: this.contentBlockIndex,
                         }),
                     });
+                    this.blockOpen = false;
                 }
 
                 const stopReason = OPENAI_TO_ANTHROPIC_STOP_REASON[chunk.choices[0].finish_reason] || "end_turn";
 
-                // 只记录 stop_reason 并累积 usage;message_delta/message_stop 统一在
+                // 只记录 stop_reason; message_delta/message_stop 统一在
                 // [DONE] 时聚合发出(避免像 deepseek 那样把最终 usage、缓存拆到
                 // finish_reason 之后的 choices:[] 尾随 chunk 时被过早发出的 message_stop 丢掉)
                 this.pendingStopReason = stopReason;
-                this.accumulateUsage(chunk);
             }
         }
 
-        // 尾随的纯 usage chunk(choices=[]):无条件累积,不再依赖 pendingStopReason
-        if ((!chunk.choices || chunk.choices.length === 0) && chunk.usage) {
+        // 任何 chunk 携带 usage（含与 finish_reason 同帧或尾随 choices=[]）都累积原始字段
+        if (chunk.usage) {
             this.accumulateUsage(chunk);
         }
 

@@ -137,6 +137,8 @@ async function status(c: Context) {
             status: "ok",
             mode: ormService.mode,
             user_type: c.get("user_type"),
+            // 系统管理员（root，或归属 main 租户的 admin）：前端据此显示租户管理 / 视角切换 / 多租户开关
+            is_system_admin: c.get("tenantScope")?.isSystemAdmin ?? false,
             // 调用方用户 id（root 为 ROOT_USER_ID）：前端据此判断「正在编辑自己」等场景
             user_id: user?.id ?? null,
             // 调用方用户名，前端顶栏展示（root 为 "Root"）

@@ -70,7 +70,7 @@ export type OpenAIContentPart =
     | { type: "image_url"; image_url: { url: string; detail?: string } };
 
 export interface OpenAIMessage {
-    role: "system" | "user" | "assistant" | "tool";
+    role: "system" | "developer" | "user" | "assistant" | "tool";
     content?: string | OpenAIContentPart[] | null;
     reasoning_content?: string | null;
     name?: string;

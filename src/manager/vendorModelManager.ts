@@ -23,6 +23,23 @@ async function findByVendorAndModel(vendorId: number, modelId: string | null): P
 }
 
 /**
+ * 批量取「若干 vendor 下、model_id 等于给定模型名」的记录（P2-09 选路批量化）。
+ *
+ * 选路时每个上游都要按模型名找一次 vendor_model，逐个 `findByVendorAndModel` 就是 N 次查询；
+ * 这里一次 whereIn 拿全，调用方自己建 map。
+ */
+async function listByVendorsAndModel(vendorIds: number[], modelId: string | null): Promise<SgVendorModel[]> {
+    if (vendorIds.length === 0 || modelId === null) {
+        return [];
+    }
+    return (await SgVendorModel.query()
+        .whereIn("vendor_id", vendorIds)
+        .where("model_id", modelId)
+        .get()).all();
+}
+
+
+/**
  * 直接插入一条 vendor model（不做重复检查，供路由自动补全等场景使用）。
  */
 async function create(vendorId: number, modelId: string): Promise<SgVendorModel> {
@@ -128,6 +145,7 @@ export default {
     listByVendor,
     findById,
     findByVendorAndModel,
+    listByVendorsAndModel,
     create,
     syncByVendor,
     add,

@@ -3,7 +3,7 @@ import { SgRecord } from "../model/sgRecord";
 import recordManager from "../manager/recordManager";
 import recordService from "../service/recordService";
 import configService from "../service/configService";
-import { ConfigKey } from "../constants";
+import { ConfigKey, UserType } from "../constants";
 import { parsePaginationQuery } from "../util/paginationUtil";
 import customError from "../customError";
 
@@ -132,15 +132,15 @@ async function recoverOrphans(c: Context) {
     return c.json({ success: true, recovered });
 }
 
-// 清理悬空数据（孤儿 payload / activity）root 专用：非 root 一律 403
+// 清理悬空数据（孤儿 payload / activity）root 专用：非 root（含 main 租户 admin）一律 403
 //
-// 注意用 `tenantScope.isRoot` 而不是 `c.get("user_type")`：`/record/*` 已挂
-// `tenantScopeMiddleware.requireTenantAdmin`，它先注入 `user`，路由上的
-// `authMiddleware.requireAdmin` 看到 `user` 已存在就短路返回，**不会**再 set `user_type`。
-// 用 `user_type` 判断在 /record 下恒为 undefined，会把 root 一起挡掉。
+// 注意用 `c.get("user")?.type` 而不是 `c.get("user_type")` 或 `tenantScope.isSystemAdmin`：
+// 1. `/record/*` 已挂 `tenantScopeMiddleware.requireTenantAdmin`，它先注入 `user`，路由上的
+//    `authMiddleware.requireAdmin` 看到 `user` 已存在就短路返回，**不会**再 set `user_type`；
+// 2. `tenantScope.isSystemAdmin` 会放行 main 租户的 admin，而全局悬空清理必须严格限制为 root。
 function assertRoot(c: Context): void {
-    const scope = c.get("tenantScope");
-    if (!scope?.isRoot) {
+    const user = c.get("user");
+    if (user?.type !== UserType.ROOT) {
         throw new customError.AppError("Root access required", 403);
     }
 }

@@ -1,0 +1,388 @@
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { fetch } from "undici";
+import requestHelper from "../../helpers/requestHelper";
+import mockHelper from "../../helpers/mockHelper";
+import dbHelper from "../../helpers/dbHelper";
+import { setupAdminUser } from "../../globalSetup";
+import modelFixtures from "../../fixtures/modelFixtures";
+import config from "../../config";
+
+/**
+ * 批次 4 的 P2 清理项验收门：
+ * - P2-02 上游返回「非 200 的 2xx」（201/204）要算成功并正常计费（原来按 `status === 200` 判，漏计费）
+ * - P2-03 LLM 请求体超 32MB → 413（原来 `c.req.text()` 无上限，能把 isolate 内存吃爆）
+ * - P2-04/06 兜底 500 只回通用文案 + request_id，不泄漏内部异常串
+ * - P2-05 客户端 `anthropic-version` 透传，缺失回落默认值
+ * - P2-15 拉上游模型列表：非 2xx 只回状态码（不带上游 body），上游不响应时 10s 超时
+ */
+
+const MOCK_BASE = config.UPSTREAM_CONFIG.mock.url;
+
+let adminToken: string;
+let userToken: string;
+let userId: number;
+
+async function captureMockRequests(): Promise<any[]> {
+    const response = await fetch(`${MOCK_BASE}/_test/requests`);
+    return (await response.json()) as any[];
+}
+
+async function createOpenAiVendorAndModel(
+    suffix: string,
+    prices: Record<string, number> = {},
+): Promise<{ vendorId: number; modelName: string; modelId: number }> {
+    const vendor = await requestHelper.post(
+        "/vendor/create.json",
+        {
+            type: "openai",
+            name: `p2-vendor-${suffix}-${Date.now()}`,
+            token: "sk-p2-cleanup",
+            urls: { openai: `${MOCK_BASE}/chat/completions/${suffix}` },
+        },
+        adminToken,
+    );
+    expect(vendor.status).toBe(200);
+
+    const modelName = `p2-model-${suffix}-${Date.now()}`;
+    const model = await requestHelper.post(
+        "/model/create.json",
+        { ...modelFixtures.createRandomModel(vendor.body.id, modelName), prices },
+        adminToken,
+    );
+    expect(model.status, `创建 model 失败: ${JSON.stringify(model.body)}`).toBe(200);
+
+    return { vendorId: vendor.body.id, modelName, modelId: model.body.id };
+}
+
+async function latestRecordByModel(modelId: number, timeoutMs = 10_000): Promise<any> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+        const res = await requestHelper.get("/record/latest.json?limit=10", adminToken);
+        const mine = (Array.isArray(res.body) ? res.body : []).find((r: any) => r.model_id === modelId);
+        if (mine && mine.status !== "processing") return mine;
+        if (Date.now() >= deadline) return mine ?? null;
+        await new Promise((r) => setTimeout(r, 150));
+    }
+}
+
+describe("批次 4 P2 清理项", () => {
+    beforeAll(async () => {
+        await dbHelper.truncate();
+        adminToken = await setupAdminUser();
+        const user = await requestHelper.post("/user/create.json", mockHelper.generateUser(), adminToken);
+        userToken = user.body.token;
+        userId = user.body.id;
+        // 计费用例需要余额：余额不足会直接 400 Insufficient balance，测不到 2xx 判定
+        await dbHelper.execute(`UPDATE user SET balance = 100 WHERE id = ${userId}`);
+    }, 60000);
+
+    describe("P2-02 非 200 的 2xx 计费与状态", () => {
+        it("上游返回 201 + usage：记录 success 且计费（cost > 0）", async () => {
+            // 必须给定价，否则 cost 天然为 0（价格单位：每百万 token）
+            const { modelName, modelId } = await createOpenAiVendorAndModel("status-201", {
+                input: 30,
+                output: 60,
+            });
+
+            const response = await requestHelper.post(
+                "/llm/v1/chat/completions",
+                { model: modelName, messages: [{ role: "user", content: "hi" }] },
+                userToken,
+            );
+            expect(response.status).toBe(201);
+
+            const record = await latestRecordByModel(modelId);
+            expect(record, "记录应已落库").toBeTruthy();
+            expect(record.status, "201 是成功响应，不能记 FAILED").toBe("success");
+            expect(record.failed_code).toBeNull();
+            expect(Number(record.cost), "2xx 必须计费，不能因为不是 200 就漏计").toBeGreaterThan(0);
+            // usage 应从上游 body 里解析出来（存储口径无 total_tokens 字段，按 prompt+completion 判定）
+            const usage = typeof record.usage === "string" ? JSON.parse(record.usage) : record.usage;
+            expect(usage, "usage 应随记录落库").toBeTruthy();
+            const promptTokens = Number(usage.prompt_tokens ?? 0);
+            const completionTokens = Number(usage.completion_tokens ?? 0);
+            expect(promptTokens + completionTokens, `usage 解析异常: ${JSON.stringify(usage)}`).toBeGreaterThan(0);
+        });
+
+        // P2-02 已修（65f9b05）：无 body 状态码（204/205/304/1xx）在「非 JSON body」与「!ok」
+        // 两个分支之前统一前置收口，不再用空串构造 204 响应。原 it.fails 看门狗已转正式断言。
+        it("上游返回 204（无 body）：记录 success，cost 为 0 但不记失败", async () => {
+            const { modelName, modelId } = await createOpenAiVendorAndModel("status-204");
+
+            const response = await fetch(`${config.SERVER_CONFIG.baseUrl}/llm/v1/chat/completions`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${userToken}` },
+                body: JSON.stringify({ model: modelName, messages: [{ role: "user", content: "hi" }] }),
+            });
+            expect(response.status).toBe(204);
+
+            const record = await latestRecordByModel(modelId);
+            expect(record, "记录应已落库").toBeTruthy();
+            expect(record.status, "204 是成功响应，不能记 FAILED").toBe("success");
+            expect(record.failed_code).toBeNull();
+            expect(Number(record.cost ?? 0), "没有 usage 时 cost 记 0").toBe(0);
+        });
+
+        // 205 与 204 同属「2xx 但不允许带体」，走同一个前置收口分支
+        it("上游返回 205（无 body）：同样是 success 且 cost 为 0", async () => {
+            const { modelName, modelId } = await createOpenAiVendorAndModel("status-205");
+
+            const response = await requestHelper.post(
+                "/llm/v1/chat/completions",
+                { model: modelName, messages: [{ role: "user", content: "hi" }] },
+                userToken,
+            );
+            expect(response.status, "205 必须原样透传，不能变成 500").toBe(205);
+
+            const record = await latestRecordByModel(modelId);
+            expect(record, "记录应已落库").toBeTruthy();
+            expect(record.status, "205 是成功响应").toBe("success");
+            expect(record.failed_code).toBeNull();
+            expect(Number(record.cost ?? 0)).toBe(0);
+        });
+
+        // 304 属于非成功但同样不允许带体：修复前它落在 `!upstreamRes.ok` 分支，
+        // 同一个 TypeError（用空串构造 304 响应）换个入口复现 → 500。
+        it("上游返回 304（无 body）：客户端拿到 304，记录 failed(upstream_error) 且不 500", async () => {
+            const { modelName, modelId } = await createOpenAiVendorAndModel("status-304");
+
+            const response = await requestHelper.post(
+                "/llm/v1/chat/completions",
+                { model: modelName, messages: [{ role: "user", content: "hi" }] },
+                userToken,
+            );
+            expect(response.status, "304 必须原样透传，不能变成 500").toBe(304);
+
+            const record = await latestRecordByModel(modelId);
+            expect(record, "记录应已落库").toBeTruthy();
+            expect(record.status, "304 不是成功响应").toBe("failed");
+            expect(record.failed_code).toBe("upstream_error");
+            expect(Number(record.cost ?? 0)).toBe(0);
+        });
+    });
+
+    describe("P2-03 请求体上限（配置项 llm_max_body_bytes）", () => {
+        const LIMIT = 1024;
+        const setBodyLimit = async (bytes: number) => {
+            const res = await requestHelper.put("/config.json", { llm_max_body_bytes: String(bytes) }, adminToken);
+            expect(res.status, `设置 llm_max_body_bytes 失败: ${JSON.stringify(res.body)}`).toBe(200);
+        };
+
+        afterEach(async () => {
+            // 恢复默认 32MB，避免污染后续用例
+            await setBodyLimit(32 * 1024 * 1024);
+        });
+
+        it("声明长度超上限：不读 body 直接 413（快速路径）", async () => {
+            await setBodyLimit(LIMIT);
+            const payload = JSON.stringify({
+                model: "whatever",
+                messages: [{ role: "user", content: "x".repeat(4096) }],
+            });
+            const response = await fetch(`${config.SERVER_CONFIG.baseUrl}/llm/v1/chat/completions`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${userToken}` },
+                body: payload,
+            });
+            expect(response.status, "超限请求体必须 413").toBe(413);
+            expect(await response.text()).toContain("too large");
+        });
+
+        it("chunked（无 content-length）超上限：按实读长度兜底 413", async () => {
+            await setBodyLimit(LIMIT);
+            const bytes = new TextEncoder().encode(JSON.stringify({
+                model: "whatever",
+                messages: [{ role: "user", content: "y".repeat(4096) }],
+            }));
+            const stream = new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(bytes);
+                    controller.close();
+                },
+            });
+            // 用流式 body 发请求（无 content-length，走 chunked）；duplex 是 undici 的流式 body 必需项，
+            // 而 undici 的 RequestInit 与 DOM 的 RequestInit 在 ReadableStream 上类型不兼容，这里显式放宽
+            const init: Record<string, unknown> = {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${userToken}` },
+                body: stream,
+                duplex: "half",
+            };
+            const response = await fetch(
+                `${config.SERVER_CONFIG.baseUrl}/llm/v1/chat/completions`,
+                init as unknown as Parameters<typeof fetch>[1],
+            );
+            expect(response.status, "分块传输必须走实读长度兜底").toBe(413);
+            expect(await response.text()).toContain("too large");
+        });
+    });
+
+    describe("P2-04/06 兜底 500 不泄漏内部细节", () => {
+        it("内部异常导致 500 时只回通用文案，不含异常串/堆栈/文件路径", async () => {
+            // 顺带覆盖 P2-26 的入口清洗：update 路径同一套 fill 逻辑
+            const vendor = await requestHelper.post(
+                "/vendor/create.json",
+                {
+                    type: "openai",
+                    name: `p2-500-vendor-${Date.now()}`,
+                    token: "sk-p2-500",
+                    urls: { openai: `${MOCK_BASE}/chat/completions` },
+                },
+                adminToken,
+            );
+            const model = await requestHelper.post(
+                "/model/create.json",
+                modelFixtures.createRandomModel(vendor.body.id, `p2-500-model-${Date.now()}`),
+                adminToken,
+            );
+            expect(model.status).toBe(200);
+
+            const body = JSON.parse(
+                JSON.stringify({
+                    name: "x",
+                    enable: true,
+                    prices: {},
+                    routing_mode: model.body.routing_mode,
+                    routing_config: model.body.routing_config,
+                    __proto__: { polluted: "yes" },
+                }),
+            );
+
+            const response = await requestHelper.put(`/model/${model.body.id}`, body, adminToken);
+
+            // P2-26 已修（请求体键名清洗）：危险键被剔除，不再抛内部 TypeError
+            const serialized = JSON.stringify(response.body);
+            expect(serialized).not.toContain("toLocaleLowerCase");
+            expect(serialized).not.toContain("castType");
+            expect(serialized).not.toContain("TypeError");
+            expect(serialized).not.toMatch(/\/Users\/|\.ts:\d+/);
+            expect([200, 201, 400, 422], `危险键应被清洗而不是 500，实际 ${response.status}`)
+                .toContain(response.status);
+            // 顺带确认没有把 __proto__ 写进模型（原型链未被污染）
+            expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        });
+
+        // P2-26 另一处入口：厂商创建同样走 Sutando fill()，同一个根因（见 inputSanitizeUtil）
+        it("POST /vendor/create.json 带 __proto__ / constructor 时静默忽略，不报错也不污染原型", async () => {
+            // 必须用 JSON.parse 造体：对象字面量里的 __proto__ 只会改原型，不是自有属性
+            const payload = JSON.parse(`{
+                "type": "openai",
+                "name": "p2-proto-vendor-${Date.now()}",
+                "token": "sk-p2-proto",
+                "urls": { "openai": "${MOCK_BASE}/chat/completions" },
+                "__proto__": { "polluted": "yes" },
+                "constructor": { "prototype": { "polluted_nested": "yes" } },
+                "prototype": { "polluted_flat": "yes" }
+            }`);
+
+            const response = await requestHelper.post("/vendor/create.json", payload, adminToken);
+            expect(response.status, `危险键应被清洗而不是 500: ${JSON.stringify(response.body)}`).toBe(200);
+            expect(JSON.stringify(response.body)).not.toContain("TypeError");
+
+            const plain: Record<string, unknown> = {};
+            expect(plain.polluted, "__proto__ 键不得污染 Object.prototype").toBeUndefined();
+            expect(plain.polluted_nested).toBeUndefined();
+            expect(plain.polluted_flat).toBeUndefined();
+            expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+
+            if (response.body?.id != null) {
+                await requestHelper.del(`/vendor/${response.body.id}`, adminToken);
+            }
+        });
+    });
+
+    describe("P2-05 anthropic-version 透传", () => {
+        it("客户端传的 anthropic-version 原样透传给上游", async () => {
+            const vendor = await requestHelper.post(
+                "/vendor/create.json",
+                {
+                    type: "anthropic",
+                    name: `p2-anthropic-${Date.now()}`,
+                    token: "sk-ant-p2",
+                    urls: { anthropic: `${MOCK_BASE}/messages` },
+                    // 显式指定 x-api-key 鉴权：anthropic-version 只在 x-api-key 模式下由实现写入
+                    config: { auth_mode: "x_api_key" },
+                },
+                adminToken,
+            );
+            expect(vendor.status).toBe(200);
+            const modelName = `p2-anthropic-model-${Date.now()}`;
+            const model = await requestHelper.post(
+                "/model/create.json",
+                modelFixtures.createRandomModel(vendor.body.id, modelName),
+                adminToken,
+            );
+            expect(model.status, `创建 anthropic model 失败: ${JSON.stringify(model.body)}`).toBe(200);
+
+            const response = await fetch(`${config.SERVER_CONFIG.baseUrl}/llm/v1/messages`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-api-key": userToken,
+                    "anthropic-version": "2024-06-01",
+                },
+                body: JSON.stringify({
+                    model: modelName,
+                    max_tokens: 16,
+                    messages: [{ role: "user", content: "hi" }],
+                }),
+            });
+            expect(response.status).toBe(200);
+
+            const requests = await captureMockRequests();
+            // 必须按模型名过滤：mock 的 /_test/requests 是跨用例累积的，只按 path 找会命中历史请求
+            const mine = [...requests]
+                .reverse()
+                .find((r) => r.url.includes("/messages") && r.json?.model === modelName);
+            expect(mine, "mock 应收到上游 messages 请求").toBeTruthy();
+            const headers = mine.headers;
+            expect(headers["anthropic-version"], "客户端版本号必须透传").toBe("2024-06-01");
+        });
+    });
+
+    describe("P2-15 拉取上游模型列表", () => {
+        it("上游 5xx 时只回状态码，不回传上游 body 里的内部线索", async () => {
+            const vendor = await requestHelper.post(
+                "/vendor/create.json",
+                {
+                    type: "openai",
+                    name: `p2-models-fail-${Date.now()}`,
+                    token: "sk-p2-models-fail",
+                    urls: { openai: `${MOCK_BASE}/models-fail/chat/completions` },
+                },
+                adminToken,
+            );
+            expect(vendor.status).toBe(200);
+
+            const response = await requestHelper.get(`/vendor/${vendor.body.id}/model/fetch.json`, adminToken);
+
+            expect(response.status).not.toBe(200);
+            const serialized = JSON.stringify(response.body);
+            expect(serialized).toContain("500");
+            expect(serialized, "不得回传上游 body 中的内部线索").not.toContain("INTERNAL_SECRET");
+            expect(serialized).not.toContain("letmein");
+        }, 30000);
+
+        it("上游不响应时在 10s 内超时失败，不会一直挂着", async () => {
+            const vendor = await requestHelper.post(
+                "/vendor/create.json",
+                {
+                    type: "openai",
+                    name: `p2-models-hang-${Date.now()}`,
+                    token: "sk-p2-models-hang",
+                    urls: { openai: `${MOCK_BASE}/models-hang/chat/completions` },
+                },
+                adminToken,
+            );
+            expect(vendor.status).toBe(200);
+
+            const startedAt = Date.now();
+            const response = await requestHelper.get(`/vendor/${vendor.body.id}/model/fetch.json`, adminToken);
+            const elapsed = Date.now() - startedAt;
+
+            expect(response.status).not.toBe(200);
+            expect(elapsed, `必须在上游超时阈值内返回（实测 ${elapsed}ms）`).toBeLessThan(15_000);
+            expect(JSON.stringify(response.body).toLowerCase()).toContain("timeout");
+        }, 40000);
+    });
+});

@@ -798,6 +798,7 @@ describe("ResponsesToOpenAIConverter", () => {
                 },
             };
             events.push(...streamConverter.convertStreamEvent(JSON.stringify(chunk4)));
+            events.push(...streamConverter.convertStreamEvent("[DONE]"));
 
             // 验证事件
             const eventTypes = events.map((e) => JSON.parse(e.data).type);
@@ -894,6 +895,7 @@ describe("ResponsesToOpenAIConverter", () => {
                 }],
             };
             events.push(...streamConverter.convertStreamEvent(JSON.stringify(chunk4)));
+            events.push(...streamConverter.convertStreamEvent("[DONE]"));
 
             // usage 帧
             const chunk5: OpenAIChunk = {
@@ -909,6 +911,7 @@ describe("ResponsesToOpenAIConverter", () => {
                 },
             };
             events.push(...streamConverter.convertStreamEvent(JSON.stringify(chunk5)));
+            events.push(...streamConverter.convertStreamEvent("[DONE]"));
 
             // 验证 response.completed 的内容
             const completedEvent = events.find((e) => JSON.parse(e.data).type === "response.completed");
@@ -979,15 +982,16 @@ describe("ResponsesToOpenAIConverter", () => {
                 },
             };
             events.push(...streamConverter.convertStreamEvent(JSON.stringify(chunk4)));
+            events.push(...streamConverter.convertStreamEvent("[DONE]"));
 
             // 验证 response.completed 的内容
             const completedEvent = events.find((e) => JSON.parse(e.data).type === "response.completed");
             const completedData = JSON.parse(completedEvent.data);
             expect(completedData.response.output).toHaveLength(2);
-            expect(completedData.response.output[0].type).toBe("message");
-            expect(completedData.response.output[0].content[0].text).toBe("The answer is 42.");
-            expect(completedData.response.output[1].type).toBe("reasoning");
-            expect(completedData.response.output[1].summary[0].text).toBe("Let me think...");
+            expect(completedData.response.output[0].type).toBe("reasoning");
+            expect(completedData.response.output[0].summary[0].text).toBe("Let me think...");
+            expect(completedData.response.output[1].type).toBe("message");
+            expect(completedData.response.output[1].content[0].text).toBe("The answer is 42.");
         });
 
         it("should generate response.completed on [DONE] when no usage frame received", () => {
@@ -1053,7 +1057,7 @@ describe("ResponsesToOpenAIConverter", () => {
             expect(completedData.response.output[0].content[0].text).toBe("Hi");
         });
 
-        it("should generate response.completed when usage is combined with finish_reason frame", () => {
+        it("should allow trailing cache usage after finish + usage frame and complete on [DONE]", () => {
             const streamConverter = new ResponsesToOpenAIConverter("gpt-4");
             const events: any[] = [];
 
@@ -1083,14 +1087,30 @@ describe("ResponsesToOpenAIConverter", () => {
                     finish_reason: "stop",
                 }],
                 usage: {
-                    prompt_tokens: 10,
+                    prompt_tokens: 100,
                     completion_tokens: 5,
-                    total_tokens: 15,
+                    total_tokens: 105,
                 },
             };
             events.push(...streamConverter.convertStreamEvent(JSON.stringify(chunk2)));
 
-            // 应该已经有 response.completed（不需要 [DONE]）
+            // 此时尚未收到 [DONE] 或 EOF，不应提前关闭流，以便继续接收尾随缓存明细
+            expect(events.some((e) => JSON.parse(e.data).type === "response.completed")).toBe(false);
+
+            // 尾随缓存明细 chunk
+            const chunk3: OpenAIChunk = {
+                id: "chatcmpl-123",
+                object: "chat.completion.chunk",
+                created: 1234567890,
+                model: "gpt-4",
+                choices: [],
+                usage: {
+                    prompt_tokens_details: { cached_tokens: 90 },
+                } as any,
+            };
+            events.push(...streamConverter.convertStreamEvent(JSON.stringify(chunk3)));
+            events.push(...streamConverter.convertStreamEvent("[DONE]"));
+
             const eventTypes = events.map((e) => {
                 try {
                     return JSON.parse(e.data).type;
@@ -1112,8 +1132,10 @@ describe("ResponsesToOpenAIConverter", () => {
             expect(completedData.response.output).toHaveLength(1);
             expect(completedData.response.output[0].type).toBe("message");
             expect(completedData.response.output[0].content[0].text).toBe("Hello!");
-            expect(completedData.response.usage.input_tokens).toBe(10);
+            expect(completedData.response.usage.input_tokens).toBe(100);
+            expect(completedData.response.usage.input_tokens_details.cached_tokens).toBe(90);
             expect(completedData.response.usage.output_tokens).toBe(5);
+            expect(completedData.response.usage.total_tokens).toBe(105);
         });
     });
 
@@ -1155,5 +1177,90 @@ describe("ResponsesToOpenAIConverter", () => {
             const converter = ConverterFactory.create(ApiFormat.OPENAI, ApiFormat.RESPONSES, "gpt-4");
             expect(converter).not.toBeNull();
         });
+    });
+});
+
+// ============================================================
+// 覆盖率补口：[DONE] 到达时把未收尾的 reasoning / message / function_call 一起收口
+// ============================================================
+
+describe("ResponsesToOpenAIConverter - 补口判定点（[DONE] 收尾未关闭的块）", () => {
+    const chunk = (delta: Record<string, unknown>, finish: string | null = null) =>
+        JSON.stringify({
+            id: "chatcmpl-1",
+            object: "chat.completion.chunk",
+            model: "gpt-4",
+            choices: [{ index: 0, delta, finish_reason: finish }],
+        });
+
+    it("reasoning / message / function_call 三个块都没收口时 [DONE] → 逐个补 done + 最后 response.completed", () => {
+        const converter = new ResponsesToOpenAIConverter("gpt-4");
+        converter.convertStreamEvent(chunk({ role: "assistant" }));
+        converter.convertStreamEvent(chunk({ reasoning_content: "想一想" }));
+        converter.convertStreamEvent(chunk({ content: "答案" }));
+        converter.convertStreamEvent(
+            chunk({
+                tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "f", arguments: '{"a":1}' } }],
+            }),
+        );
+
+        const doneEvents = converter.convertStreamEvent("[DONE]");
+        const parsed = doneEvents.map((e) => JSON.parse(e.data));
+
+        expect(parsed.map((d) => d.type)).toEqual([
+            "response.reasoning_summary_text.done",
+            "response.reasoning_summary_part.done",
+            "response.output_item.done",
+            "response.output_text.done",
+            "response.content_part.done",
+            "response.output_item.done",
+            "response.function_call_arguments.done",
+            "response.output_item.done",
+            "response.completed",
+        ]);
+
+        // reasoning：文本、part、item 三处都必须带同一份摘要，不能出现空字符串
+        expect(parsed[0].text).toBe("想一想");
+        expect(parsed[1].part).toEqual({ type: "summary_text", text: "想一想" });
+        expect(parsed[2].item).toMatchObject({ type: "reasoning", summary: [{ type: "summary_text", text: "想一想" }] });
+
+        // message：done 事件的文本要等于累积文本
+        expect(parsed[3].text).toBe("答案");
+        expect(parsed[4].part).toEqual({ type: "output_text", text: "答案" });
+        expect(parsed[5].item).toMatchObject({
+            type: "message",
+            status: "completed",
+            role: "assistant",
+            content: [{ type: "output_text", text: "答案" }],
+        });
+
+        // function_call：参数不能丢，且 item 状态是 completed
+        expect(parsed[6].arguments).toBe('{"a":1}');
+        expect(parsed[7].item).toMatchObject({ type: "function_call", status: "completed", arguments: '{"a":1}' });
+
+        // 收尾后流已终止：再来 chunk 不再产生事件
+        expect(converter.convertStreamEvent(chunk({ content: "又来了" }))).toEqual([]);
+    });
+
+    it("同一轮多个 function_call → 每个都补一份 done（不合并、不丢参数）", () => {
+        const converter = new ResponsesToOpenAIConverter("gpt-4");
+        converter.convertStreamEvent(chunk({ role: "assistant" }));
+        converter.convertStreamEvent(
+            chunk({
+                tool_calls: [
+                    { index: 0, id: "call_a", type: "function", function: { name: "a", arguments: '{"x":1}' } },
+                    { index: 1, id: "call_b", type: "function", function: { name: "b", arguments: '{"y":2}' } },
+                ],
+            }),
+        );
+
+        const parsed = converter.convertStreamEvent("[DONE]").map((e) => JSON.parse(e.data));
+        const argsDone = parsed.filter((d) => d.type === "response.function_call_arguments.done");
+        const itemDone = parsed.filter((d) => d.type === "response.output_item.done" && d.item?.type === "function_call");
+
+        expect(argsDone).toHaveLength(2);
+        expect(argsDone.map((d) => d.arguments).sort()).toEqual(['{"x":1}', '{"y":2}']);
+        expect(itemDone).toHaveLength(2);
+        expect(itemDone.map((d) => d.item.name).sort()).toEqual(["a", "b"]);
     });
 });

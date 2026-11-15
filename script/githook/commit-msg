@@ -1,0 +1,30 @@
+#!/bin/bash
+#
+# commit-msg 钩子：拦截提交信息里的 AI 工具署名。
+#
+# 为什么独立成 commit-msg 而不是塞在 pre-commit 里：
+# git 会把「本次提交信息文件路径」作为 $1 传给 commit-msg 钩子，这是**唯一可靠**
+# 的获取方式。原先写在 pre-commit 里、读 `$ROOT_DIR/.git/COMMIT_MSG` 的做法是
+# 无效的 —— git 实际写的是 `COMMIT_EDITMSG`，那个路径根本不存在，于是
+# `if [ -f ... ]` 恒假、校验**从未执行过**，却在文档里被描述成「会拦截」。
+# （这属于「自称已兜底但实际没生效」，与 P2-14、#18 同源。）
+#
+# 安装：script/install-githooks.sh（或 npm install 的 prepare）会把
+# `core.hooksPath` 指向本目录，git 自动使用本文件。
+
+set -uo pipefail
+
+MSG_FILE="${1:-}"
+
+if [ -z "$MSG_FILE" ] || [ ! -f "$MSG_FILE" ]; then
+    echo "[commit-msg] 未拿到提交信息文件路径，跳过检查"
+    exit 0
+fi
+
+if grep -qi "claude" "$MSG_FILE"; then
+    echo "❌ 提交信息包含 AI 工具署名（claude 等），已拒绝。"
+    echo "   请移除 AI 工具相关字样后重新提交。"
+    exit 1
+fi
+
+exit 0

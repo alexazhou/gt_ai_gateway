@@ -45,6 +45,8 @@ export interface StatusResponse {
     status?: string;
     mode?: RunMode;
     user_type?: string;
+    /** 系统管理员（root，或归属 main 租户的 admin）：决定租户管理 / 视角切换 / 多租户开关是否可用 */
+    is_system_admin?: boolean;
     /** 调用方用户 id（root 为 -1） */
     user_id?: number | null;
     /** 调用方用户名（root 为 "Root"） */

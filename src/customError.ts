@@ -1,8 +1,40 @@
 import { Context } from "hono";
-import { ApiFormat } from "./constants";
+import { ApiFormat, FailedCode } from "./constants";
 
-// 使用 Symbol 标记来识别 AppError 实例
+// 使用 Symbol 标记来识别 AppError 实例。
+//
+// P2-19：这个标记原来只「写」不「读」——定义完就没被检查过，跨 realm / 重复打包导致
+// `instanceof` 失效时没有任何兜底。现在统一走 isAppError()：先 Symbol、再 instanceof。
 const APP_ERROR_SYMBOL = Symbol.for("AppError");
+
+export type AppErrorKind = "AppError" | "NotFoundError" | "ClientWriteError" | "RateLimitError" | "AccessDeniedError";
+
+/**
+ * 判定错误是否是 AppError（可进一步限定具体子类）。
+ *
+ * 用 Symbol.for（全局注册表）而不是 instanceof 单条路：同一份代码被不同路径/不同 realm
+ * 加载时构造函数不是同一个引用，instanceof 会误判为 false，进而把 4xx 当 500 处理。
+ */
+function isAppError(error: unknown): error is AppError;
+function isAppError(error: unknown, kind: "AppError"): error is AppError;
+function isAppError(error: unknown, kind: "NotFoundError"): error is NotFoundError;
+function isAppError(error: unknown, kind: "ClientWriteError"): error is ClientWriteError;
+function isAppError(error: unknown, kind: "RateLimitError"): error is RateLimitError;
+function isAppError(error: unknown, kind: "AccessDeniedError"): error is AccessDeniedError;
+function isAppError(error: unknown, kind?: AppErrorKind): error is AppError {
+    if (error === null || typeof error !== "object") {
+        return false;
+    }
+    const marked = (error as Record<symbol, unknown>)[APP_ERROR_SYMBOL] === true;
+    if (!marked && !(error instanceof AppError)) {
+        return false;
+    }
+    if (!kind) {
+        return true;
+    }
+    // 子类各自在构造器里设置了 name，跨 realm 也能区分（标记只区分「是不是 AppError」）
+    return (error as Error).name === kind;
+}
 
 
 class AppError extends Error {
@@ -12,6 +44,11 @@ class AppError extends Error {
         public message: string,
         public statusCode: number = 400,
         public code?: string,
+        /**
+         * 落库用的失败归因（record.failed_code）。未指定时由调用方兜底为 unknown_error；
+         * 典型用法：协议转换失败 → FailedCode.CONVERSION_ERROR，便于按原因统计排障。
+         */
+        public failedCode?: FailedCode,
     ) {
         super(message);
         this.name = "AppError";
@@ -110,5 +147,6 @@ export default {
     ClientWriteError,
     RateLimitError,
     AccessDeniedError,
+    isAppError,
     buildLlmErrorResponse,
 };

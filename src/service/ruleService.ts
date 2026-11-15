@@ -1,4 +1,4 @@
-import { RuleType, UserType } from "../constants";
+import { RuleType } from "../constants";
 import { SgUser } from "../model/sgUser";
 import { SgModel } from "../model/sgModel";
 import { SgVendor } from "../model/sgVendor";
@@ -8,6 +8,7 @@ import rateLimitService from "./rateLimitService";
 import customError from "../customError";
 import scopeExpr from "../util/rule/scopeExpr";
 import type { RequestContext } from "../util/rule/types";
+import type { TenantScope } from "../middleware/tenantScopeMiddleware";
 
 // 规则缓存 TTL：兜底 worker 多 isolate 的跨实例缓存过期（CRUD 只失效本地 isolate 缓存，
 // 其他 isolate 需等 TTL 过期才能感知变更，60s 内全局生效）
@@ -113,13 +114,11 @@ async function checkMatchedRules(
 
 /**
  * 阶段一：路由前准入检查（不含 vendor_id 的规则，此时尚未路由、vendor_id 未知）。
- * root 用户直接旁路（不匹配、不计数）。命中拒绝时抛 AccessDeniedError（403）/ RateLimitError（429）。
+ * 对所有用户一视同仁（含 root，无旁路）。
+ * 命中拒绝时抛 AccessDeniedError（403）/ RateLimitError（429）。
  */
-async function matchAndCheck(user: SgUser, modelConfig: SgModel, tenantId: number, mainTenantId: number): Promise<void> {
-    if (user.type === UserType.ROOT) {
-        return;
-    }
-    const { nonVendorRules } = await getEnabledRules(tenantId, mainTenantId);
+async function matchAndCheck(user: SgUser, modelConfig: SgModel, scope: TenantScope): Promise<void> {
+    const { nonVendorRules } = await getEnabledRules(scope.tenantId, scope.mainTenantId);
     if (nonVendorRules.length === 0) {
         return;
     }
@@ -133,13 +132,11 @@ async function matchAndCheck(user: SgUser, modelConfig: SgModel, tenantId: numbe
 
 /**
  * 阶段二：路由后准入检查（含 vendor_id 的规则，实际路由到的供应商已确定）。
- * root 用户直接旁路。rate_limit 传 failoverEligible = true（超限视为该上游繁忙，可切换其它供应商）。
+ * 对所有用户一视同仁（含 root，无旁路）。
+ * rate_limit 传 failoverEligible = true（超限视为该上游繁忙，可切换其它供应商）。
  */
-async function matchAndCheckVendor(user: SgUser, modelConfig: SgModel, vendor: SgVendor, tenantId: number, mainTenantId: number): Promise<void> {
-    if (user.type === UserType.ROOT) {
-        return;
-    }
-    const { vendorRules } = await getEnabledRules(tenantId, mainTenantId);
+async function matchAndCheckVendor(user: SgUser, modelConfig: SgModel, vendor: SgVendor, scope: TenantScope): Promise<void> {
+    const { vendorRules } = await getEnabledRules(scope.tenantId, scope.mainTenantId);
     if (vendorRules.length === 0) {
         return;
     }

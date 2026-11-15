@@ -109,6 +109,7 @@
 - **依赖层级**：`controller → service → manager → model`，manager 不反向依赖 service（eslint `no-restricted-imports` 约束）
 - **事务原子性**：`adjustBalance` 两步写操作拆分后的事务保障
 - **非目标**：不改业务行为、不引入新功能；statsController 的 raw SQL 聚合重构与前端联动，另立专项
+- **管理权限对齐**：引入「系统管理员」（root，或归属 main 租户的 admin），二者管理权限完全等价（租户管理 / 跨租户视角 / 多租户开关）；root 的调用权限 / 无限余额等身份性能力不下放，并移除原有的 root 规则旁路（规则对所有用户一视同仁）；判定统一收敛到 `TenantScope.isSystemAdmin`，并补齐 `/config.json` 写入与 `/client-config/*` 的 main 视角校验
 
 ### V1.10: 测试与诊断增强 (规划中)
 
@@ -137,4 +138,5 @@
 - [设计文档](./) — 路由、计费、客户端管理、协议、分层重构等专项设计
 - [测试请求多模态设计](./2026-10-20-multimodal-test-request/step1_product.md) — 测试对话框文本 / 图片切换（规划中）
 - [设计文档规范](./设计文档规范.md) — 设计与文档命名规范
+- [main 租户 admin 与 root 管理权限对齐](./2026-09-16-main-admin-root-parity/step1_product.md) — 系统管理员定义与能力等价
 - [发布流程](../tech/release_process.md) — 新版本发布流程

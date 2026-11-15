@@ -3,6 +3,7 @@ import requestHelper from "../../helpers/requestHelper";
 import vendorFixtures from "../../fixtures/vendorFixtures";
 import dbHelper from "../../helpers/dbHelper"
 import { setupAdminUser } from "../../globalSetup";
+import maskUtil from "../../../src/util/maskUtil";
 
 /**
  * Vendor Endpoint Positive Tests
@@ -29,7 +30,8 @@ describe("Vendor API (Positive)", () => {
             expect(response.body).toHaveProperty("id");
             expect(response.body.name).toBe(vendorData.name);
             expect(response.body.type).toBe(vendorData.type);
-            expect(response.body.token).toBe(vendorData.token);
+            // P1-08：凭据不回传明文，只回前 4 位掩码
+            expect(response.body.token).toBe(maskUtil.maskToken(vendorData.token));
             expect(response.body.urls).toEqual(vendorData.urls);
             expect(response.body).toHaveProperty("created_at");
             expect(response.body).toHaveProperty("updated_at");
@@ -213,7 +215,7 @@ describe("Vendor API (Positive)", () => {
             );
 
             expect(response.status).toBe(200);
-            expect(response.body.token).toBe("new-updated-token");
+            expect(response.body.token).toBe(maskUtil.maskToken("new-updated-token"));
         });
 
         it("should update vendor url", async () => {
@@ -301,6 +303,72 @@ describe("Vendor API (Positive)", () => {
             expect(response.body.name).toBe("Name Change Only");
             expect(response.body.urls).toEqual(originalUrls);
             expect(response.body.token).toBe(originalToken);
+        });
+
+        // P1-08：编辑接口「留空/回传掩码 = 不修改」，不能让一次改名把真 token 打成星号
+        it("should not overwrite the stored token when the client sends back the masked value", async () => {
+            const getResponse = await requestHelper.get(
+                `/vendor/${createdVendorId}`,
+                adminToken,
+            );
+            const maskedToken = getResponse.body.token as string;
+            expect(maskedToken).toContain("*");
+
+            const response = await requestHelper.put(
+                `/vendor/${createdVendorId}`,
+                { token: maskedToken },
+                adminToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.token).toBe(maskedToken);
+
+            const rows = await dbHelper.query<{ token: string }>(
+                `SELECT token FROM vendor WHERE id = ${createdVendorId}`,
+            );
+            expect(rows[0].token).toBe("new-updated-token");
+        });
+
+        it("should keep the stored token when token is omitted or empty", async () => {
+            for (const payload of [{ name: "No Token Field" }, { token: "" }]) {
+                const response = await requestHelper.put(
+                    `/vendor/${createdVendorId}`,
+                    payload,
+                    adminToken,
+                );
+                expect(response.status).toBe(200);
+            }
+
+            const rows = await dbHelper.query<{ token: string }>(
+                `SELECT token FROM vendor WHERE id = ${createdVendorId}`,
+            );
+            expect(rows[0].token).toBe("new-updated-token");
+        });
+
+        // P1-08：代理 URL 里的账号密码同样不能回传明文
+        it("should mask proxy credentials and restore them on masked save-back", async () => {
+            const proxyUrl = "http://user:secret@127.0.0.1:3128";
+            const response = await requestHelper.put(
+                `/vendor/${createdVendorId}`,
+                { config: { auth_mode: "bearer_token", proxy: { type: "http", url: proxyUrl } } },
+                adminToken,
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.config.proxy.url).toBe("http://****@127.0.0.1:3128");
+
+            // 前端把掩码配置原样保存回来：库里必须还是真 URL
+            const saveBack = await requestHelper.put(
+                `/vendor/${createdVendorId}`,
+                { config: response.body.config },
+                adminToken,
+            );
+            expect(saveBack.status).toBe(200);
+
+            const rows = await dbHelper.query<{ config: string }>(
+                `SELECT config FROM vendor WHERE id = ${createdVendorId}`,
+            );
+            expect(JSON.parse(rows[0].config).proxy.url).toBe(proxyUrl);
         });
     });
 
