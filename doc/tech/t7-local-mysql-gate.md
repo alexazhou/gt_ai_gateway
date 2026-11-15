@@ -43,7 +43,7 @@ docker compose -f docker-compose.test-mysql.yml down
 ## 3. 硬要求（已裁定，不得自行放宽）
 
 1. **禁止「连不上就静默回退 sqlite」**：`DB_DRIVER=mysql` 但 3306 不通 → 门**直接 exit 1**，打印脱敏连接串 + `DB_DRIVER` + 引擎探测结果 + 起容器命令。否则「忘了起容器」会得到一条与 #22 一模一样的假绿。
-2. **方言心跳两条互为反证**（`tests/unit/db/mysqlGateHeartbeat.mysql.test.ts`）：
+2. **方言心跳两条互为反证**（`tests/lifecycle/mysqlGateHeartbeat.mysql.test.ts`）：
    - `SELECT version()` 必须**成功**（连对引擎）；
    - `SELECT sqlite_version()` 必须**抛错**（连错引擎时它必然成功 → 报警）。
    - **`@@version` 方案禁用**：它在 SQLite 报 `unrecognized token: "@"`，是**语法错**不是**引擎错**，会与「SQL 写错」混淆。
@@ -90,7 +90,7 @@ Test Files  27 failed | 114 passed (141)
 （`testTimeout` 抬高之前的三次是 `28 failed | 113 passed (141)` / `92~93 failed`，差异全部来自 `dbMigrationService.test.ts` —— 见 §5.2。）
 
 - 红在 **`near 'usage = ? WHERE id = ?' at line 1`**（`ER_PARSE_ERROR` / errno 1064）
-- 心跳 3 例全过：`✓ tests/unit/db/mysqlGateHeartbeat.mysql.test.ts (3 tests) 41ms`、`[mysql-gate] 引擎探测成功：8.4.11`
+- 心跳 3 例全过：`✓ tests/lifecycle/mysqlGateHeartbeat.mysql.test.ts (3 tests) 41ms`、`[mysql-gate] 引擎探测成功：8.4.11`
 - 实例身份：`实例身份（@@hostname）: OK → t7-mysql-gate（期望 t7-mysql-gate）`
 
 **与 CI 的对账（独立取数，不是我复述自己）**
@@ -167,7 +167,7 @@ sqlite node 门：`140 passed (140)` / `1459 passed | 3 skipped (1462)` / exit 0
 
 ### 5.2 本地 / CI 差异（`dbMigrationService.test.ts`）—— **已由裁定 A 消除**
 
-`tests/unit/service/dbMigrationService.test.ts` 里两个用例各自要跑完 33 个迁移，用的是 vitest 默认 `testTimeout: 5000`。
+`tests/lifecycle/dbMigrationService.test.ts` 里两个用例各自要跑完 33 个迁移，用的是 vitest 默认 `testTimeout: 5000`。
 
 | 跑法 | 耗时 | 结果 |
 |---|---|---|

@@ -49,7 +49,7 @@ vitest ──> npx                      ← child.pid / testServerProcess.pid �
 | 站点 | 原代码 | 后果 |
 |---|---|---|
 | `tests/globalSetup.ts` `startTestServer()` | `spawn("npx", ["tsx", …])` + `stopTestServer()` 里 `testServerProcess.kill("SIGTERM")` | npx 收到信号退出，wrapper/loader 被 reparent → `ppid=1` 孤儿 |
-| `tests/integration/migrationMode.node.test.ts` `spawnBackend()` | `child.kill("SIGTERM")` / `child.kill("SIGKILL")` | 同上；本文件 2 个「能起来」的用例各留 1 个实例 |
+| `tests/lifecycle/migrationMode.node.test.ts` `spawnBackend()` | `child.kill("SIGTERM")` / `child.kill("SIGKILL")` | 同上；本文件 2 个「能起来」的用例各留 1 个实例 |
 
 `stopTestServer()` 原来那个 5s 后 `SIGKILL` 兜底同样只打 npx，所以**兜底也兜不住**。
 
@@ -73,11 +73,11 @@ vitest ──> npx                      ← child.pid / testServerProcess.pid �
 
 ## 5. 对照实验（同命令、同文件、同 worktree，只切用例文件内容）
 
-`tests/integration/migrationMode.node.test.ts` 单文件跑法：
+`tests/lifecycle/migrationMode.node.test.ts` 单文件跑法：
 
 ```
 ./scripts/with-test-lock.sh env TEST_MODE=node \
-  npx vitest run --config vitest.config.ts tests/integration/migrationMode.node.test.ts
+  npx vitest run --config vitest.config.ts tests/lifecycle/migrationMode.node.test.ts
 ```
 
 两次跑前后各做一次彻底清理（`pkill -KILL -f "src/local.ts"` 直到计数 0），
