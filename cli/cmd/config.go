@@ -74,7 +74,7 @@ func (a *App) newConfigSetCmd() *cobra.Command {
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p := a.Printer()
-			body, err := buildConfigBody(filePath, kvPairs, a.in)
+			body, err := buildJSONBody(filePath, kvPairs, a.in)
 			if err != nil {
 				return err
 			}
@@ -113,7 +113,7 @@ func (a *App) newConfigSetCmd() *cobra.Command {
 
 // buildConfigBody 把 --file 或 --key k=v 转换成 PUT 请求体。
 // 两者互斥；都不传或 key 格式非法一律归为参数错误（退出码 2）。
-func buildConfigBody(filePath string, kvPairs []string, stdin *os.File) (map[string]any, error) {
+func buildJSONBody(filePath string, kvPairs []string, stdin *os.File) (map[string]any, error) {
 	if filePath != "" && len(kvPairs) > 0 {
 		return nil, client.Usagef("--file 与 --key 不能同时使用，请二选一")
 	}

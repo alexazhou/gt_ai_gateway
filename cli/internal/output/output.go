@@ -5,10 +5,13 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 )
@@ -134,4 +137,143 @@ func (p *Printer) Line(format string, a ...any) {
 // Info 向 stderr 输出提示信息（不污染 stdout）。
 func (p *Printer) Info(format string, a ...any) {
 	fmt.Fprintf(p.Err, format+"\n", a...)
+}
+
+// ---- 通用 JSON 渲染（P2 资源域命令用：接口返回结构各不相同，但都是 JSON） ----
+
+// ValueString 把任意 JSON 值渲染成适合表格单元格的一行文本：
+// 标量原样，对象/数组压成紧凑 JSON 并截断，避免把表格撑爆。
+func ValueString(v any) string {
+	switch typed := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return truncate(typed, 120)
+	case bool:
+		if typed {
+			return "true"
+		}
+		return "false"
+	case float64:
+		// JSON 数字统一是 float64：整数去掉多余小数位
+		if typed == math.Trunc(typed) && math.Abs(typed) < 1e15 {
+			return strconv.FormatInt(int64(typed), 10)
+		}
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	default:
+		raw, err := json.Marshal(typed)
+		if err != nil {
+			return fmt.Sprintf("%v", typed)
+		}
+		return truncate(string(raw), 120)
+	}
+}
+
+func truncate(s string, limit int) string {
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return string(runes[:limit]) + "…"
+}
+
+// DecodeList 解析「列表类」响应：既支持裸数组，也支持 {list:[...],total:n} 包装。
+func DecodeList(raw []byte) (items []map[string]any, total int, err error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, 0, nil
+	}
+	if trimmed[0] == '[' {
+		var arr []any
+		if err := json.Unmarshal(trimmed, &arr); err != nil {
+			return nil, 0, fmt.Errorf("解析列表响应失败：%w", err)
+		}
+		items = make([]map[string]any, 0, len(arr))
+		for _, entry := range arr {
+			switch typed := entry.(type) {
+			case map[string]any:
+				items = append(items, typed)
+			default:
+				items = append(items, map[string]any{"value": typed})
+			}
+		}
+		return items, len(items), nil
+	}
+	var wrapper struct {
+		List  []map[string]any `json:"list"`
+		Total int              `json:"total"`
+	}
+	if err := json.Unmarshal(trimmed, &wrapper); err != nil {
+		return nil, 0, fmt.Errorf("解析列表响应失败（既不是数组也不是 {list,total}）：%w", err)
+	}
+	return wrapper.List, wrapper.Total, nil
+}
+
+// RenderList 把列表响应渲染成表格；--quiet 时只打印第一列（通常是 ID）。
+// total 打到 stderr，保证 stdout 只含数据。
+func (p *Printer) RenderList(raw []byte, columns []string) error {
+	items, total, err := DecodeList(raw)
+	if err != nil {
+		return err
+	}
+	if p.Quiet {
+		for _, item := range items {
+			p.Line("%s", ValueString(item[columns[0]]))
+		}
+		return nil
+	}
+	rows := make([][]string, 0, len(items))
+	for _, item := range items {
+		row := make([]string, 0, len(columns))
+		for _, col := range columns {
+			val := ValueString(item[col])
+			if val == "" {
+				val = "-"
+			}
+			row = append(row, val)
+		}
+		rows = append(rows, row)
+	}
+	headers := make([]string, 0, len(columns))
+	for _, col := range columns {
+		headers = append(headers, strings.ToUpper(col))
+	}
+	if err := p.Table(headers, rows); err != nil {
+		return err
+	}
+	fmt.Fprintf(p.Err, "total: %d\n", total)
+	return nil
+}
+
+// RenderObject 把单个对象渲染成「键: 值」摘要（嵌套结构压成紧凑 JSON）。
+// --quiet 时只打印 id（若存在），便于链式命令使用。
+func (p *Printer) RenderObject(raw []byte) error {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(trimmed, &obj); err != nil {
+		// 不是对象（比如字符串/数组）：原样打出，不假装是键值
+		return p.JSONRaw(trimmed)
+	}
+	if p.Quiet {
+		for _, key := range []string{"id", "record_id", "success"} {
+			if val, ok := obj[key]; ok {
+				p.Line("%s", ValueString(val))
+				return nil
+			}
+		}
+		return p.JSONRaw(trimmed)
+	}
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	pairs := make([][2]string, 0, len(keys))
+	for _, k := range keys {
+		pairs = append(pairs, [2]string{k, ValueString(obj[k])})
+	}
+	return p.KV(pairs)
 }
