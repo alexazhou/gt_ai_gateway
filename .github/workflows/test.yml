@@ -300,6 +300,22 @@ jobs:
           submodules: recursive
           token: ${{ github.token }}
 
+      # 机械守护（#269）：cli/scripts/*.sh 必须是 100755。
+      # 由来：#263 与 #266 两次因为「写临时文件再 rename」的原子写把脚本执行位丢了（100755→100644），
+      # 而 CI 一律用 `bash x.sh` 调用，所以红不了；`./x.sh` 才会 permission denied。
+      # 放在最早的一步：mode 不对就没必要继续跑后面的门。
+      - name: Assert cli/scripts/*.sh are executable
+        run: |
+          set -e
+          bad="$(git ls-files -s -- 'cli/scripts/*.sh' | awk '$1 != "100755" {print "  " $1 "  " $4}')"
+          if [ -n "$bad" ]; then
+            echo "❌ 以下脚本 mode 不是 100755："
+            echo "$bad"
+            echo "修复：chmod +x <文件> && git add <文件>（或 git update-index --chmod=+x <文件>）"
+            exit 1
+          fi
+          echo "ok: $(git ls-files -s -- 'cli/scripts/*.sh' | wc -l) 个脚本均为 100755"
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
