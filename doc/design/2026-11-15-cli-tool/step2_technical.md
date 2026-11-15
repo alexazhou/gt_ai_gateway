@@ -113,7 +113,13 @@ cli/
 - **Linux**：`${XDG_DATA_HOME:-~/.local/share}/GtCoder/AiGateway/config.json`
 
 读取字段 `host`、`port`、`root_token`：
-- 若 `host` 为 `""`、`0.0.0.0` 或 `::`，映射为 `127.0.0.1`（与 `tauri/src-tauri/src/utils.rs` 保持一致）。
+
+- **`host` 的规范化（CLI 侧实现，三例）**：`""`、`0.0.0.0`、`::` 一律映射为 `127.0.0.1`。
+  这里的依据要写清，因为桌面端代码本身只覆盖了其中一种：
+  - `0.0.0.0` → `127.0.0.1`：与桌面端 `tauri/src-tauri/src/utils.rs:7-13` 的 `generate_client_url` 一致（它只有 `host == "0.0.0.0"` 这一个分支）。
+  - `""` → `127.0.0.1`：桌面端 `tauri/src-tauri/src/lib.rs:530-534` 的 `read_config` 在读到空 `host` 时不会采用，落回 `DEFAULT_HOST`（`lib.rs:103`，值为 `127.0.0.1`）。即**正常写盘路径上不会出现空 host**；CLI 仍显式处理空值，是为了不依赖「上游一定先兜过」这个前提（手改配置、旧版本配置、他方写入都可能留空）。
+  - `::` → `127.0.0.1`：桌面端代码未做映射（`utils.rs` 只判 `0.0.0.0`），但 `::` 是合法的 IPv6 通配监听地址，直连会拼出 `http://::6722`（非法 URL）。CLI 这里是对桌面端行为的**超集**：容忍 `::` 并映射回环。
+- **`port` 缺省值**：配置里没有 `port`（或越界）时按 `6722` 处理，依据是桌面端 `tauri/src-tauri/src/lib.rs:102` 的 `DEFAULT_PORT = 6722`；否则会拼出 `http://127.0.0.1:0`。
 - 拼装 `base_url = fmt.Sprintf("http://%s:%d", clientHost, port)`。
 - `gtgw login --from-tauri` 会显式读取该配置并调用 `GET /status.json` 验证后保存为 Profile（默认名 `tauri`）。
 
