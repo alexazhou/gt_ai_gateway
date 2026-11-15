@@ -59,8 +59,13 @@ ls -l "$HOME/.gtgw/config.json" | sed 's/^/      /'
 [ -f "$HOME/.gtgw/config.json" ] && pass "配置在 \$HOME/.gtgw/config.json" || fail "配置不在 \$HOME/.gtgw/config.json"
 [ -f "$HOME/.config/gtgw/config.json" ] && fail "居然写出了旧路径" || pass "没有创建旧路径 \$HOME/.config/gtgw"
 
-DIR_PERM="$(stat -f '%Lp' "$HOME/.gtgw" 2>/dev/null || stat -c '%a' "$HOME/.gtgw" 2>/dev/null)"
-FILE_PERM="$(stat -f '%Lp' "$HOME/.gtgw/config.json" 2>/dev/null || stat -c '%a' "$HOME/.gtgw/config.json" 2>/dev/null)"
+# 权限读数用 python3 取（macOS 的 `stat -f '%Lp'` 与 GNU 的 `stat -c '%a'` 互不兼容；
+# CI 是 Linux、开发机是 macOS，靠 `stat || stat` 兜底会在 GNU 上先输出文件系统信息再回退，
+# 得到「看起来像 700 其实带着垃圾前缀」的字符串 —— #266 接进 CI 时改掉的正是这个坑）。
+perm_of() { python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])' "$1"; }
+
+DIR_PERM="$(perm_of "$HOME/.gtgw")"
+FILE_PERM="$(perm_of "$HOME/.gtgw/config.json")"
 [ "$DIR_PERM" = "700" ] && pass "目录权限 0700" || fail "目录权限 $DIR_PERM（期望 700）"
 [ "$FILE_PERM" = "600" ] && pass "文件权限 0600" || fail "文件权限 $FILE_PERM（期望 600）"
 

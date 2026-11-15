@@ -332,6 +332,13 @@ jobs:
       - name: e2e smoke against mock gateway (idempotent)
         run: BIN=cli/dist/gtgw bash cli/scripts/e2e.sh
 
+      # 配置目录判据（#263 的核心，由 #266 补进 CI）：配置必须落 `~/.gtgw/config.json`、
+      # 旧的 `~/.config/gtgw` 不得被读取、真实家目录不得被创建。
+      # 隔离方式：脚本自己把 HOME/USERPROFILE 指到 $TMP/home，所以本 step 不会写 runner 的真实家目录；
+      # 缺依赖或二进制缺失时脚本以 exit 3 明确报红（不是静默跳过），避免这条判据「看起来跑了其实没跑」。
+      - name: config path is ~/.gtgw and legacy path is not read (e2e)
+        run: bash cli/scripts/e2e-config-path.sh cli/dist/gtgw
+
       # 以下两步是验收人 2026-11-15 追加的两条补测（#259 单上 event 1609）。
       # 它们需要 P3 的命令（integration env / record clear-payload / --allow-fallback-destructive），
       # 所以只在「P3 已合入」的树上有意义：本 workflow 一旦在只有 P1 的分支上跑，这两步会以
