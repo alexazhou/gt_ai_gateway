@@ -14,7 +14,7 @@ var recordColumns = []string{"id", "user_id", "model_id", "status", "created_at"
 func (a *App) newRecordCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "record",
-		Short: "请求记录（list / get / activity / delete / recover-orphans / clear-payload / clear-all）",
+		Short: "请求记录（list / get / activity / delete / recover-orphans / clear-payload / clear-all / clear-orphans / watch）",
 		Long: `筛选参数以后端为准（recordController.listRecords）：status / user_ids / model_ids / start_time / end_time，
 其中 user_ids、model_ids 是逗号分隔的 ID 列表。`,
 		Args: noArgs,
@@ -27,6 +27,9 @@ func (a *App) newRecordCmd() *cobra.Command {
 		a.newRecordRecoverOrphansCmd(),
 		a.newRecordClearPayloadCmd(),
 		a.newRecordClearAllCmd(),
+		// 复合命令（P3）：多片游标清理与增量监控
+		a.newRecordClearOrphansCmd(),
+		a.newRecordWatchCmd(),
 	)
 	return cmd
 }

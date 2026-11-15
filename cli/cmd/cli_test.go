@@ -33,6 +33,8 @@ func (r *recorder) add(req *http.Request) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	body, _ := io.ReadAll(req.Body)
+	// 记录完把 body 放回去：后面的 handler 还要按请求体做断言（否则它读到空 body）
+	req.Body = io.NopCloser(bytes.NewReader(body))
 	r.requests = append(r.requests, recordedRequest{
 		Method: req.Method,
 		Path:   req.URL.RequestURI(),
