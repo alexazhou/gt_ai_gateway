@@ -139,6 +139,7 @@ func (a *App) NewRootCmd() *cobra.Command {
 	})
 
 	root.AddCommand(
+		// 会话与系统（P1）
 		a.newLoginCmd(),
 		a.newLogoutCmd(),
 		a.newProfileCmd(),
@@ -146,6 +147,8 @@ func (a *App) NewRootCmd() *cobra.Command {
 		a.newUpdateCmd(),
 		a.newDashboardCmd(),
 		a.newConfigCmd(),
+		// 资源域（P2）
+		a.newVendorCmd(),
 	)
 	return root
 }
