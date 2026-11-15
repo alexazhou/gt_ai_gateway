@@ -160,8 +160,10 @@ func (a *App) NewRootCmd() *cobra.Command {
 		a.newTenantCmd(),
 		a.newRuleCmd(),
 		a.newRecordCmd(),
-		// 连通性自测（P3）
+		// 客户端接入与自测（P3）
+		a.newClientCmd(),
 		a.newTestCmd(),
+		a.newIntegrationCmd(),
 	)
 	return root
 }
