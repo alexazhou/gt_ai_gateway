@@ -332,6 +332,27 @@ jobs:
       - name: e2e smoke against mock gateway (idempotent)
         run: BIN=cli/dist/gtgw bash cli/scripts/e2e.sh
 
+      # 以下两步是验收人 2026-11-15 追加的两条补测（#259 单上 event 1609）。
+      # 它们需要 P3 的命令（integration env / record clear-payload / --allow-fallback-destructive），
+      # 所以只在「P3 已合入」的树上有意义：本 workflow 一旦在只有 P1 的分支上跑，这两步会以
+      # exit 3 + `SKIP-REASON:` 前缀明确失败（不是静默跳过）。
+      - name: Install extra shells (fish + pwsh) and print versions
+        run: |
+          set -e
+          sudo apt-get update -qq
+          sudo apt-get install -y fish
+          echo "--- installed shells"
+          bash --version | head -1
+          zsh --version
+          fish --version
+          pwsh --version
+
+      - name: integration env in four shells (real eval)
+        run: bash cli/scripts/e2e-shell-env.sh cli/dist/gtgw
+
+      - name: fallback connection blocks destructive commands (e2e)
+        run: bash cli/scripts/e2e-fallback-destructive.sh cli/dist/gtgw
+
       - name: Upload CLI binaries
         uses: actions/upload-artifact@v4
         with:
