@@ -284,3 +284,58 @@ jobs:
       - name: Run Rust tests
         working-directory: tauri/src-tauri
         run: cargo test --release --target x86_64-pc-windows-msvc
+
+  # CLI 门（gtgw，Go）：vet + 单测 + 6 目标交叉编译 + 真二进制对 mock 的 e2e 冒烟。
+  # 只装 Go、不装 node（cli 是独立 Go module），与其它 job 并行，约 60~90s。
+  # 单独文件的理由：它守的是 cli/ 和 Dockerfile 里的东西，不需要等 npm ci / frontend build。
+  test-cli:
+    name: Test (CLI - Go)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          token: ${{ github.token }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: go vet
+        run: cd cli && go vet ./...
+
+      - name: go test
+        run: cd cli && go test ./... -count=1
+
+      # 版本从根 package.json 注入（与 release 同一处实现，避免两套构建逻辑漂移）
+      - name: Build (host, version injected)
+        run: bash cli/scripts/build.sh
+
+      - name: Cross compile (5~6 targets)
+        run: bash cli/scripts/release.sh
+
+      - name: Assert Linux binaries are static
+        run: |
+          set -e
+          for f in cli/dist/cli/gtgw_*linux*; do
+            echo "--- $f"
+            file "$f"
+            file "$f" | grep -q "statically linked"
+          done
+
+      # 真二进制 + 真 mock 网关（HTTP 往返），且连跑两轮 diff 证明幂等
+      - name: e2e smoke against mock gateway (idempotent)
+        run: BIN=cli/dist/gtgw bash cli/scripts/e2e.sh
+
+      - name: Upload CLI binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtgw-cli-binaries
+          path: |
+            cli/dist/cli/gtgw_*
+          retention-days: 7
