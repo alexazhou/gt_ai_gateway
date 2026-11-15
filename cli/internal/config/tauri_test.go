@@ -1,7 +1,9 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -112,5 +114,65 @@ func TestParseTauriConfig(t *testing.T) {
 func TestParseTauriConfigInvalidJSON(t *testing.T) {
 	if _, err := ParseTauriConfig([]byte("nope"), "/tmp/config.json"); err == nil {
 		t.Fatal("非法 JSON 应报错")
+	}
+}
+
+// TestTauriConfigPathEnvOverride 覆盖 GTGW_TAURI_CONFIG：显式指定配置文件路径时，
+// 不再按平台探测默认路径（CI / 测试夹具的入口）。
+func TestTauriConfigPathEnvOverride(t *testing.T) {
+	env := map[string]string{EnvTauriConfig: "/tmp/fixtures/tauri-config.json"}
+	got, err := TauriConfigPath(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatalf("TauriConfigPath: %v", err)
+	}
+	if got != "/tmp/fixtures/tauri-config.json" {
+		t.Fatalf("path = %q", got)
+	}
+
+	// 未设置时退回平台默认路径，行为不变
+	fallback, err := TauriConfigPath(func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("TauriConfigPath(默认): %v", err)
+	}
+	if fallback == "/tmp/fixtures/tauri-config.json" || fallback == "" {
+		t.Fatalf("默认路径异常：%q", fallback)
+	}
+}
+
+// TestLoadTauriConfigFromEnvOverride 用真实夹具文件验证 `--from-tauri` 的数据来源可注入：
+// host=0.0.0.0 + port 缺省 ⇒ 127.0.0.1:6722，且 Path 指认到夹具文件。
+func TestLoadTauriConfigFromEnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tauri-config.json")
+	if err := os.WriteFile(path, []byte(`{"host":"0.0.0.0","root_token":"sk-fixture-token"}`), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	env := map[string]string{EnvTauriConfig: path}
+	got, err := LoadTauriConfigFrom(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatalf("LoadTauriConfigFrom: %v", err)
+	}
+	if got.BaseURL != "http://127.0.0.1:6722" {
+		t.Fatalf("BaseURL = %q, 期望 http://127.0.0.1:6722", got.BaseURL)
+	}
+	if got.Token != "sk-fixture-token" {
+		t.Fatalf("Token = %q", got.Token)
+	}
+	if got.Path != path {
+		t.Fatalf("Path = %q, 期望夹具路径 %q（要能指认来源）", got.Path, path)
+	}
+}
+
+// TestLoadTauriConfigFromEnvOverrideMissing 显式指定的文件不存在时，错误里要带上该路径，
+// 不许静默回退到本机默认配置（否则 CI 会读到开发机数据）。
+func TestLoadTauriConfigFromEnvOverrideMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope.json")
+	env := map[string]string{EnvTauriConfig: missing}
+	_, err := LoadTauriConfigFrom(func(k string) string { return env[k] })
+	if err == nil {
+		t.Fatalf("文件不存在时应报错")
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Fatalf("错误信息应包含路径 %q，实际：%v", missing, err)
 	}
 }

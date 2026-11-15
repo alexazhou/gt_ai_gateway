@@ -52,7 +52,8 @@ func (a *App) newLoginCmd() *cobra.Command {
 			return a.runLogin(cmd, fromTauri)
 		},
 	}
-	cmd.Flags().BoolVar(&fromTauri, "from-tauri", false, "从 Tauri 桌面端配置读取地址与 Token 并保存为 profile `tauri`")
+	cmd.Flags().BoolVar(&fromTauri, "from-tauri", false,
+		fmt.Sprintf("从 Tauri 桌面端配置读取地址与 Token 并保存为 profile `tauri`（配置文件可用 %s 指定）", config.EnvTauriConfig))
 	return cmd
 }
 

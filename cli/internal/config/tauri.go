@@ -113,15 +113,34 @@ func ParseTauriConfig(raw []byte, path string) (*TauriConfig, error) {
 	}, nil
 }
 
+// TauriConfigPath 返回实际要读取的桌面端配置文件路径。
+//
+// 优先 GTGW_TAURI_CONFIG（显式指定，CI / 测试夹具用），否则按平台默认路径探测。
+// 显式指定时若文件不存在，错误信息里会带上你给的那个路径，不会静默回退到默认路径。
+func TauriConfigPath(getenv func(string) string) (string, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if custom := strings.TrimSpace(getenv(EnvTauriConfig)); custom != "" {
+		return custom, nil
+	}
+	return TauriPathFor(runtime.GOOS, getenv, nil)
+}
+
 // LoadTauriConfigFrom 读取本机桌面端配置。找不到文件返回 ErrTauriConfigNotFound。
 func LoadTauriConfigFrom(getenv func(string) string) (*TauriConfig, error) {
-	path, err := TauriPathFor(runtime.GOOS, getenv, nil)
+	path, err := TauriConfigPath(getenv)
 	if err != nil {
 		return nil, err
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			// 显式指定的路径（CI / 夹具）不存在时必须报出该路径：静默回落成
+			// ErrTauriConfigNotFound 会让人以为「本机没装桌面端」，实际是夹具路径写错。
+			if getenv != nil && strings.TrimSpace(getenv(EnvTauriConfig)) != "" {
+				return nil, fmt.Errorf("Tauri 配置（%s 指定）不存在：%s", EnvTauriConfig, path)
+			}
 			return nil, ErrTauriConfigNotFound
 		}
 		return nil, fmt.Errorf("读取 Tauri 配置 %s 失败：%w", path, err)
