@@ -227,7 +227,8 @@ func commandPathOf(command string) string {
 	}
 	kept := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if strings.HasPrefix(part, "<") {
+		// 跳掉位置参数（<id>）与 flag（--file <json>）：命令路径只保留子命令链
+		if strings.HasPrefix(part, "<") || strings.HasPrefix(part, "-") {
 			continue
 		}
 		kept = append(kept, part)
@@ -235,11 +236,15 @@ func commandPathOf(command string) string {
 	return strings.Join(kept, " ")
 }
 
-// p2LeafCommandPaths 返回 P2 新增命令树下的叶子命令全路径。
+// p2LeafCommandPaths 返回「对接网关路由」的命令树下的叶子命令全路径。
+//
+// 注意 integration 不在其中：`gtgw integration env` 是纯本地生成，不访问任何路由，
+// 强行登记会逼着映射表编一条不存在的路由。
 func p2LeafCommandPaths(index map[string]*cobra.Command) []string {
 	roots := map[string]bool{
 		"vendor": true, "model": true, "user": true,
 		"balance": true, "tenant": true, "rule": true, "record": true,
+		"client": true, "test": true,
 	}
 	var out []string
 	for name, cmd := range index {
