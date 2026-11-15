@@ -121,17 +121,17 @@ func TestClientBackupDeleteNeedsConfirmation(t *testing.T) {
 	}
 }
 
-// TestClientApplyBlockedOnFallback 回退连接下 apply 必须拒绝（-y 不够）。
-func TestClientApplyBlockedOnFallback(t *testing.T) {
+// TestClientApplyBlockedOnLocalDesktopProfile 本机桌面端 profile 下 apply 必须拒绝（-y 不够）。
+func TestClientApplyBlockedOnLocalDesktopProfile(t *testing.T) {
 	mock := newMockGateway(t, nil)
-	// 模拟「Tauri 自动回退」：没有任何显式 --url，靠 loader 注入桌面端配置
-	app, _, errOut := newFallbackTestApp(t, mock.URL)
+	// 造出「来自本机桌面端」的 profile（login --from-tauri），再跑破坏性命令
+	app, _, errOut := newDesktopProfileApp(t, mock.URL, "")
 	body := writeTempJSON(t, `{"client":"claude-code","backupId":1}`)
 	code := runCLI(app, "-y", "client", "apply", "--file", body)
 	if code != 2 {
-		t.Fatalf("回退连接下 apply 退出码 = %d，期望 2（stderr=%s）", code, errOut.String())
+		t.Fatalf("本机桌面端 profile 下 apply 退出码 = %d，期望 2（stderr=%s）", code, errOut.String())
 	}
-	if !strings.Contains(errOut.String(), "桌面端配置") {
+	if !strings.Contains(errOut.String(), "来自本机桌面端") {
 		t.Fatalf("错误应说明连接来源：%s", errOut.String())
 	}
 	if len(mock.rec.paths()) != 0 {

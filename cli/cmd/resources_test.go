@@ -191,11 +191,12 @@ func defaultP2Routes() []stubRoute {
 // 也顺便验证「env 层」在配置解析里的生效。
 func newEnvTestApp(t *testing.T, baseURL, token string) (*App, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
-	dir := t.TempDir()
+	home := t.TempDir()
 	env := map[string]string{
-		config.EnvXDGConfigHome: dir,
-		config.EnvURL:           baseURL,
-		config.EnvToken:         token,
+		"HOME":          home,
+		"USERPROFILE":   home,
+		config.EnvURL:   baseURL,
+		config.EnvToken: token,
 	}
 	var out, errOut bytes.Buffer
 	app := NewApp(&out, &errOut, func(k string) string { return env[k] }, "1.9.1-beta1", "testsha")

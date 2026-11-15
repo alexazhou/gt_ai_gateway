@@ -332,6 +332,35 @@ jobs:
       - name: e2e smoke against mock gateway (idempotent)
         run: BIN=cli/dist/gtgw bash cli/scripts/e2e.sh
 
+      # 以下两步是验收人 2026-11-15 追加的两条补测（#259 单上 event 1609）。
+      # 它们需要 P3 的命令（integration env / record clear-payload / --allow-fallback-destructive），
+      # 所以只在「P3 已合入」的树上有意义：本 workflow 一旦在只有 P1 的分支上跑，这两步会以
+      # exit 3 + `SKIP-REASON:` 前缀明确失败（不是静默跳过）。
+      - name: Install extra shells (zsh + fish + pwsh) and print versions
+        run: |
+          set -e
+          # ubuntu-latest 上没有 zsh（实测 2026-11-15：`zsh: command not found`），必须显式装；
+          # pwsh 通常在镜像里，但也不假设——缺了就从 Microsoft 源装，别让它默默变成「command not found」。
+          sudo apt-get update -qq
+          sudo apt-get install -y zsh fish
+          if ! command -v pwsh >/dev/null 2>&1; then
+            curl -sSL -o /tmp/pmp.deb https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb
+            sudo dpkg -i /tmp/pmp.deb
+            sudo apt-get update -qq
+            sudo apt-get install -y powershell
+          fi
+          echo "--- installed shell versions"
+          bash --version | head -1
+          zsh --version
+          fish --version
+          pwsh --version
+
+      - name: integration env in four shells (real eval)
+        run: bash cli/scripts/e2e-shell-env.sh cli/dist/gtgw
+
+      - name: fallback connection blocks destructive commands (e2e)
+        run: bash cli/scripts/e2e-fallback-destructive.sh cli/dist/gtgw
+
       - name: Upload CLI binaries
         uses: actions/upload-artifact@v4
         with:

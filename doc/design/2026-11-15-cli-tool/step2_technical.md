@@ -77,8 +77,10 @@ cli/
 ### 1. 配置解析与 Tauri 桌面端联动（`internal/config`）
 
 #### 配置文件路径与结构
-- **POSIX（macOS / Linux）**：`${XDG_CONFIG_HOME:-~/.config}/gtgw/config.json`
-- **Windows**：`%APPDATA%\gtgw\config.json`
+- **全平台统一**：家目录下的 `.gtgw/config.json`
+  - macOS / Linux：`~/.gtgw/config.json`
+  - Windows：`%USERPROFILE%\.gtgw\config.json`（**不落 `%APPDATA%`**）
+- **旧路径不再读取**：`${XDG_CONFIG_HOME:-~/.config}/gtgw/config.json` 已废弃，不做双读、不做静默迁移；`XDG_CONFIG_HOME` 不再参与配置目录推导。
 
 ```json
 {
@@ -88,10 +90,17 @@ cli/
       "base_url": "http://127.0.0.1:8720",
       "token": "sk-...",
       "default_tenant": "main"
+    },
+    "tauri": {
+      "base_url": "http://127.0.0.1:6722",
+      "token": "sk-...",
+      "from_desktop": true
     }
   }
 }
 ```
+
+`from_desktop` 是「这条 Profile 的地址与 Token 来自本机桌面端」的持久标记：只由 `gtgw login --from-tauri` 写入，其它登录方式对同名 Profile 会显式清零。破坏性闸门只认这个标记，**不认 Profile 名字**（用户可用 `--profile foo` 改名）。
 
 #### 安全写入与权限控制
 - 目录不存在时以 `0700` 创建（POSIX）。
@@ -104,7 +113,16 @@ cli/
 1. **命令行参数**：`--url`、`--token`、`--tenant`
 2. **环境变量**：`GTGW_URL`、`GTGW_TOKEN`、`GTGW_TENANT`
 3. **指定或当前激活 Profile**：`--profile <name>` 或 `config.json` 中的 `active_profile`
-4. **Tauri 桌面端自动回退**（仅当未传 `--url`/`--token`、未设环境变量且无有效 Profile 时触发）
+
+**没有第 4 层**：隐式的「Tauri 桌面端自动回退」已整层删除（`config.Resolve()` 不再产生 `SourceTauri`）。
+三层都为空时解析结果是空地址，由调用方统一报「没有可用的网关地址：请先 `gtgw login`，或传 --url / 设置 GTGW_URL」，
+绝不自动连任何地址。本机桌面端只作为一种**显式 Profile** 存在（`gtgw login --from-tauri`）。
+
+#### 破坏性命令闸门（`cli/cmd/safety.go`）
+- 判据：当前生效 Profile 带 `from_desktop` 标记，**且**生效的 `base_url` 就来自该 Profile（若用 `--url` / `GTGW_URL` 覆盖了目标地址则不拦，因为实际操作的不是那个网关）。
+- 命中且未传 `--allow-local-destructive`：退出码 `2`、**零请求**，`-y` 不放行；报错打印 Profile 名与目标地址。
+- 命中且已显式放行：放行，并把 Profile 名与目标地址打到 stderr，让用户看清连的是哪。
+- 其它来源不干预。
 
 #### Tauri 配置探测规则（`tauri.go`）
 对应 `tauri/src-tauri/src/lib.rs` 的持久化路径：

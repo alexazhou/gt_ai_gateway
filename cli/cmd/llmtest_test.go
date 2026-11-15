@@ -185,9 +185,10 @@ func TestStreamSegmentedArrival(t *testing.T) {
 
 	var errBuf bytes.Buffer
 	tw := &timedWriter{}
+	home := t.TempDir()
 	app := NewApp(tw, &errBuf, func(k string) string {
-		if k == "XDG_CONFIG_HOME" {
-			return t.TempDir()
+		if k == "HOME" || k == "USERPROFILE" {
+			return home
 		}
 		return ""
 	}, "test", "sha")
@@ -316,7 +317,7 @@ func TestTestAPIKeyOverride(t *testing.T) {
 	dir := t.TempDir()
 	var out, errOut bytes.Buffer
 	app := NewApp(&out, &errOut, func(k string) string {
-		if k == "XDG_CONFIG_HOME" {
+		if k == "HOME" || k == "USERPROFILE" {
 			return dir
 		}
 		return ""

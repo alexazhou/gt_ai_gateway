@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/alexazhou/gt_ai_gateway/cli/internal/client"
-	"github.com/alexazhou/gt_ai_gateway/cli/internal/config"
 	"github.com/alexazhou/gt_ai_gateway/cli/internal/prompt"
 )
 
@@ -134,13 +133,13 @@ func (a *App) outObject(resp *client.Response) error {
 
 // confirmDestructive 是危险操作的统一确认：未传 --yes 且非 TTY ⇒ 退出码 2，且请求不会发出。
 //
-// 回退连接（Tauri 自动回退）下把来源写进确认提示：事故的根因之一就是
+// 本机桌面端 profile 下把来源写进确认提示：事故的根因之一就是
 // 「用户以为在打 mock，其实连的是本机真实网关」。放行判定在 guardDestructive 里，
-// 这里只负责让确认文案带上来源。
+// 这里只负责让确认文案带上 profile 名与目标地址。
 func (a *App) confirmDestructive(what string) error {
 	question := fmt.Sprintf("确定%s？", what)
-	if baseURL, source, err := a.connectionInfo(); err == nil && source == config.SourceTauri {
-		question = fmt.Sprintf("确定%s？（当前连接来自桌面端配置：%s）", what, baseURL)
+	if profile, baseURL, hit := a.isLocalDesktopConnection(); hit {
+		question = fmt.Sprintf("确定%s？（当前 profile %q 来自本机桌面端：%s）", what, profile, baseURL)
 	}
 	return prompt.Confirm(a.errOut, a.in, question, a.flagYes)
 }
