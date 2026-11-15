@@ -16,7 +16,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -306,3 +308,28 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body, out any)
 	}
 	return resp, nil
 }
+
+// IsTimeout 判断错误是否属于「请求超时 / 客户端主动放弃」。
+//
+// 用途：非幂等写操作超时后要提示「服务端可能已执行」——客户端超时与服务端完成是两件事
+// （2026-11-15 的验收事故里，三个 DELETE 客户端全部超时退出，服务端全部 200）。
+func IsTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	// url.Error 会包一层，errors.As 已覆盖；这里兜底判断文案（部分自定义 RoundTripper 不实现 net.Error）
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "context deadline exceeded") ||
+		strings.Contains(msg, "timeout awaiting response headers") ||
+		strings.Contains(msg, "i/o timeout")
+}
+
+// CleanupTimeout 是长耗时清理类接口的默认超时（真实库 clear-payload 实测 193.9s）。
+const CleanupTimeout = 5 * time.Minute
