@@ -569,5 +569,28 @@
       "reason": "welcome/health 展示页：返回欢迎文案与版本信息，status.json 已覆盖同样的可机读信息，无管理语义",
       "category": "out-of-scope"
     }
+  ],
+  "deviations": [
+    {
+      "id": "D1",
+      "doc": "step2：`record list --model/--user/--status`",
+      "code": "recordController.listRecords 只读 user_ids / model_ids（逗号分隔）+ status / start_time / end_time",
+      "cli": "`record list --user-ids --model-ids --status --start-time --end-time`",
+      "reason": "后端不认 --model/--user；按 #257 裁决不做软别名——一个「看起来支持、服务端不认」的 flag 比没有更危险"
+    },
+    {
+      "id": "D2",
+      "doc": "step2：`vendor test --content-mode`",
+      "code": "vendorController.testVendor 只读 format / model / auto_convert",
+      "cli": "`vendor test --format --model --auto-convert`",
+      "reason": "后端无 content_mode 字段；不造该 flag，并在用例里反向断言 body 不含 content_mode"
+    },
+    {
+      "id": "D3",
+      "doc": "step2 / P2 初版：`user create` 与 `user update` 的 `--token`",
+      "code": "userController.createUser/updateUser 的 body.token 是**该用户自己的** Token",
+      "cli": "`--user-token`；旧 `--token` 显式报参数错（退出码 2，零请求）",
+      "reason": "#257 裁决：--token 与全局管理员 --token 同名，会把管理员 Token 静默写进用户记录，故改名且不兼容"
+    }
   ]
 }

@@ -1,17 +1,13 @@
 package cmd
 
 import (
-	"bytes"
 	"encoding/json"
-	"net/http"
 	"os"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
-
-	"github.com/alexazhou/gt_ai_gateway/cli/internal/config"
 )
 
 // route-command-map 的机读源是 cli/testdata/route-map.json：它同时被
@@ -89,7 +85,22 @@ func TestRouteMapCoversRoutesTs(t *testing.T) {
 		}
 	}
 
-	t.Logf("routes.ts=%d 条，已覆盖=%d 条，未覆盖=%d 条", len(routes), covered, len(routes)-covered)
+	// 偏差记录：每条都要有 id / 文档写法 / 代码事实 / CLI 做法 / 理由，缺一项说明文档没写完。
+	if len(doc.Deviations) == 0 {
+		t.Fatalf("route-map.json 没有 deviations：文档偏差必须以代码为准并逐条记录")
+	}
+	for _, d := range doc.Deviations {
+		for field, value := range map[string]string{
+			"id": d.ID, "doc": d.Doc, "code": d.Code, "cli": d.CLI, "reason": d.Reason,
+		} {
+			if strings.TrimSpace(value) == "" {
+				t.Fatalf("deviation %q 的 %s 为空", d.ID, field)
+			}
+		}
+	}
+
+	t.Logf("routes.ts=%d 条，已覆盖=%d 条，未覆盖=%d 条，偏差记录=%d 条",
+		len(routes), covered, len(routes)-covered, len(doc.Deviations))
 }
 
 // ---------- 数据装载 ----------
@@ -104,8 +115,19 @@ type routeMapEntry struct {
 }
 
 type routeMapDoc struct {
-	Source  string          `json:"source"`
-	Entries []routeMapEntry `json:"entries"`
+	Source     string           `json:"source"`
+	Entries    []routeMapEntry  `json:"entries"`
+	Deviations []routeDeviation `json:"deviations"`
+}
+
+// routeDeviation 是「step2 文档写法 ↔ 代码事实 ↔ CLI 做法」的偏差记录。
+// 放在映射数据里一起被生成脚本渲染进 route-command-map.md，避免文档与实现各写一份。
+type routeDeviation struct {
+	ID     string `json:"id"`
+	Doc    string `json:"doc"`
+	Code   string `json:"code"`
+	CLI    string `json:"cli"`
+	Reason string `json:"reason"`
 }
 
 func loadRouteMap(t *testing.T) routeMapDoc {
@@ -148,7 +170,10 @@ func loadRoutesTs(t *testing.T) map[struct{ method, path string }]bool {
 		}
 	}
 	if raw == nil {
-		t.Fatalf("找不到 src/routes.ts（试过 %v）；可用 GTGW_ROUTES_TS 指定路径", candidates)
+		t.Fatalf("找不到 src/routes.ts（试过 %v）。\n"+
+			"入口差集是本需求的承重判据，所以这里**失败而不是跳过**：\n"+
+			"  请用环境变量 GTGW_ROUTES_TS 指向仓库里的 src/routes.ts（该判据校验 routes.ts ↔ 命令的入口覆盖）。\n"+
+			"  典型用法：GTGW_ROUTES_TS=$PWD/src/routes.ts go test ./cmd -run TestRouteMapCoversRoutesTs", candidates)
 	}
 	t.Logf("routes.ts = %s", used)
 
@@ -228,44 +253,4 @@ func p2LeafCommandPaths(index map[string]*cobra.Command) []string {
 		out = append(out, name)
 	}
 	return out
-}
-
-// TestUserCreateTokenFlagIsUserToken 固化一个容易被误用的语义：
-// `gtgw user create|update` 的 --token 是「用户 Token」，会遮蔽全局 --token（管理员 Token）。
-// 管理员 Token 必须来自环境变量或 profile。
-func TestUserCreateTokenFlagIsUserToken(t *testing.T) {
-	gw := newResourceGateway(t, nil)
-	dir := t.TempDir()
-	var out, errOut bytes.Buffer
-	app := NewApp(&out, &errOut, func(k string) string {
-		switch k {
-		case config.EnvXDGConfigHome:
-			return dir
-		case config.EnvURL:
-			return gw.URL
-		case config.EnvToken:
-			return testToken
-		}
-		return ""
-	}, "1.9.1-beta1", "testsha")
-	app.SetTauriLoader(func() (*config.TauriConfig, error) { return nil, config.ErrTauriConfigNotFound })
-
-	if code := runCLI(app, "user", "create", "--name", "alice", "--token", "sk-user-1"); code != 0 {
-		t.Fatalf("退出码 = %d, 期望 0（stderr=%s）", code, errOut.String())
-	}
-	last := gw.rec.last()
-	if last.Method != http.MethodPost || last.Path != "/user/create.json" {
-		t.Fatalf("请求 = %s %s", last.Method, last.Path)
-	}
-	// 鉴权头用的是环境变量里的管理员 Token，而不是本地 --token。
-	if auth := last.Header.Get("Authorization"); auth != "Bearer "+testToken {
-		t.Fatalf("Authorization = %q, 期望管理员 Token（env）", auth)
-	}
-	var body map[string]any
-	if err := json.Unmarshal(last.Body, &body); err != nil {
-		t.Fatalf("请求体不是合法 JSON：%v", err)
-	}
-	if body["token"] != "sk-user-1" {
-		t.Fatalf("body.token = %v, 期望本地 --token 的值 sk-user-1", body["token"])
-	}
 }
