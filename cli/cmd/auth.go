@@ -136,14 +136,21 @@ func (a *App) runLogin(cmd *cobra.Command, fromTauri bool) error {
 	if tenantToSave == "" {
 		tenantToSave = st.tenantName()
 	}
-	f.SetProfile(profileName, config.Profile{BaseURL: cl.BaseURL(), Token: token, DefaultTenant: tenantToSave})
+	// FromDesktop 随登录方式一起落盘：`--from-tauri` 才置位，其它登录方式显式清零
+	// （同一个 profile 名被手动 login 覆盖后，就不再是桌面端凭据了）。
+	f.SetProfile(profileName, config.Profile{
+		BaseURL:       cl.BaseURL(),
+		Token:         token,
+		DefaultTenant: tenantToSave,
+		FromDesktop:   fromTauri,
+	})
 	f.ActiveProfile = profileName
 	if err := a.saveFile(f); err != nil {
 		return err
 	}
 
 	if a.flagJSON {
-		return p.JSONValue(map[string]any{
+		out := map[string]any{
 			"profile":     profileName,
 			"base_url":    cl.BaseURL(),
 			"tenant":      tenantToSave,
@@ -151,12 +158,19 @@ func (a *App) runLogin(cmd *cobra.Command, fromTauri bool) error {
 			"user_name":   stringOrEmpty(st.UserName),
 			"server":      st.System.Version,
 			"environment": st.System.Environment,
-		})
+		}
+		if fromTauri {
+			out["origin"] = config.ProfileOriginDesktop
+		}
+		return p.JSONValue(out)
 	}
 	pairs := [][2]string{
 		{"profile", profileName},
 		{"base_url", cl.BaseURL()},
 		{"token", output.MaskToken(token)},
+	}
+	if fromTauri {
+		pairs = append(pairs, [2]string{"profile_origin", config.ProfileOriginDesktop})
 	}
 	if tenantToSave != "" {
 		pairs = append(pairs, [2]string{"tenant", tenantToSave})
@@ -255,6 +269,7 @@ func (a *App) newProfileCmd() *cobra.Command {
 						BaseURL string `json:"base_url"`
 						Token   string `json:"token"`
 						Tenant  string `json:"default_tenant,omitempty"`
+						Origin  string `json:"origin,omitempty"`
 					}
 					items := make([]item, 0, len(names))
 					for _, name := range names {
@@ -265,6 +280,7 @@ func (a *App) newProfileCmd() *cobra.Command {
 							BaseURL: prof.BaseURL,
 							Token:   output.MaskToken(prof.Token),
 							Tenant:  prof.DefaultTenant,
+							Origin:  prof.Origin(),
 						})
 					}
 					return p.JSONValue(map[string]any{"active_profile": f.ActiveProfile, "profiles": items})
@@ -282,9 +298,9 @@ func (a *App) newProfileCmd() *cobra.Command {
 					if name == f.ActiveProfile {
 						active = "*"
 					}
-					rows = append(rows, []string{active, name, prof.BaseURL, output.MaskToken(prof.Token), prof.DefaultTenant})
+					rows = append(rows, []string{active, name, prof.BaseURL, output.MaskToken(prof.Token), prof.DefaultTenant, prof.Origin()})
 				}
-				return p.Table([]string{"ACTIVE", "NAME", "BASE_URL", "TOKEN", "TENANT"}, rows)
+				return p.Table([]string{"ACTIVE", "NAME", "BASE_URL", "TOKEN", "TENANT", "ORIGIN"}, rows)
 			},
 		},
 		&cobra.Command{
@@ -379,6 +395,9 @@ func (a *App) newStatusCmd() *cobra.Command {
 			}
 			if res.ProfileName != "" {
 				pairs = append(pairs, [2]string{"profile", res.ProfileName})
+			}
+			if res.ProfileFromDesktop {
+				pairs = append(pairs, [2]string{"profile_origin", config.ProfileOriginDesktop})
 			}
 			pairs = append(pairs,
 				[2]string{"status", st.Status},

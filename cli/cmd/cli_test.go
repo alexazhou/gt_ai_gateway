@@ -137,9 +137,12 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // newTestApp 构造注入了临时配置目录的 App。
 func newTestApp(t *testing.T) (*App, *bytes.Buffer, *bytes.Buffer, string) {
 	t.Helper()
+	// 用 HOME 注入隔离真实家目录：DirFrom 只读家目录（`<home>/.gtgw`），
+	// 注入 HOME 后整个用例与真实 `~/.gtgw` 完全无关（Windows 同时给 USERPROFILE）。
 	dir := t.TempDir()
 	env := map[string]string{
-		config.EnvXDGConfigHome: dir,
+		"HOME":        dir,
+		"USERPROFILE": dir,
 	}
 	var out, errOut bytes.Buffer
 	app := NewApp(&out, &errOut, func(k string) string { return env[k] }, "1.9.1-beta1", "testsha")
@@ -153,9 +156,10 @@ func runCLI(app *App, args ...string) int {
 	return app.Execute(nil, args)
 }
 
-func readConfigFile(t *testing.T, dir string) config.File {
+// readConfigFile 读取注入 home 下的 `~/.gtgw/config.json`。
+func readConfigFile(t *testing.T, home string) config.File {
 	t.Helper()
-	f, err := config.LoadFrom(filepath.Join(dir, "gtgw"))
+	f, err := config.LoadFrom(filepath.Join(home, ".gtgw"))
 	if err != nil {
 		t.Fatalf("LoadFrom: %v", err)
 	}
@@ -190,7 +194,14 @@ func TestLoginSavesProfileAndMasksToken(t *testing.T) {
 		t.Fatalf("profile = %+v", prof)
 	}
 	if runtime.GOOS != "windows" {
-		info, err := os.Stat(filepath.Join(dir, "gtgw", "config.json"))
+		dirInfo, err := os.Stat(filepath.Join(dir, ".gtgw"))
+		if err != nil {
+			t.Fatalf("stat dir: %v", err)
+		}
+		if perm := dirInfo.Mode().Perm(); perm != 0o700 {
+			t.Fatalf("配置目录权限 = %#o, 期望 0700", perm)
+		}
+		info, err := os.Stat(filepath.Join(dir, ".gtgw", "config.json"))
 		if err != nil {
 			t.Fatalf("stat: %v", err)
 		}
@@ -218,6 +229,13 @@ func TestLoginFromTauri(t *testing.T) {
 	prof, ok := f.Profile("tauri")
 	if !ok || prof.BaseURL != gw.URL || prof.Token != testToken {
 		t.Fatalf("profile tauri = %+v", prof)
+	}
+	// 标记必须落盘：闸门靠它识别「本机桌面端」，不靠 profile 名字。
+	if !prof.FromDesktop || prof.Origin() != config.ProfileOriginDesktop {
+		t.Fatalf("profile tauri = %+v, 期望带 from_desktop 标记", prof)
+	}
+	if !strings.Contains(out.String(), config.ProfileOriginDesktop) {
+		t.Fatalf("login --from-tauri 输出应标出来源：%s", out.String())
 	}
 	if strings.Contains(out.String(), testToken) {
 		t.Fatalf("stdout 泄露完整 token：%s", out.String())

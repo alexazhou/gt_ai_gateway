@@ -1,5 +1,10 @@
-// Package config 负责 gtgw 的本地配置：Profile 结构、四层配置优先级合并、
-// 0700/0600 权限与原子写入，以及与 Tauri 桌面端配置的联动（见 tauri.go）。
+// Package config 负责 gtgw 的本地配置：Profile 结构、配置优先级合并
+// （flag > 环境变量 > profile）、0700/0600 权限与原子写入，以及
+// `login --from-tauri` 读取桌面端配置的入口（见 tauri.go）。
+//
+// 2026-11-15 变更：配置目录统一为 `~/.gtgw`；旧的 `${XDG_CONFIG_HOME:-~/.config}/gtgw`
+// **不再读取**；`config.Resolve()` 的「隐式 tauri 回退」整层删除——本机桌面端只以
+// 一个**显式 profile**（`gtgw login --from-tauri`）的形式存在。
 package config
 
 import (
@@ -18,19 +23,20 @@ const (
 	EnvURL    = "GTGW_URL"
 	EnvToken  = "GTGW_TOKEN"
 	EnvTenant = "GTGW_TENANT"
-	// EnvXDGConfigHome 覆写 POSIX 配置根目录（step1 §存储位置）。
-	EnvXDGConfigHome = "XDG_CONFIG_HOME"
 	// EnvTauriConfig 显式指定桌面端 config.json 路径，绕开按平台探测默认路径。
 	// CI / 测试夹具用：让 `login --from-tauri` 这条链路在任何机器上都可复现。
 	EnvTauriConfig = "GTGW_TAURI_CONFIG"
 )
+
+// ConfigDirName 是配置目录名。2026-11-15 起全平台统一为家目录下的 `.gtgw`：
+// macOS / Linux = `~/.gtgw`，Windows = `%USERPROFILE%\.gtgw`（**不落 `%APPDATA%`**）。
+const ConfigDirName = ".gtgw"
 
 // 配置来源（写入 Resolved.Sources，便于判据「断言实际生效的值来自哪一层」）。
 const (
 	SourceFlag    = "flag"
 	SourceEnv     = "env"
 	SourceProfile = "profile"
-	SourceTauri   = "tauri"
 	SourceDefault = "default"
 )
 
@@ -39,6 +45,25 @@ type Profile struct {
 	BaseURL       string `json:"base_url"`
 	Token         string `json:"token"`
 	DefaultTenant string `json:"default_tenant,omitempty"`
+	// FromDesktop 是「这条 profile 的地址与 Token 来自本机桌面端」的持久标记。
+	//
+	// 由 `gtgw login --from-tauri` 写入、其它登录方式显式清零。
+	// 破坏性闸门（cli/cmd/safety.go）据此判断，**不看 profile 名字**：
+	// 用户可以用 `login --from-tauri --profile foo` 把桌面端凭据存成任意名字，
+	// 光靠名字识别会被绕过（2026-11-15 Operator 口径）。
+	FromDesktop bool `json:"from_desktop,omitempty"`
+}
+
+// ProfileOriginDesktop 是「凭据来自本机桌面端」的来源标签（`profile list` / `status` 展示用）。
+const ProfileOriginDesktop = "本机桌面端"
+
+// Origin 返回 profile 的来源标签：桌面端 profile 返回 ProfileOriginDesktop，
+// 普通 profile 返回空串（表示由 --url / 环境变量手工登录）。
+func (p Profile) Origin() string {
+	if p.FromDesktop {
+		return ProfileOriginDesktop
+	}
+	return ""
 }
 
 // File 是磁盘上 config.json 的结构。
@@ -78,28 +103,43 @@ func (f *File) Active() (string, Profile, bool) {
 	return f.ActiveProfile, p, ok
 }
 
-// DirFrom 返回配置目录：POSIX 为 `${XDG_CONFIG_HOME:-~/.config}/gtgw`，
-// Windows 为 `%APPDATA%\gtgw`。getenv 允许测试注入。
-func DirFrom(getenv func(string) string) (string, error) {
+// HomeDirFrom 返回用户主目录。
+//
+// 所有取值都经过 getenv（而不是直接读进程环境），这样单测与 e2e 才能注入 HOME 做隔离：
+//   - Windows 先看 %USERPROFILE%，再看 HOME（git-bash / MSYS 会设 HOME）；
+//   - 其它平台先看 HOME，再看 USERPROFILE；
+//   - 都取不到时退回 os.UserHomeDir()（它自己也是读这两个变量，只是兜底）。
+func HomeDirFrom(getenv func(string) string) (string, error) {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	if home := strings.TrimSpace(getenv(EnvXDGConfigHome)); home != "" {
-		return filepath.Join(home, "gtgw"), nil
-	}
+	keys := []string{"HOME", "USERPROFILE"}
 	if runtime.GOOS == "windows" {
-		if appData := strings.TrimSpace(getenv("APPDATA")); appData != "" {
-			return filepath.Join(appData, "gtgw"), nil
+		keys = []string{"USERPROFILE", "HOME"}
+	}
+	for _, key := range keys {
+		if v := strings.TrimSpace(getenv(key)); v != "" {
+			return v, nil
 		}
 	}
-	homeDir, err := os.UserHomeDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("无法确定用户配置文件目录：%w", err)
+		return "", fmt.Errorf("无法确定用户主目录：%w", err)
 	}
-	if runtime.GOOS == "windows" {
-		return filepath.Join(homeDir, "AppData", "Roaming", "gtgw"), nil
+	return home, nil
+}
+
+// DirFrom 返回配置目录：`<家目录>/.gtgw`（全平台统一）。
+//
+// 2026-11-15 变更：旧路径 `${XDG_CONFIG_HOME:-~/.config}/gtgw` **不再读取**——
+// 不双读、不做静默兼容（Operator 口径）。因此这里刻意**不看** XDG_CONFIG_HOME：
+// 留着它会让「配置到底落在哪」依赖环境变量，正是本次要消灭的不确定性。
+func DirFrom(getenv func(string) string) (string, error) {
+	home, err := HomeDirFrom(getenv)
+	if err != nil {
+		return "", err
 	}
-	return filepath.Join(homeDir, ".config", "gtgw"), nil
+	return filepath.Join(home, ConfigDirName), nil
 }
 
 // PathFrom 返回 config.json 的完整路径。
@@ -210,7 +250,7 @@ func MaskToken(token string) string {
 	return token[:4] + "****" + token[len(token)-4:]
 }
 
-// ResolveOptions 是配置解析的输入：命令行参数 + 环境变量 + 已加载的配置 + Tauri 回退。
+// ResolveOptions 是配置解析的输入：命令行参数 + 环境变量 + 已加载的配置。
 type ResolveOptions struct {
 	// URL / Token / Tenant / ProfileName 来自命令行参数，空串表示「未提供」。
 	URL         string
@@ -223,18 +263,18 @@ type ResolveOptions struct {
 
 	// File 是已加载的本地配置；nil 视为空配置。
 	File *File
-
-	// TauriLoader 用于第 4 层回退；nil 表示使用 LoadTauriConfigFrom(Getenv)。
-	TauriLoader func() (*TauriConfig, error)
 }
 
-// Resolved 是四层合并后的实际生效配置，Sources 记录每个字段的来源层级。
+// Resolved 是合并后的实际生效配置，Sources 记录每个字段的来源层级。
 type Resolved struct {
 	BaseURL     string
 	Token       string
 	Tenant      string
 	ProfileName string
-	Sources     map[string]string
+	// ProfileFromDesktop 表示当前生效的 profile 带有「来自本机桌面端」的持久标记
+	// （`gtgw login --from-tauri` 写入）。破坏性闸门据此判断，见 cli/cmd/safety.go。
+	ProfileFromDesktop bool
+	Sources            map[string]string
 }
 
 // Source 返回字段来源（"base_url" / "token" / "tenant"），未解析到时为空串。
@@ -245,9 +285,11 @@ func (r Resolved) HasCredentials() bool {
 	return r.BaseURL != "" && r.Token != ""
 }
 
-// Resolve 按 step2 §配置解析优先级合并配置：
-// 命令行参数 > 环境变量 > 指定/激活 Profile > Tauri 桌面端回退。
-// Tauri 回退只在「未传 --url/--token、未设环境变量且无有效 Profile」时触发。
+// Resolve 按 step2 §配置解析优先级合并配置：命令行参数 > 环境变量 > 指定/激活 Profile。
+//
+// 2026-11-15：第 4 层「隐式 tauri 回退」已删除——tauri 只作为「一种 profile」显式存在
+// （`gtgw login --from-tauri`）。因此三层都没配时，Resolve 返回**空地址**，
+// 由调用方报「没有可用的网关地址」，绝不自动连任何地址（#257 事故的直接教训）。
 func Resolve(o ResolveOptions) (Resolved, error) {
 	getenv := o.Getenv
 	if getenv == nil {
@@ -273,7 +315,8 @@ func Resolve(o ResolveOptions) (Resolved, error) {
 				if strings.TrimSpace(o.ProfileName) != "" {
 					return res, client.Usagef("profile %q 不存在，可用 `gtgw profile list` 查看已有环境", o.ProfileName)
 				}
-				// active_profile 指向已删除的 profile：视为「无有效 profile」，允许回退到 Tauri。
+				// active_profile 指向已删除的 profile：视为「无有效 profile」，
+				// 不报错也不回退（回退层已删除），最终由调用方报「没有可用的网关地址」。
 				profileName = ""
 			} else {
 				prof, hasProfile = p, true
@@ -281,6 +324,8 @@ func Resolve(o ResolveOptions) (Resolved, error) {
 		}
 	}
 	res.ProfileName = profileName
+	// 桌面端标记随 profile 一起带出来（判断只看这个布尔，不看 profile 名字）。
+	res.ProfileFromDesktop = hasProfile && prof.FromDesktop
 
 	// 第 1、2、3 层逐字段覆盖
 	pick := func(field, flagVal, envVal, profileVal string) (string, string) {
@@ -298,26 +343,5 @@ func Resolve(o ResolveOptions) (Resolved, error) {
 	res.BaseURL, res.Sources["base_url"] = pick("base_url", o.URL, envURL, prof.BaseURL)
 	res.Token, res.Sources["token"] = pick("token", o.Token, envToken, prof.Token)
 	res.Tenant, res.Sources["tenant"] = pick("tenant", o.Tenant, envTenant, prof.DefaultTenant)
-
-	// 第 4 层：Tauri 回退——只在完全没被前三层覆盖时触发
-	tauriAllowed := strings.TrimSpace(o.URL) == "" &&
-		strings.TrimSpace(o.Token) == "" &&
-		envURL == "" && envToken == "" &&
-		!hasProfile
-	if tauriAllowed && res.BaseURL == "" && res.Token == "" {
-		loader := o.TauriLoader
-		if loader == nil {
-			loader = func() (*TauriConfig, error) { return LoadTauriConfigFrom(getenv) }
-		}
-		tc, err := loader()
-		if err == nil && tc != nil {
-			if res.BaseURL == "" && tc.BaseURL != "" {
-				res.BaseURL, res.Sources["base_url"] = tc.BaseURL, SourceTauri
-			}
-			if res.Token == "" && tc.Token != "" {
-				res.Token, res.Sources["token"] = tc.Token, SourceTauri
-			}
-		}
-	}
 	return res, nil
 }

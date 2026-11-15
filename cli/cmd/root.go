@@ -42,9 +42,9 @@ type App struct {
 	flagQuiet   bool
 	flagYes     bool
 	flagTimeout time.Duration
-	// flagAllowFallbackDestructive 允许在「Tauri 自动回退」连接上执行破坏性命令。
+	// flagAllowLocalDestructive 允许在「本机桌面端 profile」连接上执行破坏性命令。
 	// 与 -y 分开：-y 只表达「我知道这是删除」，不表达「我知道可能连错了网关」。
-	flagAllowFallbackDestructive bool
+	flagAllowLocalDestructive bool
 
 	// 解析结果缓存（一次执行内只解析一次）
 	resolved    *config.Resolved
@@ -136,8 +136,8 @@ func (a *App) NewRootCmd() *cobra.Command {
 	pf.BoolVarP(&a.flagQuiet, "quiet", "q", false, "精简输出：仅打印关键标识")
 	pf.BoolVarP(&a.flagYes, "yes", "y", false, "跳过危险操作的二次确认")
 	pf.DurationVar(&a.flagTimeout, "timeout", 0, "请求超时（如 30s / 2m），0 表示使用命令默认值")
-	pf.BoolVar(&a.flagAllowFallbackDestructive, fallbackDestructiveFlag, false,
-		"允许在 Tauri 桌面端自动回退连接上执行破坏性命令（默认拒绝；-y 不放行回退连接）")
+	pf.BoolVar(&a.flagAllowLocalDestructive, localDestructiveFlag, false,
+		"允许在当前 profile 是本机桌面端（login --from-tauri）时执行破坏性命令（默认拒绝；-y 不放行）")
 
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return client.Usagef("%v", err)
@@ -251,7 +251,7 @@ func (a *App) saveFile(f *config.File) error {
 	return config.SaveTo(dir, f)
 }
 
-// Settings 返回四层合并后的生效配置（缓存）。
+// Settings 返回合并后的生效配置（缓存）。
 func (a *App) Settings() (config.Resolved, error) {
 	if a.resolved != nil {
 		return *a.resolved, nil
@@ -271,7 +271,6 @@ func (a *App) Settings() (config.Resolved, error) {
 		ProfileName: a.flagProfile,
 		Getenv:      a.getenv,
 		File:        f,
-		TauriLoader: a.loadTauri,
 	})
 	if err != nil {
 		a.settingsErr = err

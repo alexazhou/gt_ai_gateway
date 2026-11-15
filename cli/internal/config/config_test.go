@@ -97,43 +97,32 @@ func TestResolvePriority(t *testing.T) {
 		}
 	})
 
-	t.Run("Tauri 回退：无 flag/env/profile 时生效", func(t *testing.T) {
-		res, err := Resolve(ResolveOptions{
-			Getenv: envFunc(nil),
-			File:   NewFile(),
-			TauriLoader: func() (*TauriConfig, error) {
-				return &TauriConfig{BaseURL: "http://127.0.0.1:6722", Token: "tauri-token"}, nil
-			},
-		})
+	t.Run("无 flag/env/profile 时不产生任何地址（隐式回退已删除）", func(t *testing.T) {
+		res, err := Resolve(ResolveOptions{Getenv: envFunc(nil), File: NewFile()})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res.BaseURL != "http://127.0.0.1:6722" || res.Source("base_url") != SourceTauri {
-			t.Fatalf("base_url = %q (%s), 期望 Tauri 回退", res.BaseURL, res.Source("base_url"))
+		if res.BaseURL != "" || res.Token != "" {
+			t.Fatalf("res = %+v, 期望空地址（不得自动连任何地址）", res)
 		}
-		if res.Token != "tauri-token" || res.Source("token") != SourceTauri {
-			t.Fatalf("token = %q, 期望 Tauri 回退", res.Token)
+		if res.Source("base_url") != "" {
+			t.Fatalf("base_url 来源 = %q, 期望空", res.Source("base_url"))
 		}
 	})
 
-	t.Run("Tauri 回退：有 profile 时不触发", func(t *testing.T) {
-		called := false
-		res, err := Resolve(ResolveOptions{
-			Getenv: envFunc(nil),
-			File:   fileWithProfile(),
-			TauriLoader: func() (*TauriConfig, error) {
-				called = true
-				return &TauriConfig{BaseURL: "http://127.0.0.1:6722", Token: "tauri-token"}, nil
-			},
-		})
+	t.Run("profile 的 FromDesktop 标记随解析带出", func(t *testing.T) {
+		f := NewFile()
+		f.SetProfile("foo", Profile{BaseURL: "http://127.0.0.1:6722", Token: "tauri-token", FromDesktop: true})
+		f.ActiveProfile = "foo"
+		res, err := Resolve(ResolveOptions{Getenv: envFunc(nil), File: f})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if called {
-			t.Fatal("存在有效 profile 时不应触发 Tauri 回退")
+		if !res.ProfileFromDesktop || res.ProfileName != "foo" {
+			t.Fatalf("res = %+v, 期望带出 foo 的桌面端标记", res)
 		}
-		if res.Source("base_url") != SourceProfile {
-			t.Fatalf("base_url 来源 = %s, 期望 profile", res.Source("base_url"))
+		if res.BaseURL != "http://127.0.0.1:6722" || res.Source("base_url") != SourceProfile {
+			t.Fatalf("base_url = %q (%s), 期望 profile 层生效", res.BaseURL, res.Source("base_url"))
 		}
 	})
 
@@ -316,11 +305,101 @@ func TestMaskToken(t *testing.T) {
 }
 
 func TestDirFrom(t *testing.T) {
-	dir, err := DirFrom(envFunc(map[string]string{EnvXDGConfigHome: "/tmp/xdg"}))
+	t.Run("统一为家目录下的 .gtgw", func(t *testing.T) {
+		dir, err := DirFrom(envFunc(map[string]string{"HOME": "/tmp/home"}))
+		if err != nil {
+			t.Fatalf("DirFrom: %v", err)
+		}
+		if want := filepath.Join("/tmp/home", ".gtgw"); dir != want {
+			t.Fatalf("dir = %q, 期望 %q", dir, want)
+		}
+	})
+
+	t.Run("XDG_CONFIG_HOME 不再参与（旧路径不读）", func(t *testing.T) {
+		dir, err := DirFrom(envFunc(map[string]string{"HOME": "/tmp/home", "XDG_CONFIG_HOME": "/tmp/xdg"}))
+		if err != nil {
+			t.Fatalf("DirFrom: %v", err)
+		}
+		if want := filepath.Join("/tmp/home", ".gtgw"); dir != want {
+			t.Fatalf("dir = %q, 期望 %q（XDG_CONFIG_HOME 必须被忽略）", dir, want)
+		}
+	})
+
+	// Windows 分支只在本机是 Windows 时可执行；其它平台由 CI 的 Rust/Windows 门之外的
+	// 手工核对覆盖（本报告会写明「未在本机实跑 Windows」）。
+	t.Run("Windows 优先 USERPROFILE", func(t *testing.T) {
+		if runtime.GOOS != "windows" {
+			t.Skip("仅 Windows 上可验证 USERPROFILE 优先")
+		}
+		dir, err := DirFrom(envFunc(map[string]string{"USERPROFILE": `C:\Users\alice`, "HOME": `C:\msys\home`}))
+		if err != nil {
+			t.Fatalf("DirFrom: %v", err)
+		}
+		if want := filepath.Join(`C:\Users\alice`, ".gtgw"); dir != want {
+			t.Fatalf("dir = %q, 期望 %q", dir, want)
+		}
+	})
+}
+
+// TestOldConfigPathIsNotRead 是本次最容易写错的一条：旧路径 `~/.config/gtgw/config.json`
+// 里的 profile 不得被读到（不双读、不静默兼容）。
+func TestOldConfigPathIsNotRead(t *testing.T) {
+	home := t.TempDir()
+	oldDir := filepath.Join(home, ".config", "gtgw")
+	if err := os.MkdirAll(oldDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	legacy := []byte(`{"active_profile":"legacy","profiles":{"legacy":{"base_url":"http://127.0.0.1:6722","token":"old-token"}}}`)
+	if err := os.WriteFile(filepath.Join(oldDir, "config.json"), legacy, 0o600); err != nil {
+		t.Fatalf("write legacy: %v", err)
+	}
+
+	dir, err := DirFrom(envFunc(map[string]string{"HOME": home}))
 	if err != nil {
 		t.Fatalf("DirFrom: %v", err)
 	}
-	if want := filepath.Join("/tmp/xdg", "gtgw"); dir != want {
+	if want := filepath.Join(home, ".gtgw"); dir != want {
 		t.Fatalf("dir = %q, 期望 %q", dir, want)
+	}
+	f, err := LoadFrom(dir)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if name, _, ok := f.Active(); ok {
+		t.Fatalf("读到了旧路径的 profile（active=%q），旧路径必须不被读取", name)
+	}
+}
+
+// TestProfileFromDesktopRoundTrip 断言「来自本机桌面端」是**持久化**标记：
+// 落盘后能读回，且普通 profile 不会写出该字段（不能靠 profile 名字识别）。
+func TestProfileFromDesktopRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	f := NewFile()
+	f.SetProfile("foo", Profile{BaseURL: "http://127.0.0.1:6722", Token: "tauri-token", FromDesktop: true})
+	f.SetProfile("plain", Profile{BaseURL: "http://gateway.example:8720", Token: "manual-token"})
+	f.ActiveProfile = "foo"
+	if err := SaveTo(dir, f); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if n := strings.Count(string(raw), "from_desktop"); n != 1 {
+		t.Fatalf("落盘 JSON 里 from_desktop 出现 %d 次，期望 1 次（只有桌面端 profile）：%s", n, raw)
+	}
+
+	loaded, err := LoadFrom(dir)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	foo, _ := loaded.Profile("foo")
+	if !foo.FromDesktop || foo.Origin() != ProfileOriginDesktop {
+		t.Fatalf("foo = %+v, 期望带桌面端标记", foo)
+	}
+	plain, _ := loaded.Profile("plain")
+	if plain.FromDesktop || plain.Origin() != "" {
+		t.Fatalf("plain = %+v, 期望不带桌面端标记", plain)
 	}
 }

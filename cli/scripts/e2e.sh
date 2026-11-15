@@ -72,8 +72,12 @@ run_suite() {
   wait_ready "$port" || { echo "mock 启动失败"; return 1; }
 
   local MOCK="http://127.0.0.1:$port"
-  local CFG="$tmp/config"
-  export XDG_CONFIG_HOME="$CFG"
+  # 配置目录统一为 `<家目录>/.gtgw`（2026-11-15 起），所以隔离方式是**注入 HOME**：
+  # e2e 里所有 gtgw 调用都落在 $tmp/home/.gtgw，真实 ~/.gtgw 不会被创建或改写。
+  local HOME_DIR="$tmp/home"
+  mkdir -p "$HOME_DIR"
+  export HOME="$HOME_DIR"
+  export USERPROFILE="$HOME_DIR"   # Windows 上家目录看 USERPROFILE
   unset GTGW_URL GTGW_TOKEN GTGW_TENANT GTGW_TAURI_CONFIG
 
   echo "== version =="
