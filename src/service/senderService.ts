@@ -180,6 +180,19 @@ async function sendRequestToUpstream(
     finalHeaders.set("Content-Type", "application/json");
 
     // 3. 替换上游模型名
+    //
+    // 注意 `body` 此刻仍是客户端原始请求体：客户端请求名要在替换成 vendor 名**之前**取，
+    // 之后所有面向客户端的 model 输出、以及 thinking 凭据的模型绑定都用它（§4.7 / PC-009-C）。
+    // 口径取客户端请求体里的 model；极端情况下取不到再退回网关模型名（modelConfig.name）。
+    let clientModelName = modelConfig.name ?? "unknown";
+    try {
+        const clientBodyJson = JSON.parse(body);
+        if (typeof clientBodyJson?.model === "string" && clientBodyJson.model.trim()) {
+            clientModelName = clientBodyJson.model.trim();
+        }
+    } catch (e) {
+        // 请求体不是合法 JSON 时保持 modelConfig.name（后续转换/上游会各自报错）
+    }
     let upstreamBody = body;
     // 显式上游替换成 vendor model 名；自动上游名与网关模型名一致，替换为无操作
     if (vendorModelName) {
@@ -214,6 +227,9 @@ async function sendRequestToUpstream(
             );
         }
         console.log(`[senderService] Using protocol converter: ${converter.constructor.name}, client=${clientFormat}, upstream=${upstreamFormat}`);
+        // 必须在转换请求体**之前**注入客户端身份与上游来源：请求侧的 thinking 凭据解封要按它们核对绑定
+        converter.updateClientModel(clientModelName);
+        converter.setCredentialSource(`vendor:${vendor.id}`);
         upstreamBody = converter.convertRequestBody(upstreamBody);
         await requestActivityService.append(recordId, RequestActivityStage.CONVERSION, "协议转换", {
             from: clientFormat,

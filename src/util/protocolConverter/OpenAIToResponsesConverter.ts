@@ -206,6 +206,8 @@ export class OpenAIToResponsesConverter extends BaseConverter {
     // ─── 非流式响应转换 ───
 
     public convertResponse(upstreamRes: ResponsesNonStreamResponse, requestId?: string): OpenAIResponse {
+        // 记录上游名（仅作无客户端身份时的兜底，不参与正常路径的客户端可见输出）
+        if (upstreamRes?.model) this.upstreamModel = upstreamRes.model;
         const messageTexts: string[] = [];
         const reasoningTexts: string[] = [];
         const toolCalls: OpenAIResponse["choices"][0]["message"]["tool_calls"] = [];
@@ -269,7 +271,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
             id: responseId,
             object: "chat.completion",
             created: upstreamRes.created_at || Math.floor(Date.now() / 1000),
-            model: upstreamRes.model || this.requestModel,
+            model: this.clientFacingModel(),
             choices: [{
                 index: 0,
                 message,
@@ -297,7 +299,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                         id: this.getChatId(),
                         object: "chat.completion.chunk",
                         created: Math.floor(Date.now() / 1000),
-                        model: this.requestModel,
+                        model: this.clientFacingModel(),
                         choices: [{
                             index: 0,
                             delta: { role: "assistant", content: "" },
@@ -319,7 +321,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                             id: this.getChatId(),
                             object: "chat.completion.chunk",
                             created: Math.floor(Date.now() / 1000),
-                            model: this.requestModel,
+                            model: this.clientFacingModel(),
                             choices: [{
                                 index: 0,
                                 delta: {
@@ -349,7 +351,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                             id: this.getChatId(),
                             object: "chat.completion.chunk",
                             created: Math.floor(Date.now() / 1000),
-                            model: this.requestModel,
+                            model: this.clientFacingModel(),
                             choices: [{
                                 index: 0,
                                 delta: { content: delta },
@@ -369,7 +371,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                             id: this.getChatId(),
                             object: "chat.completion.chunk",
                             created: Math.floor(Date.now() / 1000),
-                            model: this.requestModel,
+                            model: this.clientFacingModel(),
                             choices: [{
                                 index: 0,
                                 delta: {
@@ -394,7 +396,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                             id: this.getChatId(),
                             object: "chat.completion.chunk",
                             created: Math.floor(Date.now() / 1000),
-                            model: this.requestModel,
+                            model: this.clientFacingModel(),
                             choices: [{
                                 index: 0,
                                 delta: { reasoning_content: delta },
@@ -432,7 +434,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                         id: this.getChatId(),
                         object: "chat.completion.chunk",
                         created: Math.floor(Date.now() / 1000),
-                        model: this.requestModel,
+                        model: this.clientFacingModel(),
                         choices: [{
                             index: 0,
                             delta: {},
@@ -452,7 +454,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                             id: this.getChatId(),
                             object: "chat.completion.chunk",
                             created: Math.floor(Date.now() / 1000),
-                            model: this.requestModel,
+                            model: this.clientFacingModel(),
                             choices: [],
                             usage: usageData,
                         }),

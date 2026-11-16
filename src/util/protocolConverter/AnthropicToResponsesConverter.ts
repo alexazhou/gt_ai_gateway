@@ -1,4 +1,5 @@
 import customError from "../../customError";
+import { FailedCode } from "../../constants";
 import { BaseConverter } from "./BaseConverter";
 import type {
     AnthropicContentBlock,
@@ -55,11 +56,6 @@ export class AnthropicToResponsesConverter extends BaseConverter {
     private blocksByKey = new Map<string, AnthropicStreamBlockState>();
     private blockByItemId = new Map<string, AnthropicStreamBlockState>();
     private itemTypesByOutputIndex = new Map<number, string>();
-    /**
-     * 上游响应里的 `model`：封包 thinking 恢复凭据时绑定它，与非流式 `convertResponse`
-     * 使用的 `upstreamRes.model` 同一口径（请求侧解封按客户端请求名核对）。
-     */
-    private upstreamModel?: string;
     private rawUsage: RawResponsesUsage = {};
 
     // ─── 请求转换 ───
@@ -138,15 +134,20 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                             let encryptedContent: string | undefined;
                             let thinkingText = block.thinking || "";
                             if (block.signature) {
+                                // 模型绑定用客户端请求名（PC-009-C / §4.7）：封包侧已统一为客户端名，
+                                // 解封再查 `req.model`（已被替换成 vendor 名）会永远对不上。
                                 const unsealed = protocolConverterUtil.unsealThinkingSignature(
                                     block.signature,
                                     "responses",
-                                    req.model,
+                                    this.clientFacingModel(req.model),
+                                    this.credentialSource,
                                 );
                                 if (!unsealed) {
                                     throw new customError.AppError(
                                         "Incompatible or unverified thinking signature cannot be converted to Responses encrypted_content",
                                         400,
+                                        "invalid_request_error",
+                                        FailedCode.CONVERSION_ERROR,
                                     );
                                 }
                                 encryptedContent = unsealed.signature;
@@ -263,6 +264,8 @@ export class AnthropicToResponsesConverter extends BaseConverter {
     // ─── 非流式响应转换 ───
 
     public convertResponse(upstreamRes: ResponsesNonStreamResponse, requestId?: string): AnthropicResponse {
+        // 记录上游名（仅作无客户端身份时的兜底，不参与正常路径的客户端可见输出）
+        if (upstreamRes?.model) this.upstreamModel = upstreamRes.model;
         const content: AnthropicContentBlock[] = [];
 
         for (const item of upstreamRes.output) {
@@ -292,7 +295,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                         signature: protocolConverterUtil.sealThinkingSignature(
                             "responses",
                             item.encrypted_content || "",
-                            { model: upstreamRes.model, thinking: thinkingText },
+                            { model: this.clientFacingModel(), source: this.credentialSource, thinking: thinkingText },
                         ),
                     });
                 }
@@ -315,7 +318,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
             type: "message",
             role: "assistant",
             content,
-            model: upstreamRes.model,
+            model: this.clientFacingModel(),
             stop_reason: stopReason,
             usage: protocolConverterUtil.responsesUsageToAnthropic(
                 protocolConverterUtil.mergeResponsesUsage({}, upstreamRes.usage),
@@ -373,7 +376,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                             type: "message",
                             role: "assistant",
                             content: [],
-                            model: this.requestModel,
+                            model: this.clientFacingModel(),
                             stop_reason: null,
                             usage: {
                                 ...startUsage,
@@ -650,7 +653,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
             const signature = protocolConverterUtil.sealThinkingSignature(
                 "responses",
                 encryptedContent,
-                { model: this.upstreamModel ?? this.requestModel, thinking: thinkingText },
+                { model: this.clientFacingModel(), source: this.credentialSource, thinking: thinkingText },
             );
             if (!signature) continue;
 

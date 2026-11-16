@@ -1,4 +1,5 @@
 import customError from "../../customError";
+import { FailedCode } from "../../constants";
 import { BaseConverter } from "./BaseConverter";
 import type {
     AnthropicContentBlock,
@@ -208,15 +209,21 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             let signature = "";
             let thinkingText = item.summary?.map((s) => s.text).join("\n") || "";
             if (item.encrypted_content) {
+                // 模型绑定用**客户端请求名**（PC-009-C）：`targetModel` 是请求体里的 model，
+                // 真实链路中它已被 senderService 替换成 vendor 名，和封包侧的客户端名对不上，
+                // 于是在别名路由下「合法回放」会被网关自己判成不兼容（400）。
                 const unsealed = protocolConverterUtil.unsealThinkingSignature(
                     item.encrypted_content,
                     "anthropic",
-                    targetModel,
+                    this.clientFacingModel(targetModel),
+                    this.credentialSource,
                 );
                 if (!unsealed) {
                     throw new customError.AppError(
                         "Incompatible or unverified reasoning encrypted_content cannot be converted to Anthropic thinking signature",
                         400,
+                        "invalid_request_error",
+                        FailedCode.CONVERSION_ERROR,
                     );
                 }
                 signature = unsealed.signature;
@@ -331,6 +338,8 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
     // ─── 非流式响应转换 ───
 
     public convertResponse(upstreamRes: AnthropicResponse, requestId?: string): ResponsesNonStreamResponse {
+        // 记录上游名（仅作无客户端身份时的兜底，不参与正常路径的客户端可见输出）
+        if (upstreamRes?.model) this.upstreamModel = upstreamRes.model;
         const output: ResponsesNonStreamResponse["output"] = [];
         const responseId = requestId || upstreamRes.id || `resp_${Date.now()}`;
 
@@ -360,7 +369,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                     encrypted_content: protocolConverterUtil.sealThinkingSignature(
                         "anthropic",
                         block.signature || "",
-                        { model: upstreamRes.model, thinking: block.thinking },
+                        { model: this.clientFacingModel(), source: this.credentialSource, thinking: block.thinking },
                     ),
                     summary: block.thinking ? [{ type: "summary_text", text: block.thinking }] : [],
                 });
@@ -375,7 +384,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             ...(upstreamRes.stop_reason === "max_tokens"
                 ? { incomplete_details: { reason: "max_output_tokens" } }
                 : {}),
-            model: upstreamRes.model,
+            model: this.clientFacingModel(),
             output,
             usage: protocolConverterUtil.anthropicUsageToResponses(
                 protocolConverterUtil.mergeAnthropicUsage({}, upstreamRes.usage),
@@ -421,6 +430,9 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                             object: "response",
                             created_at: Math.floor(Date.now() / 1000),
                             status: "in_progress",
+                            // §4.7：流式响应里面向客户端的 model 一律用客户端请求名，
+                            // created 这一帧也不例外（此前整帧缺 model 字段）
+                            model: this.clientFacingModel(),
                             output: [],
                         },
                     }),
@@ -527,7 +539,9 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                                 id: item.id,
                                 type: "reasoning",
                                 status: "in_progress",
-                                encrypted_content: item.signature,
+                                // §4.6：未完成的 reasoning 项不带 encrypted_content（不能塞空串占位），
+                                // 未完成时签名往往还没到，凭据统一只在 done / completed 出现。
+                                ...(item.signature ? { encrypted_content: item.signature } : {}),
                                 summary: [],
                             },
                         }),
@@ -637,7 +651,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                             created_at: Math.floor(Date.now() / 1000),
                             status: isIncomplete ? "incomplete" : "completed",
                             ...(isIncomplete ? { incomplete_details: { reason: "max_output_tokens" } } : {}),
-                            model: this.requestModel,
+                            model: this.clientFacingModel(),
                             output: outputArr,
                             usage: protocolConverterUtil.anthropicUsageToResponses(this.rawUsage),
                         },
@@ -671,7 +685,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                 encrypted_content: protocolConverterUtil.sealThinkingSignature(
                     "anthropic",
                     item.signature,
-                    { model: this.requestModel, thinking: item.thinking },
+                    { model: this.clientFacingModel(), source: this.credentialSource, thinking: item.thinking },
                 ),
                 summary: item.thinking ? [{ type: "summary_text", text: item.thinking }] : [],
             };
