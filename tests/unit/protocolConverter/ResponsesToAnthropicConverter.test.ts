@@ -66,8 +66,9 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         const result = converter.convertRequest(req);
 
         expect(result.model).toBe("gpt-4.1");
+        // #295：最后一条 user 的字符串 content 规范化为 text 块并带缓存标记（文本逐字一致）
         expect(result.messages).toEqual([
-            { role: "user", content: "Hello" },
+            { role: "user", content: [{ type: "text", text: "Hello", cache_control: { type: "ephemeral" } }] },
         ]);
     });
 
@@ -86,7 +87,10 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
 
         const result = converter.convertRequest(req);
 
-        expect(result.system).toBe("You are a helpful assistant.");
+        // #295：instructions 汇总为 system 后规范化为 text 块并带缓存标记
+        expect(result.system).toEqual([
+            { type: "text", text: "You are a helpful assistant.", cache_control: { type: "ephemeral" } },
+        ]);
     });
 
     it("should convert system message in input to system prompt", () => {
@@ -108,7 +112,10 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
 
         const result = converter.convertRequest(req);
 
-        expect(result.system).toBe("System prompt from input");
+        // #295：input 里的 system 消息汇总为 system 后规范化为 text 块并带缓存标记
+        expect(result.system).toEqual([
+            { type: "text", text: "System prompt from input", cache_control: { type: "ephemeral" } },
+        ]);
         expect(result.messages).toHaveLength(1);
         expect(result.messages[0].role).toBe("user");
     });
@@ -132,7 +139,10 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
 
         const result = converter.convertRequest(req);
 
-        expect(result.system).toBe("Developer instruction");
+        // #295：developer 消息汇总为 system 后规范化为 text 块并带缓存标记
+        expect(result.system).toEqual([
+            { type: "text", text: "Developer instruction", cache_control: { type: "ephemeral" } },
+        ]);
         expect(result.messages).toHaveLength(1);
         expect(result.messages[0].role).toBe("user");
     });
@@ -308,9 +318,10 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         const result = converter.convertRequest(req);
 
         expect(result.messages).toHaveLength(1);
+        // #295：合并顺序不变，最后一块带缓存标记
         expect(result.messages[0].content).toEqual([
             { type: "text", text: "first" },
-            { type: "text", text: "second" },
+            { type: "text", text: "second", cache_control: { type: "ephemeral" } },
         ]);
     });
 
@@ -330,7 +341,8 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         const content = result.messages[1].content as AnthropicContentBlock[];
         expect(content).toEqual([
             { type: "tool_result", tool_use_id: "call_1", content: "Sunny" },
-            { type: "text", text: "谢谢" },
+            // #295：tool_result 之后的 user 文本合并在同一消息里，最后一块带缓存标记
+            { type: "text", text: "谢谢", cache_control: { type: "ephemeral" } },
         ]);
     });
 
@@ -644,7 +656,12 @@ describe("ResponsesToAnthropicConverter - convertRequest", () => {
         expect((toolResultMsg.content as any[])[0].type).toBe("tool_result");
         expect((toolResultMsg.content as any[])[1].type).toBe("tool_result");
         expect((toolResultMsg.content as any[])[2].type).toBe("tool_result");
-        expect((toolResultMsg.content as any[])[3]).toEqual({ type: "text", text: "Done" });
+        // #295：末尾 text 块带缓存标记，前面三个 tool_result 不变
+        expect((toolResultMsg.content as any[])[3]).toEqual({
+            type: "text",
+            text: "Done",
+            cache_control: { type: "ephemeral" },
+        });
 
         // 验证 tool_result 的 tool_use_id 正确对应
         expect((toolResultMsg.content as any[])[0].tool_use_id).toBe("call_00");

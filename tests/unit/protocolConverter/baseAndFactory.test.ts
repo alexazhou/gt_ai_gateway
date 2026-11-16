@@ -149,7 +149,10 @@ describe("ConverterFactory", () => {
         }) as AnthropicRequest;
         // P1-07：缺省值改为安全缺省 4096
         expect(upstreamRequest.max_tokens).toBe(4096);
-        expect(upstreamRequest.messages[0].content).toBe("Hello");
+        // #295：工厂链路同样经过收尾补全 —— 最后一条 user 规范化为带标记的 text 块
+        expect(upstreamRequest.messages[0].content).toEqual([
+            { type: "text", text: "Hello", cache_control: { type: "ephemeral" } },
+        ]);
 
         const clientResponse = converter!.convertResponse({
             id: "msg_123",
@@ -238,7 +241,12 @@ describe("ConverterFactory - Responses ↔ Anthropic routing", () => {
                 },
             ],
         }) as AnthropicRequest;
-        expect((upstreamReq.messages[0].content as AnthropicContentBlock[])[0]).toEqual({ type: "text", text: "hello" });
+        // #295：Responses 路由也经过同一个收尾补全 —— 文本逐字一致、最后一块带标记
+        expect((upstreamReq.messages[0].content as AnthropicContentBlock[])[0]).toEqual({
+            type: "text",
+            text: "hello",
+            cache_control: { type: "ephemeral" },
+        });
 
         const clientRes = converter!.convertResponse({
             id: "msg_123",

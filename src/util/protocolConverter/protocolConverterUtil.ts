@@ -2,9 +2,12 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import customError from "../../customError";
 import objectUtil from "../objectUtil";
 import type {
+    AnthropicCacheControl,
     AnthropicContentBlock,
     AnthropicRequest,
     AnthropicStreamUsage,
+    AnthropicTextBlock,
+    AnthropicTool,
     AnthropicUsage,
 } from "../protocol/anthropicTypes";
 import type { OpenAIStreamUsage, OpenAIUsage } from "../protocol/openaiTypes";
@@ -237,11 +240,212 @@ function appendAnthropicMessage(
 }
 
 
+// ─── Anthropic 请求缓存断点补全（#295，方案见 doc/tech/anthropic_cache_control_design.md）───
+
+/**
+ * 显式缓存断点总数上限。文档 §4.4 第一版按 4 个设计；
+ * 目标上游与兼容供应商的真实限制需要在有凭据的环境确认（§8.2 第 1 条）。
+ */
+const MAX_ANTHROPIC_CACHE_BREAKPOINTS = 4;
+
+/** 自动补全写入的标记；**不设 ttl**，用目标协议默认短期缓存。 */
+const ANTHROPIC_EPHEMERAL_CACHE: AnthropicCacheControl = { type: "ephemeral" };
+
+/**
+ * 可自动标记的内容块类型。`thinking` 明确**不在**其中（§4.3）：
+ * 不直接给 thinking 块加标记，也不改其明文或 signature。
+ */
+const ANTHROPIC_CACHEABLE_BLOCK_TYPES: ReadonlySet<string> = new Set(["text", "image", "tool_result"]);
+
+function isLegalAnthropicCacheControl(value: unknown): value is AnthropicCacheControl {
+    return objectUtil.isRecord(value) && (value as { type?: unknown }).type === "ephemeral";
+}
+
+/**
+ * 已有断点的扫描结果：
+ * - `count` 合法标记数
+ * - `illegal` 非法标记的位置
+ * - `positions` 合法标记的位置（给「超过上限」的错误文案点名用）
+ */
+interface AnthropicCacheScan {
+    count: number;
+    illegal: string[];
+    positions: string[];
+}
+
+function scanAnthropicCacheBreakpoints(req: AnthropicRequest): AnthropicCacheScan {
+    const illegal: string[] = [];
+    const positions: string[] = [];
+    let count = 0;
+
+    const visit = (holder: { cache_control?: unknown }, where: string): void => {
+        if (holder.cache_control === undefined) {
+            return;
+        }
+        if (isLegalAnthropicCacheControl(holder.cache_control)) {
+            count += 1;
+            positions.push(where);
+        } else {
+            illegal.push(where);
+        }
+    };
+
+    (req.tools ?? []).forEach((tool, index) => visit(tool, `tools[${index}]`));
+
+    if (Array.isArray(req.system)) {
+        req.system.forEach((block, index) => visit(block, `system[${index}]`));
+    }
+
+    req.messages.forEach((message, messageIndex) => {
+        if (!Array.isArray(message.content)) {
+            return;
+        }
+        message.content.forEach((block, blockIndex) => {
+            // 只检查**内容块本身**：tool_result 的嵌套 content、工具 input_schema、
+            // 工具入参里的同名键都是业务数据，不是协议断点（§4.4 末段）。
+            visit(block, `messages[${messageIndex}].content[${blockIndex}]`);
+        });
+    });
+
+    return { count, illegal, positions };
+}
+
+/** 消息断点：最后一条 user 消息里最后一个可标记块；无可标记块时跳过（不越界去标 assistant）。 */
+function markLastUserMessageBlock(req: AnthropicRequest): boolean {
+    for (let index = req.messages.length - 1; index >= 0; index -= 1) {
+        const message = req.messages[index];
+        if (message.role !== "user") {
+            continue;
+        }
+        if (typeof message.content === "string") {
+            if (message.content.length === 0) {
+                return false;
+            }
+            const block: AnthropicContentBlock = {
+                type: "text",
+                text: message.content,
+                cache_control: { ...ANTHROPIC_EPHEMERAL_CACHE },
+            };
+            message.content = [block];
+            return true;
+        }
+        for (let blockIndex = message.content.length - 1; blockIndex >= 0; blockIndex -= 1) {
+            const block = message.content[blockIndex];
+            if (!ANTHROPIC_CACHEABLE_BLOCK_TYPES.has(block.type)) {
+                continue;
+            }
+            if (block.cache_control !== undefined) {
+                // 该位置已有标记：保留原位置，不重复添加（幂等的关键一环）
+                return false;
+            }
+            if (block.type === "text" && !block.text) {
+                continue;
+            }
+            block.cache_control = { ...ANTHROPIC_EPHEMERAL_CACHE };
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+/** 系统断点：最后一个可标记的 system 文本块；字符串先规范化为单文本块数组。 */
+function markLastSystemBlock(req: AnthropicRequest): boolean {
+    if (req.system === undefined) {
+        return false;
+    }
+    if (typeof req.system === "string") {
+        if (req.system.length === 0) {
+            return false;
+        }
+        const block: AnthropicTextBlock = {
+            type: "text",
+            text: req.system,
+            cache_control: { ...ANTHROPIC_EPHEMERAL_CACHE },
+        };
+        req.system = [block];
+        return true;
+    }
+    for (let index = req.system.length - 1; index >= 0; index -= 1) {
+        const block = req.system[index];
+        if (block.type !== "text" || !block.text) {
+            continue;
+        }
+        if (block.cache_control !== undefined) {
+            return false;
+        }
+        block.cache_control = { ...ANTHROPIC_EPHEMERAL_CACHE };
+        return true;
+    }
+    return false;
+}
+
+/** 工具断点：最后一个工具定义。 */
+function markLastTool(req: AnthropicRequest): boolean {
+    const tools: AnthropicTool[] | undefined = req.tools;
+    if (!tools || tools.length === 0) {
+        return false;
+    }
+    const tool = tools[tools.length - 1];
+    if (tool.cache_control !== undefined) {
+        return false;
+    }
+    tool.cache_control = { ...ANTHROPIC_EPHEMERAL_CACHE };
+    return true;
+}
+
+/**
+ * 为「转 Anthropic」的请求补全显式缓存断点（Chat→Anthropic 与 Responses→Anthropic 共用）。
+ *
+ * 规则（文档 §4，实现前已定稿，此处只落一份）：
+ * - 三处候选：`tools` 最后一个工具 / `system` 最后一个可标记文本块 /
+ *   `messages` 最后一条 user 消息的最后一个可标记块（含 `tool_result` 外层块）。
+ * - 优先级：消息 → system → tools（§4.4 第 3 条，有限预算时先补最能随对话推进而复用的前缀）。
+ * - 已有合法标记保留原位置与设置；候选位置已有标记则不重复添加 ⇒ 同一请求重复调用结果相同（幂等）。
+ * - 非法标记或已有标记超过上限 ⇒ **明确拒绝**（400），不静默删除客户端配置。
+ * - 空 system / 空内容 / 空工具不生成占位块；`thinking` 不加标记。
+ *
+ * 原地修改并返回同一个请求对象：调用点都是「构造完成后、返回前」，无需额外拷贝。
+ */
+function applyAnthropicCacheControl(req: AnthropicRequest): AnthropicRequest {
+    const scan = scanAnthropicCacheBreakpoints(req);
+    // 两种拒绝的文案都必须自带三件事：**位置**（哪个字段带的问题）、**原因**（非法取值 / 超上限，
+    // 两者要能一眼区分）、**上限值**。只说「invalid cache_control」等于让客户端换个地方猜。
+    if (scan.illegal.length > 0) {
+        throw new customError.AppError(
+            `Invalid cache_control at ${scan.illegal.join(", ")}: unsupported value, `
+            + `only {"type":"ephemeral"} is accepted; this gateway allows at most `
+            + `${MAX_ANTHROPIC_CACHE_BREAKPOINTS} cache breakpoints per request`,
+            400,
+        );
+    }
+    if (scan.count > MAX_ANTHROPIC_CACHE_BREAKPOINTS) {
+        throw new customError.AppError(
+            `Anthropic request carries ${scan.count} cache breakpoints `
+            + `(${scan.positions.join(", ")}), exceeding the limit of `
+            + `${MAX_ANTHROPIC_CACHE_BREAKPOINTS}; refusing to drop client markers`,
+            400,
+        );
+    }
+
+    let remaining = MAX_ANTHROPIC_CACHE_BREAKPOINTS - scan.count;
+    if (remaining > 0 && markLastUserMessageBlock(req)) {
+        remaining -= 1;
+    }
+    if (remaining > 0 && markLastSystemBlock(req)) {
+        remaining -= 1;
+    }
+    if (remaining > 0 && markLastTool(req)) {
+        remaining -= 1;
+    }
+    return req;
+}
+
+
 /**
  * 解析工具调用的 JSON 参数；非法 JSON 或非对象结果时返回空对象。
  */
-function parseToolArguments(args: string): Record<string, unknown> {
-    try {
+function parseToolArguments(args: string): Record<string, unknown> {    try {
         const parsed: unknown = JSON.parse(args);
         return objectUtil.isRecord(parsed) ? parsed : {};
     } catch {
@@ -426,6 +630,7 @@ export default {
     extractResponsesText,
     anthropicImageSourceToUrl,
     anthropicImageSourceFromUrl,
+    applyAnthropicCacheControl,
     mergeOpenAIUsage,
     mergeAnthropicUsage,
     mergeResponsesUsage,

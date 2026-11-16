@@ -260,9 +260,14 @@ describe("AI Protocol Conversion API", () => {
             .filter((request) => Array.isArray(request.json?.messages?.[0]?.content)
                 && request.json.messages[0].content.some((part: any) => part.type === "image"));
         expect(captured).toHaveLength(1);
+        // #295：这一断言看的就是**最终发给上游的请求体**，缓存标记必须熬过插件链后仍然在
         expect(captured[0].json.messages[0].content).toEqual([
             { type: "text", text: "描述这张图片" },
-            { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+            {
+                type: "image",
+                source: { type: "base64", media_type: "image/png", data: "AAAA" },
+                cache_control: { type: "ephemeral" },
+            },
         ]);
     }, 30000);
 
@@ -547,7 +552,10 @@ describe("AI Protocol Conversion API", () => {
             .filter((request) => JSON.stringify(request.json).includes(marker));
         expect(captured).toHaveLength(1);
         expect(captured[0].json.input).toBeUndefined();
-        expect(captured[0].json.messages[0].content).toEqual([{ type: "text", text: marker }]);
+        // #295：最终上游请求体里，最后一条 user 的 text 块带缓存标记
+        expect(captured[0].json.messages[0].content).toEqual([
+            { type: "text", text: marker, cache_control: { type: "ephemeral" } },
+        ]);
     }, 30000);
 
 
@@ -920,7 +928,8 @@ describe("AI Protocol Conversion API", () => {
                 role: "user",
                 content: [
                     { type: "tool_result", tool_use_id: marker, content: "42" },
-                    { type: "text", text: marker },
+                    // #295：tool_result 与后续 user 文本合并在同一条 user 轮次里，最后一块带缓存标记
+                    { type: "text", text: marker, cache_control: { type: "ephemeral" } },
                 ],
             },
         ]);
@@ -989,13 +998,14 @@ describe("AI Protocol Conversion API", () => {
         const captured = (await upstreamCaptureHelper.list())
             .filter((request) => JSON.stringify(request.json).includes(markerA));
         expect(captured).toHaveLength(1);
+        // #295：text/image/text 顺序不变，最后可标记块（末尾 text）带缓存标记
         expect(captured[0].json.messages[0].content).toEqual([
             { type: "text", text: markerA },
             {
                 type: "image",
                 source: { type: "base64", media_type: "image/png", data: "AAAA" },
             },
-            { type: "text", text: markerB },
+            { type: "text", text: markerB, cache_control: { type: "ephemeral" } },
         ]);
     }, 30000);
 

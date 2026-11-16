@@ -33,7 +33,10 @@ describe("OpenAIToAnthropicConverter - convertRequest", () => {
         expect(result.model).toBe("gpt-4");
         expect(result.messages).toHaveLength(1);
         expect(result.messages[0].role).toBe("user");
-        expect(result.messages[0].content).toBe("Hello");
+        // #295：最后一条 user 的字符串 content 规范化为 text 块并带缓存标记（文本逐字一致）
+        expect(result.messages[0].content).toEqual([
+            { type: "text", text: "Hello", cache_control: { type: "ephemeral" } },
+        ]);
         expect(result.max_tokens).toBe(1024);
     });
 
@@ -55,7 +58,12 @@ describe("OpenAIToAnthropicConverter - convertRequest", () => {
 
         expect(result.messages[0].content).toEqual([
             { type: "text", text: "描述这张图片" },
-            { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+            {
+                type: "image",
+                source: { type: "base64", media_type: "image/png", data: "AAAA" },
+                // #295：最后一个可标记块（image）带缓存标记
+                cache_control: { type: "ephemeral" },
+            },
         ]);
     });
 
@@ -77,7 +85,12 @@ describe("OpenAIToAnthropicConverter - convertRequest", () => {
 
         expect(result.messages[0].content).toEqual([
             { type: "text", text: "描述这张图片" },
-            { type: "image", source: { type: "url", url: "https://example.com/cat.png" } },
+            {
+                type: "image",
+                source: { type: "url", url: "https://example.com/cat.png" },
+                // #295：最后一个可标记块（image）带缓存标记
+                cache_control: { type: "ephemeral" },
+            },
         ]);
     });
 
@@ -94,7 +107,10 @@ describe("OpenAIToAnthropicConverter - convertRequest", () => {
 
         const result = converter.convertRequest(openaiReq) as AnthropicRequest;
 
-        expect(result.messages[0].content).toEqual([{ type: "text", text: "Hello" }]);
+        // #295：文本内容与块顺序不变，最后一个可标记块带缓存标记
+        expect(result.messages[0].content).toEqual([
+            { type: "text", text: "Hello", cache_control: { type: "ephemeral" } },
+        ]);
     });
 
     it("should extract system messages into Anthropic system field", () => {
@@ -109,7 +125,10 @@ describe("OpenAIToAnthropicConverter - convertRequest", () => {
 
         const result = converter.convertRequest(openaiReq);
 
-        expect(result.system).toBe("You are a helpful assistant.");
+        // #295：system 字符串规范化为 text 块并带缓存标记（文本逐字一致）
+        expect(result.system).toEqual([
+            { type: "text", text: "You are a helpful assistant.", cache_control: { type: "ephemeral" } },
+        ]);
         expect(result.messages).toHaveLength(1);
         expect(result.messages[0].role).toBe("user");
     });
@@ -244,9 +263,10 @@ describe("OpenAIToAnthropicConverter - convertRequest", () => {
         const result = converter.convertRequest(openaiReq);
 
         expect(result.messages).toHaveLength(1);
+        // #295：合并顺序不变，最后一块带缓存标记
         expect(result.messages[0].content).toEqual([
             { type: "text", text: "first" },
-            { type: "text", text: "second" },
+            { type: "text", text: "second", cache_control: { type: "ephemeral" } },
         ]);
     });
 
@@ -274,7 +294,8 @@ describe("OpenAIToAnthropicConverter - convertRequest", () => {
         const content = result.messages[1].content as AnthropicContentBlock[];
         expect(content).toEqual([
             { type: "tool_result", tool_use_id: "call_1", content: "Sunny" },
-            { type: "tool_result", tool_use_id: "call_2", content: "10:00" },
+            // #295：多个 tool_result 顺序与 tool_use_id 不变，最后一个外层块带缓存标记
+            { type: "tool_result", tool_use_id: "call_2", content: "10:00", cache_control: { type: "ephemeral" } },
         ]);
     });
 
@@ -302,7 +323,8 @@ describe("OpenAIToAnthropicConverter - convertRequest", () => {
         const content = result.messages[2].content as AnthropicContentBlock[];
         expect(content).toEqual([
             { type: "tool_result", tool_use_id: "call_123", content: "Sunny, 25°C" },
-            { type: "text", text: "Thanks" },
+            // #295：tool_result 与后续 user 文本合并在同一条 user 消息里，最后一块带缓存标记
+            { type: "text", text: "Thanks", cache_control: { type: "ephemeral" } },
         ]);
     });
 
@@ -350,7 +372,10 @@ describe("OpenAIToAnthropicConverter - convertRequest", () => {
         };
 
         const result = converter.convertRequest(openaiReq);
-        expect(result.system).toBe("First\n\nSecond");
+        // #295：多条 system 的汇总顺序与分隔符不变，最终 system 块带缓存标记
+        expect(result.system).toEqual([
+            { type: "text", text: "First\n\nSecond", cache_control: { type: "ephemeral" } },
+        ]);
     });
 
     it("should convert tool_choice variants", () => {
@@ -841,7 +866,10 @@ describe("OpenAIToAnthropicConverter - tool_choice / response_format 组合（P1
         const result = converter.convertRequest(request) as AnthropicRequest;
 
         expect(result.messages).toHaveLength(1);
-        expect(result.messages[0].content).toBe("return json");
+        // #295：response_format 不改内容，仅按缓存规则把最后一条 user 规范化为带标记的 text 块
+        expect(result.messages[0].content).toEqual([
+            { type: "text", text: "return json", cache_control: { type: "ephemeral" } },
+        ]);
         expect(result.max_tokens).toBeLessThanOrEqual(SAFE_MAX_TOKENS_UPPER_BOUND);
     });
 });
@@ -900,7 +928,10 @@ describe("OpenAIToAnthropicConverter - 补口判定点", () => {
 
         const result = converter.convertRequest(req) as AnthropicRequest;
 
-        expect(result.system).toBe("规则一\n规则二");
+        // #295：文本分片仍按换行拼接、图片不塞进 system；拼接结果落在单个 text 块上并带缓存标记
+        expect(result.system).toEqual([
+            { type: "text", text: "规则一\n规则二", cache_control: { type: "ephemeral" } },
+        ]);
     });
 
     it("tool 消息的 content 是数组 → tool_result 里只拼文本分片", () => {

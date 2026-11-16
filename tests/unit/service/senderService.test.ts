@@ -379,7 +379,10 @@ describe("convertRequestBody - OpenAI to Anthropic", () => {
         const result = convertRequestBody(body, ApiFormat.OPENAI, ApiFormat.ANTHROPIC);
         const parsed = JSON.parse(result);
 
-        expect(parsed.system).toBe("You are a helpful assistant.");
+        // #295：system 字符串规范化为 text 块并带缓存标记（文本逐字一致）
+        expect(parsed.system).toEqual([
+            { type: "text", text: "You are a helpful assistant.", cache_control: { type: "ephemeral" } },
+        ]);
         // System message should be removed from messages array
         const userMessages = parsed.messages.filter((m: any) => m.role === "system");
         expect(userMessages).toHaveLength(0);
