@@ -319,6 +319,8 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
     // ─── 非流式响应转换 ───
 
     public convertResponse(upstreamRes: OpenAIResponse, requestId?: string): ResponsesNonStreamResponse {
+        // 记录上游名（仅作无客户端身份时的兜底，不参与正常路径的客户端可见输出）
+        if (upstreamRes?.model) this.upstreamModel = upstreamRes.model;
         const output: ResponsesNonStreamResponse["output"] = [];
         const responseId = requestId || upstreamRes.id || `resp_${Date.now()}`;
         const message = upstreamRes.choices?.[0]?.message;
@@ -363,7 +365,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
             created_at: Math.floor(Date.now() / 1000),
             status,
             ...(incompleteDetails ? { incomplete_details: incompleteDetails } : {}),
-            model: upstreamRes.model,
+            model: this.clientFacingModel(),
             output,
             usage: protocolConverterUtil.openAIUsageToResponses(
                 protocolConverterUtil.mergeOpenAIUsage({}, upstreamRes.usage),
@@ -875,7 +877,7 @@ export class ResponsesToOpenAIConverter extends BaseConverter {
                         created_at: Math.floor(Date.now() / 1000),
                         status,
                         ...(incompleteDetails ? { incomplete_details: incompleteDetails } : {}),
-                        model: this.requestModel,
+                        model: this.clientFacingModel(),
                         output: outputArr,
                         usage: protocolConverterUtil.openAIUsageToResponses(this.rawUsage),
                     },

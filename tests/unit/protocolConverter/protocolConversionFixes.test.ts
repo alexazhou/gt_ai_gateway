@@ -494,9 +494,12 @@ describe("Protocol Conversion Fixes (PC-001 ~ PC-011)", () => {
                 delta: "hi",
             }))[0].data);
             expect(c1.id).toBe("chatcmpl-upstream");
-            expect(c1.model).toBe("actual_model");
+            // §4.7（#297）改判：面向客户端的 model 一律是**客户端请求名**，不再是上游名；
+            // PC-010 在这里要求的是「跨 chunk 保持一致」，一致性仍然成立，只是取值口径变了。
+            expect(c1.model).toBe("requested_model");
             expect(c2.id).toBe("chatcmpl-upstream");
-            expect(c2.model).toBe("actual_model");
+            expect(c2.model).toBe("requested_model");
+            expect(c2.model).toBe(c1.model);
 
             const r2a = ConverterFactory.create(ApiFormat.RESPONSES, ApiFormat.ANTHROPIC, "claude-3-7-sonnet")!;
             const resp = r2a.convertResponse({

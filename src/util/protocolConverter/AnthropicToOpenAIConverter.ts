@@ -281,6 +281,8 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
 
 
     public convertResponse(upstreamRes: OpenAIResponse, requestId?: string): AnthropicResponse {
+        // 记录上游名（仅作无客户端身份时的兜底，不参与正常路径的客户端可见输出）
+        if (upstreamRes?.model) this.upstreamModel = upstreamRes.model;
         const message = upstreamRes.choices[0]?.message;
         const contentBlocks: AnthropicContentBlock[] = [];
 
@@ -328,7 +330,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
             type: "message",
             role: "assistant",
             content: contentBlocks,
-            model: upstreamRes.model,
+            model: this.clientFacingModel(),
             stop_reason: stopReason as AnthropicResponse["stop_reason"],
             usage: protocolConverterUtil.openAIUsageToAnthropic(
                 protocolConverterUtil.mergeOpenAIUsage({}, upstreamRes.usage),
@@ -541,7 +543,7 @@ export class AnthropicToOpenAIConverter extends BaseConverter {
                         id: this.responseId,
                         type: "message",
                         role: "assistant",
-                        model: this.requestModel,
+                        model: this.clientFacingModel(),
                         content: [],
                         stop_reason: null,
                         stop_sequence: null,

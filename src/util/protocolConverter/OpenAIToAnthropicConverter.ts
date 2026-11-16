@@ -233,6 +233,8 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
 
 
     public convertResponse(upstreamRes: AnthropicResponse, requestId?: string): OpenAIResponse {
+        // 记录上游名（仅作无客户端身份时的兜底，不参与正常路径的客户端可见输出）
+        if (upstreamRes?.model) this.upstreamModel = upstreamRes.model;
         let textContent = "";
         let reasoningContent: string | undefined = undefined;
         let toolCalls: OpenAIMessage["tool_calls"] = undefined;
@@ -262,7 +264,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
             id: finalId.startsWith("chatcmpl-") ? finalId : `chatcmpl-${finalId.replace("msg_", "")}`,
             object: "chat.completion",
             created: Math.floor(Date.now() / 1000),
-            model: upstreamRes.model,
+            model: this.clientFacingModel(),
             choices: [
                 {
                     index: 0,
@@ -301,7 +303,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                 id: this.responseId,
                 object: "chat.completion.chunk",
                 created: Math.floor(Date.now() / 1000),
-                model: this.requestModel,
+                model: this.clientFacingModel(),
                 choices: [
                     {
                         index: 0,
@@ -322,7 +324,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                     id: this.responseId,
                     object: "chat.completion.chunk",
                     created: Math.floor(Date.now() / 1000),
-                    model: this.requestModel,
+                    model: this.clientFacingModel(),
                     choices: [
                         {
                             index: 0,
@@ -347,7 +349,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                     id: this.responseId,
                     object: "chat.completion.chunk",
                     created: Math.floor(Date.now() / 1000),
-                    model: this.requestModel,
+                    model: this.clientFacingModel(),
                     choices: [
                         {
                             index: 0,
@@ -369,7 +371,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                     id: this.responseId,
                     object: "chat.completion.chunk",
                     created: Math.floor(Date.now() / 1000),
-                    model: this.requestModel,
+                    model: this.clientFacingModel(),
                     choices: [
                         {
                             index: 0,
@@ -386,7 +388,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                     id: this.responseId,
                     object: "chat.completion.chunk",
                     created: Math.floor(Date.now() / 1000),
-                    model: this.requestModel,
+                    model: this.clientFacingModel(),
                     choices: [
                         {
                             index: 0,
@@ -403,7 +405,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                     id: this.responseId,
                     object: "chat.completion.chunk",
                     created: Math.floor(Date.now() / 1000),
-                    model: this.requestModel,
+                    model: this.clientFacingModel(),
                     choices: [
                         {
                             index: 0,
@@ -434,7 +436,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                 id: this.responseId,
                 object: "chat.completion.chunk",
                 created: Math.floor(Date.now() / 1000),
-                model: this.requestModel,
+                model: this.clientFacingModel(),
                 choices: [
                     {
                         index: 0,

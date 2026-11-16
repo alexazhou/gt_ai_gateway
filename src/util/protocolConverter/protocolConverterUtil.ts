@@ -546,6 +546,8 @@ interface SealedThinkingPayload {
     v: 1;
     src: "anthropic" | "responses";
     model?: string;
+    /** 上游来源标识（`vendor:<id>`）：凭据只对签出它的上游来源有效（PC-009-C） */
+    source?: string;
     thinking?: string;
     signature: string;
 }
@@ -558,7 +560,7 @@ interface SealedThinkingPayload {
 function sealThinkingSignature(
     src: "anthropic" | "responses",
     signature: string,
-    options?: { model?: string; thinking?: string },
+    options?: { model?: string; thinking?: string; source?: string },
 ): string {
     if (!signature) return "";
     const payload: SealedThinkingPayload = {
@@ -566,6 +568,7 @@ function sealThinkingSignature(
         src,
         signature,
         ...(options?.model ? { model: options.model } : {}),
+        ...(options?.source ? { source: options.source } : {}),
         ...(options?.thinking !== undefined ? { thinking: options.thinking } : {}),
     };
     const payloadB64 = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
@@ -583,7 +586,21 @@ function unsealThinkingSignature(
     token: string,
     expectedSrc: "anthropic" | "responses",
     expectedModel?: string,
-): { signature: string; thinking?: string } | null {
+    /**
+     * 期望的上游来源（`vendor:<id>`）。仅在**凭据自身带 source** 时校验：
+     * 老凭据没有该字段，保持向后兼容（否则升级瞬间在途多轮对话全部 400）。
+     */
+    expectedSource?: string,
+): {
+    signature: string;
+    thinking?: string;
+    /**
+     * 本次是否**真的**核对过来源：
+     * - `true`：凭据自带 `source` 且与期望值相等（新凭据，来源已强制校验）；
+     * - `false`：老凭据没有 `source` 字段 ⇒ 只校验了模型，来源**未校验**（调用方必须留痕）。
+     */
+    sourceChecked: boolean;
+} | null {
     if (!token || !token.startsWith(`${THINKING_SIG_PREFIX}.`)) {
         return null;
     }
@@ -617,9 +634,13 @@ function unsealThinkingSignature(
     if (expectedModel && typeof payload.model === "string" && payload.model !== expectedModel) {
         return null;
     }
+    if (expectedSource && typeof payload.source === "string" && payload.source !== expectedSource) {
+        return null;
+    }
     return {
         signature: payload.signature,
         thinking: typeof payload.thinking === "string" ? payload.thinking : undefined,
+        sourceChecked: Boolean(expectedSource && typeof payload.source === "string"),
     };
 }
 
