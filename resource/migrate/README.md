@@ -15,32 +15,29 @@ resource/migrate/migrate_NNNN/
 
 ## 编号规则（硬规则）
 
-1. **递增、不跳号、不复用。** 当前最新是 `migrate_0034`，下一个用 **`migrate_0035`**。
-2. **已发布的编号永久退役，即使目录被删除也不能再用。**
-   - **已退役：`migrate_0033`**（跨 isolate 限流 / 上游冷却，`rate_limit_bucket` / `upstream_health`）。
-     它曾随 `v1.9.1-beta1` 发布出去（`git tag --contains 5b29b86` 仅该 tag），
-     装过该 beta 的库里仍有它的记录；目录已删除，由 **`migrate_0034`** 收敛
-     （drop 两张表 + 删 `migrate_0033` 记录）。
-   - **为什么不能复用**：`readMigrationState()` 的判据是
-     `pending = available.filter(name => !appliedNames.has(name))`，**只覆盖「目录里有、库里没有」**。
-     若把新内容放进一个「库里已有记录」的编号，那个迁移会被**静默跳过**：不报错、不建表、
-     无任何日志，随后在运行时报「表不存在」。
+1. **只增不改**：已应用过的迁移，**文件不许改、`_migrations` 记录不许删**。
+   要撤销某个迁移建的东西，只能用**新编号追加一个反向迁移**（示例见 `migrate_0034`：它只 `DROP`
+   了 `migrate_0033` 建的两张表，`migrate_0033` 的文件与记录原样保留）。
+2. **递增、不跳号、不复用。** 当前最新是 `migrate_0034`，下一个用 **`migrate_0035`**。
+3. 若某编号对应的迁移目录真的被删除过（历史遗留），那个编号**永久不可复用**：
+   `readMigrationState()` 的判据是 `pending = available.filter(name => !appliedNames.has(name))`，
+   只覆盖「目录里有、库里没有」；把新内容塞进「库里已有记录」的编号会被**静默跳过**
+   （不报错、不建表、无日志，随后运行时报「表不存在」）。
 
 ## 反向差异是盲区（写迁移前必读）
 
 判据没有反向分支，所以「**库里有记录、目录里没有**」这种情况 `migrate()` / `status()` 都不会提示，
 只会显示 `up to date`（实测：库里留着已删迁移的记录时输出 `Applied: 33, Available: 32, Pending: 0`，
-版本号仍报 33）。
+版本号仍报 33）。这正是上面第 3 条「编号不可复用」的成因。
 
-要收敛这种状态，**必须显式写一个新迁移**去做清理，例如 `migrate_0034`：
+正因如此，**不要靠删目录来"撤销"迁移** —— 走「新编号 + 反向迁移」。
+若确实遇到历史遗留的这种状态，只能显式写一个迁移去清理，且清理时也只动对象、不动历史记录：
 
 ```sql
 DROP TABLE IF EXISTS <该迁移建的表>;
-DELETE FROM _migrations WHERE name = '<已删迁移的编号>';
 ```
 
-顺序无关（runner 在迁移 SQL 执行完之后才 `INSERT INTO _migrations` 记录新迁移），
-但 `DELETE` 的目标只能是**别的**编号，不要删自己。
+（`DELETE FROM _migrations` 属于改写历史，**不要做**。）
 
 > 待补用例：`tests/lifecycle/` 目前缺「库里有记录、目录里没有」的场景（任务单 #288），
 > 补上后这里可以改成指向该用例。
@@ -48,5 +45,4 @@ DELETE FROM _migrations WHERE name = '<已删迁移的编号>';
 ## 本地与 CI 口径
 
 - 本地只跑 sqlite（node / worker-local）；**MySQL 门交 GitHub CI**，本地不起 mysql 容器。
-- 迁移只许新增：已执行过的迁移内容不许改（改了对已升级的库不生效，只会让新旧库分叉）。
 - 真库迁移必须在合并之后执行，不在开发分支上动真实数据。

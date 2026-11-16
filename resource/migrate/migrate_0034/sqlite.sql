@@ -1,16 +1,13 @@
--- 收敛「装过 v1.9.1-beta1 的库」：撤销 migrate_0033（跨 isolate 限流 / 上游冷却两张表）
+-- 清掉 migrate_0033 建的两张表（跨 isolate 限流 / 上游冷却），**不修改历史迁移**
 --
--- 背景：#287 已把限流与冷却改回内存实现，migrate_0033 目录整目录删除。但装过
--- v1.9.1-beta1 的库（git tag --contains 5b29b86 仅该 tag）里仍留着这两张空表与
--- 一条 migrate_0033 记录，而迁移判据 pending = available − applied 只覆盖
--- 「目录有、库里没有」，反向差异永远不进判据 ⇒ migrate() 会一直报 up to date，
--- 表与记录永久残留。本迁移做显式收敛，让所有库自动对齐代码目录。
+-- 背景：#287 已把限流与上游冷却改回内存实现，这两张表不再被任何代码读写。
+-- 但 migrate_0033 是已发布过的历史迁移（随 v1.9.1-beta1），**文件与 _migrations 记录都保留**，
+-- 只在它之后追加本迁移做表清理 —— 迁移历史只增不改。
 --
--- 顺序：runner 在迁移 SQL 执行完之后才 INSERT INTO _migrations 记 0034，
--- 所以这里删 0033 的记录与随后写 0034 的记录不冲突。
--- 新库上执行同样安全：DROP IF EXISTS 无表可删，DELETE 无行可删。
+-- 顺序契约：本迁移只做 DROP，不触碰 _migrations（runner 会在本 SQL 执行完之后
+-- 自己 INSERT 一条 migrate_0034）。历史记录（含 migrate_0033）一律保留。
+--
+-- 全新库上同样安全：0033 先建表，本迁移随后删表，终态一致；DROP IF EXISTS 无表可删也不报错。
 
 DROP TABLE IF EXISTS rate_limit_bucket;
 DROP TABLE IF EXISTS upstream_health;
-
-DELETE FROM _migrations WHERE name = 'migrate_0033';
