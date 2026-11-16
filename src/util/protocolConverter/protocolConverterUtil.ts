@@ -261,14 +261,21 @@ function isLegalAnthropicCacheControl(value: unknown): value is AnthropicCacheCo
     return objectUtil.isRecord(value) && (value as { type?: unknown }).type === "ephemeral";
 }
 
-/** 已有断点的扫描结果：`count` 为合法标记数，`illegal` 记录非法标记的位置。 */
+/**
+ * 已有断点的扫描结果：
+ * - `count` 合法标记数
+ * - `illegal` 非法标记的位置
+ * - `positions` 合法标记的位置（给「超过上限」的错误文案点名用）
+ */
 interface AnthropicCacheScan {
     count: number;
     illegal: string[];
+    positions: string[];
 }
 
 function scanAnthropicCacheBreakpoints(req: AnthropicRequest): AnthropicCacheScan {
     const illegal: string[] = [];
+    const positions: string[] = [];
     let count = 0;
 
     const visit = (holder: { cache_control?: unknown }, where: string): void => {
@@ -277,6 +284,7 @@ function scanAnthropicCacheBreakpoints(req: AnthropicRequest): AnthropicCacheSca
         }
         if (isLegalAnthropicCacheControl(holder.cache_control)) {
             count += 1;
+            positions.push(where);
         } else {
             illegal.push(where);
         }
@@ -299,7 +307,7 @@ function scanAnthropicCacheBreakpoints(req: AnthropicRequest): AnthropicCacheSca
         });
     });
 
-    return { count, illegal };
+    return { count, illegal, positions };
 }
 
 /** 消息断点：最后一条 user 消息里最后一个可标记块；无可标记块时跳过（不越界去标 assistant）。 */
@@ -401,17 +409,21 @@ function markLastTool(req: AnthropicRequest): boolean {
  */
 function applyAnthropicCacheControl(req: AnthropicRequest): AnthropicRequest {
     const scan = scanAnthropicCacheBreakpoints(req);
+    // 两种拒绝的文案都必须自带三件事：**位置**（哪个字段带的问题）、**原因**（非法取值 / 超上限，
+    // 两者要能一眼区分）、**上限值**。只说「invalid cache_control」等于让客户端换个地方猜。
     if (scan.illegal.length > 0) {
         throw new customError.AppError(
-            `Invalid cache_control in Anthropic request at ${scan.illegal.join(", ")}: `
-            + `only {"type":"ephemeral"} is supported`,
+            `Invalid cache_control at ${scan.illegal.join(", ")}: unsupported value, `
+            + `only {"type":"ephemeral"} is accepted; this gateway allows at most `
+            + `${MAX_ANTHROPIC_CACHE_BREAKPOINTS} cache breakpoints per request`,
             400,
         );
     }
     if (scan.count > MAX_ANTHROPIC_CACHE_BREAKPOINTS) {
         throw new customError.AppError(
-            `Anthropic request already carries ${scan.count} cache breakpoints, `
-            + `exceeding the limit of ${MAX_ANTHROPIC_CACHE_BREAKPOINTS}; refusing to drop client markers`,
+            `Anthropic request carries ${scan.count} cache breakpoints `
+            + `(${scan.positions.join(", ")}), exceeding the limit of `
+            + `${MAX_ANTHROPIC_CACHE_BREAKPOINTS}; refusing to drop client markers`,
             400,
         );
     }

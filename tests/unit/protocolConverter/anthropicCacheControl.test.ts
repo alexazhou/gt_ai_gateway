@@ -335,7 +335,11 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
             messages: [{ role: "user", content: "问题" }],
         };
 
+        // 文案必须自带三件事：位置 / 原因（超上限）/ 上限值
         expect(() => protocolConverterUtil.applyAnthropicCacheControl(req)).toThrowError(/exceeding the limit of 4/);
+        expect(() => protocolConverterUtil.applyAnthropicCacheControl(req)).toThrowError(/tools\[0\]/);
+        expect(() => protocolConverterUtil.applyAnthropicCacheControl(req)).toThrowError(/tools\[4\]/);
+        expect(() => protocolConverterUtil.applyAnthropicCacheControl(req)).toThrowError(/carries 5 cache breakpoints/);
         // 拒绝时不改动请求：5 个标记原样在
         expect(collectBreakpoints(req)).toHaveLength(5);
     });
@@ -350,7 +354,12 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
             }],
         };
 
+        // 位置 / 原因（不支持取值，且与「超上限」措辞可区分）/ 上限值
         expect(() => protocolConverterUtil.applyAnthropicCacheControl(req)).toThrowError(/messages\[0\]\.content\[0\]/);
+        expect(() => protocolConverterUtil.applyAnthropicCacheControl(req)).toThrowError(/unsupported value/);
+        expect(() => protocolConverterUtil.applyAnthropicCacheControl(req)).toThrowError(/at most 4 cache breakpoints/);
+        // 原因可区分：非法这一条不能出现「超上限」的措辞
+        expect(() => protocolConverterUtil.applyAnthropicCacheControl(req)).not.toThrowError(/exceeding the limit/);
     });
 
     // ── 10. 工具 schema / 业务数据包含 cache_control ─────────────────────────
