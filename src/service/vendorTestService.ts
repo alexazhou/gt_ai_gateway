@@ -3,12 +3,14 @@ import { resolveUpstreamFormat } from "../util/protocolUtil/protocolUtil";
 import fetchUtil from "../util/fetchUtil";
 import abortTimeoutUtil from "../util/abortTimeoutUtil";
 import { ApiFormat, VendorAuthMode } from "../constants";
+import { buildVendorTestBody, normalizeContentMode, type TestContentMode } from "../util/protocol/testRequestUtil";
 
 
 export interface TestVendorOptions {
     format?: ApiFormat;
     model?: string;
     auto_convert?: boolean;
+    content_mode?: TestContentMode;
 }
 
 export interface TestVendorResult {
@@ -24,19 +26,16 @@ export interface TestVendorResult {
     request_body: unknown;
     response?: unknown;
     error?: string;
+    content_mode: TestContentMode;
 }
 
 
 /**
- * 按 API 格式构建请求头和请求体
+ * 按 API 格式构建请求头（鉴权逻辑与旧 buildRequest 一致）。
+ * 请求体已抽到 util/protocol/testRequestUtil（文本/多模态共用同一套三协议构造）。
  */
-function buildRequest(
-    vendor: SgVendor,
-    format: ApiFormat,
-    model: string,
-): { headers: Headers; body: string } {
+function buildHeaders(vendor: SgVendor, format: ApiFormat): Headers {
     const headers = new Headers();
-    let body = "";
 
     if (format === ApiFormat.ANTHROPIC) {
         if (vendor.config.auth_mode === VendorAuthMode.BEARER_TOKEN) {
@@ -45,31 +44,12 @@ function buildRequest(
             headers.set("x-api-key", vendor.token);
             headers.set("anthropic-version", "2023-06-01");
         }
-        headers.set("Content-Type", "application/json");
-        body = JSON.stringify({
-            model,
-            messages: [{ role: "user", content: "ping" }],
-            max_tokens: 1,
-        });
-    } else if (format === ApiFormat.RESPONSES) {
-        headers.set("Authorization", vendor.token.startsWith("Bearer ") ? vendor.token : `Bearer ${vendor.token}`);
-        headers.set("Content-Type", "application/json");
-        body = JSON.stringify({
-            model,
-            input: "ping",
-            max_output_tokens: 16,
-        });
     } else {
         headers.set("Authorization", vendor.token.startsWith("Bearer ") ? vendor.token : `Bearer ${vendor.token}`);
-        headers.set("Content-Type", "application/json");
-        body = JSON.stringify({
-            model,
-            messages: [{ role: "user", content: "ping" }],
-            max_tokens: 5,
-        });
     }
+    headers.set("Content-Type", "application/json");
 
-    return { headers, body };
+    return headers;
 }
 
 
@@ -100,6 +80,8 @@ export async function testVendorConnectivity(
         model = "test-ping",
         auto_convert = false,
     } = options;
+    // 缺省走文本模式：旧调用方不传 content_mode 时接口行为完全不变
+    const contentMode: TestContentMode = normalizeContentMode(options.content_mode);
 
     let requestFormat: ApiFormat = rawFormat;
     let convertedFrom: string | undefined;
@@ -115,7 +97,9 @@ export async function testVendorConnectivity(
     }
 
     const url = vendor.getUrlByFormat(requestFormat);
-    const { headers, body } = buildRequest(vendor, requestFormat, model);
+    // auto_convert 时按**最终上游协议**原生构造：多模态不会被协议转换丢掉
+    const headers = buildHeaders(vendor, requestFormat);
+    const body = buildVendorTestBody(requestFormat, model, contentMode);
 
     // 代理信息：原样返回存储的配置
     const proxyConfig = vendor.config.proxy;
@@ -137,6 +121,7 @@ export async function testVendorConnectivity(
             request_method: "POST",
             request_headers: sanitizeHeaders(headers),
             request_body: requestBodyDisplay,
+            content_mode: contentMode,
         };
     }
 
@@ -172,6 +157,7 @@ export async function testVendorConnectivity(
             request_headers: sanitizeHeaders(headers),
             request_body: requestBodyDisplay,
             response: responseData,
+            content_mode: contentMode,
         };
     } catch (error) {
         console.error(`[testVendor] Fetch failed for vendor ${vendor.name} (${vendor.id}) at ${url}:`, error);
@@ -184,6 +170,7 @@ export async function testVendorConnectivity(
             request_method: "POST",
             request_headers: sanitizeHeaders(headers),
             request_body: requestBodyDisplay,
+            content_mode: contentMode,
         };
     }
 }

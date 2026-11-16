@@ -10,6 +10,7 @@ import { createListResponse, parsePaginationQuery } from "../util/paginationUtil
 import inputSanitizeUtil from "../util/inputSanitizeUtil";
 import objectUtil from "../util/objectUtil";
 import protocolUtils from "../util/protocolUtil/protocolUtil";
+import { buildModelRouteTestBody, normalizeContentMode } from "../util/protocol/testRequestUtil";
 
 
 function parseJsonLike(text: string): unknown {
@@ -18,31 +19,6 @@ function parseJsonLike(text: string): unknown {
     } catch {
         return text;
     }
-}
-
-
-// 构建模型路由测试的客户端请求体（与前端 runRoutingTest 原请求一致）
-function buildTestRequestBody(format: ApiFormat, model: string): string {
-    if (format === ApiFormat.ANTHROPIC) {
-        return JSON.stringify({
-            model,
-            messages: [{ role: "user", content: "你好" }],
-            max_tokens: 256,
-        });
-    }
-    if (format === ApiFormat.RESPONSES) {
-        return JSON.stringify({
-            model,
-            input: "你好",
-            max_output_tokens: 256,
-        });
-    }
-    return JSON.stringify({
-        model,
-        messages: [{ role: "user", content: "你好" }],
-        max_tokens: 256,
-        stream: false,
-    });
 }
 
 
@@ -152,6 +128,8 @@ async function testModelRoute(c: Context) {
         throw new customError.AppError("format must be one of openai, anthropic, responses");
     }
     const format = formatRaw;
+    // 非法值抛 400；缺省 text（旧调用方不传时行为完全不变）
+    const contentMode = normalizeContentMode(bodyJson.content_mode);
 
     // requireAdmin 已注入完整 user（含租户）；模型按当前视角租户解析（本租户优先、共享兜底）
     const user = c.get("user");
@@ -169,10 +147,11 @@ async function testModelRoute(c: Context) {
             request_method: "POST",
             request_headers: {},
             request_body: null,
+            content_mode: contentMode,
         });
     }
 
-    const body = buildTestRequestBody(format, modelName);
+    const body = buildModelRouteTestBody(format, modelName, contentMode);
     const startTime = Date.now();
 
     let response: Response;
@@ -197,6 +176,7 @@ async function testModelRoute(c: Context) {
             request_headers: snapshot?.headers ?? {},
             request_body: snapshot?.body ? parseJsonLike(snapshot.body) : null,
             error: errorMessage,
+            content_mode: contentMode,
         });
     }
 
@@ -217,6 +197,7 @@ async function testModelRoute(c: Context) {
         request_headers: snapshot?.headers ?? {},
         request_body: snapshot?.body ? parseJsonLike(snapshot.body) : null,
         response: parseJsonLike(responseText),
+        content_mode: contentMode,
     });
 }
 

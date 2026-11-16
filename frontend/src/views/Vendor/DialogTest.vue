@@ -18,12 +18,23 @@
                         </div>
                     </template>
 
-                    <a-form-item :label="mode === 'model' ? '客户端请求协议' : '向服务端请求协议'">
+                    <!-- 协议 / 请求类型：标题与选项同一行，各占一行 -->
+                    <a-form-item class="param-line" :label="mode === 'model' ? '客户端请求协议' : '向服务端请求协议'">
                         <a-radio-group v-model:value="format">
                             <a-radio-button value="openai">OpenAI</a-radio-button>
                             <a-radio-button value="anthropic">Anthropic</a-radio-button>
                             <a-radio-button value="responses">Responses</a-radio-button>
                         </a-radio-group>
+                    </a-form-item>
+
+                    <a-form-item class="param-line" label="请求类型">
+                        <a-radio-group v-model:value="contentMode">
+                            <a-radio-button value="text">文本</a-radio-button>
+                            <a-radio-button value="image">多模态（图片）</a-radio-button>
+                        </a-radio-group>
+                        <div v-if="contentMode === 'image'" class="hint-text">
+                            将发送一张内置测试图片 + 提示词「请描述这张图片」，用于验证模型能否接收图片输入
+                        </div>
                     </a-form-item>
 
                     <!-- Vendor mode: editable model select -->
@@ -120,7 +131,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { testVendor, listVendorModels } from '@/api/vendor';
-import type { VendorTestResponse } from '@/api/vendor';
+import type { VendorTestResponse, TestContentMode } from '@/api/vendor';
 import type { Vendor, VendorModel } from '@/types/vendor';
 import { testModelRoute } from '@/api/model';
 import { notifyRequestError, notifySuccess, notifyWarning } from '@/utils/requestFeedback';
@@ -130,6 +141,8 @@ import { CopyOutlined } from '@ant-design/icons-vue';
 const visible = ref(false);
 const loading = ref(false);
 const format = ref('openai');
+// 请求类型：text=纯文本（默认，行为与之前一致）；image=多模态（后端内置样图）
+const contentMode = ref<TestContentMode>('text');
 const result = ref<VendorTestResponse | null>(null);
 const currentVendor = ref<Vendor | null>(null);
 const activeTab = ref('response');
@@ -236,6 +249,7 @@ function openVendorTest(vendor: Vendor, model?: string) {
     searchValue.value = '';
     activeTab.value = 'response';
     format.value = vendor.type === 'anthropic' ? 'anthropic' : 'openai';
+    contentMode.value = 'text';
 
     loadVendorModels(vendor.id, model);
 }
@@ -249,6 +263,7 @@ function openModelTest(model: string) {
     testModel.value = '';
     searchValue.value = '';
     format.value = 'openai';
+    contentMode.value = 'text';
     activeTab.value = 'response';
 }
 
@@ -272,6 +287,11 @@ watch(format, () => {
     result.value = null;
 });
 
+// 切换请求类型时清空结果：否则多模态的结果会留在文本模式下面，看起来像文本请求的返回
+watch(contentMode, () => {
+    result.value = null;
+});
+
 function handleSearch(val: string) {
     searchValue.value = val;
 }
@@ -286,7 +306,7 @@ async function runRoutingTest() {
     const startTime = Date.now();
 
     try {
-        const res = await testModelRoute(model, format.value);
+        const res = await testModelRoute(model, format.value, contentMode.value);
         result.value = res;
         if (res.success) {
             notifySuccess('测试完成，模型正常响应');
@@ -317,7 +337,7 @@ async function runVendorTest() {
     loading.value = true;
     result.value = null;
     try {
-        const res = await testVendor(currentVendor.value.id, format.value, model);
+        const res = await testVendor(currentVendor.value.id, format.value, model, false, contentMode.value);
         result.value = res;
         if (res.success) {
             notifySuccess('测试完成，连接正常');
@@ -357,6 +377,38 @@ defineExpose({ openVendorTest, openModelTest });
 
 .test-config {
     margin-bottom: 16px;
+}
+
+/*
+ * 「标题 + 选项」同一行（表单一共仍是两行）。
+ * 表单是 vertical 布局，antd 靠 .ant-form-item-row 的 column 方向把 label 压在选项上方；
+ * 这里只对 .param-line 改回 row，其余表单项（测试模型）仍保持原样。
+ */
+.param-line {
+    margin-bottom: 10px;
+}
+
+.param-line :deep(.ant-form-item-row) {
+    flex-direction: row;
+    align-items: flex-start;
+}
+
+/* 固定标签列宽，两行选项左侧对齐 */
+.param-line :deep(.ant-form-item-label) {
+    flex: 0 0 124px;
+    padding: 5px 12px 0 0;
+    text-align: left;
+    white-space: nowrap;
+}
+
+/*
+ * 关键一条：antd 给 control 设了 width: 100%，而 flex-basis: auto 会退回这个 100%，
+ * 于是 124 + 552 > 552 触发换行，label 又被挤回上一行。必须把 basis 压成 0。
+ */
+.param-line :deep(.ant-form-item-control) {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
 }
 
 .hint-text {
