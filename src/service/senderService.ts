@@ -394,10 +394,6 @@ async function sendRequest(
     let lastFailureCode: string | null = null;
 
     while (true) {
-        // 路由选路的 isDown 是同步路径（读本 isolate 缓存），这里先按 TTL 从共享存储刷新一次，
-        // 让其他 isolate 刚标记的 DOWN 在本次选路就生效（Worker 跨 isolate 冷却，见 P0-3）
-        await upstreamHealthService.syncFromStore();
-
         let routingResult: ModelRoutingResult;
         try {
             routingResult = await routingService.selectUpstream(
