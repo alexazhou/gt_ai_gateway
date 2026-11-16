@@ -171,7 +171,8 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             }
         }
 
-        return anthropicReq;
+        // #295：请求构造完成后统一补全缓存断点（与 Chat 路径共用同一个函数）
+        return protocolConverterUtil.applyAnthropicCacheControl(anthropicReq);
     }
 
     private convertInputItem(
