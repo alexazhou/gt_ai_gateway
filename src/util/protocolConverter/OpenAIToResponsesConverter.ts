@@ -35,6 +35,18 @@ export class OpenAIToResponsesConverter extends BaseConverter {
     private isFirstChunk = true;
     private hasToolCalls = false;
     private pendingFinishReason: string | null = null;
+    /**
+     * Responses 输出项（item id / output_index）→ Chat 侧 `tool_calls[].index`。
+     *
+     * Responses 的 `output_index` 是**所有**输出项（reasoning / message / function_call）共用的位置，
+     * 直接拿它当 Chat 的工具下标会在前面有 reasoning/message 时把工具塞到 index=2，
+     * 客户端按 index 扩数组就会在前面留出两个空壳工具项（PC-003-B）。
+     * Chat 侧的工具下标只按「第几个工具」从 0 连续分配，创建与参数增量共用同一份映射。
+     */
+    private toolChatIndexByKey = new Map<string, number>();
+    private nextToolChatIndex = 0;
+    /** 既无 item id 又无 output_index 的增量帧：沿用上一次落位的工具下标 */
+    private lastToolChatIndex: number | null = null;
 
     // ─── 请求转换 ───
 
@@ -300,6 +312,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                 const item = data.item as ResponsesStreamItem | undefined;
                 if (item?.type === "function_call") {
                     this.hasToolCalls = true;
+                    const chatToolIndex = this.resolveToolChatIndex(data, item);
                     // 新的 tool call
                     out.push({
                         data: JSON.stringify({
@@ -311,7 +324,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                                 index: 0,
                                 delta: {
                                     tool_calls: [{
-                                        index: data.output_index as number || 0,
+                                        index: chatToolIndex,
                                         id: item.call_id || item.id,
                                         type: "function",
                                         function: {
@@ -361,7 +374,7 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                                 index: 0,
                                 delta: {
                                     tool_calls: [{
-                                        index: data.output_index as number || 0,
+                                        index: this.resolveToolChatIndex(data),
                                         function: { arguments: delta },
                                     }],
                                 },
@@ -449,6 +462,9 @@ export class OpenAIToResponsesConverter extends BaseConverter {
                 // reset state
                 this.hasToolCalls = false;
                 this.isFirstChunk = true;
+                this.toolChatIndexByKey.clear();
+                this.nextToolChatIndex = 0;
+                this.lastToolChatIndex = null;
 
                 // OpenAI 客户端的终止标记：Responses 上游用 response.completed / response.incomplete 收尾，不带 [DONE]
                 out.push({ data: "[DONE]" });
@@ -478,6 +494,43 @@ export class OpenAIToResponsesConverter extends BaseConverter {
         }
 
         return out;
+    }
+
+    /**
+     * 取该输出项在 Chat 侧的工具下标；首次见到时从 0 连续分配。
+     *
+     * 同一个输出项的不同事件可能只带其中一种标识（创建帧带 item.id，增量帧带 item_id），
+     * 所以 item id 与 output_index 都注册到同一个下标上，任一能命中即可复用。
+     */
+    private resolveToolChatIndex(
+        data: Record<string, unknown>,
+        item?: { id?: string },
+    ): number {
+        const itemId = (item?.id as string | undefined) ?? (data.item_id as string | undefined);
+        const outputIndex = typeof data.output_index === "number" ? data.output_index : undefined;
+        const keys: string[] = [];
+        if (itemId) keys.push(`id:${itemId}`);
+        if (outputIndex !== undefined) keys.push(`output_index:${outputIndex}`);
+
+        for (const key of keys) {
+            const existing = this.toolChatIndexByKey.get(key);
+            if (existing !== undefined) {
+                // 顺手把本次带来的另一种标识也绑定到同一下标，后续帧任意命中
+                for (const k of keys) this.toolChatIndexByKey.set(k, existing);
+                this.lastToolChatIndex = existing;
+                return existing;
+            }
+        }
+
+        // 两种标识都没带：只能当作上一个工具的续传
+        if (keys.length === 0 && this.lastToolChatIndex !== null) {
+            return this.lastToolChatIndex;
+        }
+
+        const assigned = this.nextToolChatIndex++;
+        for (const key of keys) this.toolChatIndexByKey.set(key, assigned);
+        this.lastToolChatIndex = assigned;
+        return assigned;
     }
 
     private extractMessageText(content: OpenAIMessage["content"]): string {
