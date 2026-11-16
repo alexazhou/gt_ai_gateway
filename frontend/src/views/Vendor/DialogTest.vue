@@ -26,6 +26,16 @@
                         </a-radio-group>
                     </a-form-item>
 
+                    <a-form-item label="请求类型">
+                        <a-radio-group v-model:value="contentMode">
+                            <a-radio-button value="text">文本</a-radio-button>
+                            <a-radio-button value="image">多模态（图片）</a-radio-button>
+                        </a-radio-group>
+                        <div v-if="contentMode === 'image'" class="hint-text">
+                            将发送一张内置测试图片 + 提示词「请描述这张图片」，用于验证模型能否接收图片输入
+                        </div>
+                    </a-form-item>
+
                     <!-- Vendor mode: editable model select -->
                     <template v-if="mode === 'vendor'">
                         <a-form-item label="测试模型">
@@ -120,7 +130,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { testVendor, listVendorModels } from '@/api/vendor';
-import type { VendorTestResponse } from '@/api/vendor';
+import type { VendorTestResponse, TestContentMode } from '@/api/vendor';
 import type { Vendor, VendorModel } from '@/types/vendor';
 import { testModelRoute } from '@/api/model';
 import { notifyRequestError, notifySuccess, notifyWarning } from '@/utils/requestFeedback';
@@ -130,6 +140,8 @@ import { CopyOutlined } from '@ant-design/icons-vue';
 const visible = ref(false);
 const loading = ref(false);
 const format = ref('openai');
+// 请求类型：text=纯文本（默认，行为与之前一致）；image=多模态（后端内置样图）
+const contentMode = ref<TestContentMode>('text');
 const result = ref<VendorTestResponse | null>(null);
 const currentVendor = ref<Vendor | null>(null);
 const activeTab = ref('response');
@@ -236,6 +248,7 @@ function openVendorTest(vendor: Vendor, model?: string) {
     searchValue.value = '';
     activeTab.value = 'response';
     format.value = vendor.type === 'anthropic' ? 'anthropic' : 'openai';
+    contentMode.value = 'text';
 
     loadVendorModels(vendor.id, model);
 }
@@ -249,6 +262,7 @@ function openModelTest(model: string) {
     testModel.value = '';
     searchValue.value = '';
     format.value = 'openai';
+    contentMode.value = 'text';
     activeTab.value = 'response';
 }
 
@@ -272,6 +286,11 @@ watch(format, () => {
     result.value = null;
 });
 
+// 切换请求类型时清空结果：否则多模态的结果会留在文本模式下面，看起来像文本请求的返回
+watch(contentMode, () => {
+    result.value = null;
+});
+
 function handleSearch(val: string) {
     searchValue.value = val;
 }
@@ -286,7 +305,7 @@ async function runRoutingTest() {
     const startTime = Date.now();
 
     try {
-        const res = await testModelRoute(model, format.value);
+        const res = await testModelRoute(model, format.value, contentMode.value);
         result.value = res;
         if (res.success) {
             notifySuccess('测试完成，模型正常响应');
@@ -317,7 +336,7 @@ async function runVendorTest() {
     loading.value = true;
     result.value = null;
     try {
-        const res = await testVendor(currentVendor.value.id, format.value, model);
+        const res = await testVendor(currentVendor.value.id, format.value, model, false, contentMode.value);
         result.value = res;
         if (res.success) {
             notifySuccess('测试完成，连接正常');

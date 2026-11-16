@@ -207,6 +207,8 @@ async function testVendor(c: Context) {
         format: bodyJson.format,
         model: bodyJson.model,
         auto_convert: bodyJson.auto_convert,
+        // 非法值由 testVendorConnectivity 里的 normalizeContentMode 抛 400（不静默降级成 text）
+        content_mode: bodyJson.content_mode,
     });
 
     return c.json(result);
