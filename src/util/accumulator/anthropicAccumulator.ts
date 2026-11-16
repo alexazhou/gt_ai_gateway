@@ -63,6 +63,32 @@ export class AnthropicAccumulator extends AccumulatorBase {
     private inputTokens: number | null = null;
 
     /**
+     * 按 content block index 累积的 thinking 签名（每块各一条完整签名）。
+     *
+     * 签名在流里是**分段**的：同一块的多条 `signature_delta` 拼起来才是完整签名；
+     * 不同 thinking 块的签名必须各归各块，不能混成一条。
+     */
+    private thinkingSignatures = new Map<number, string>();
+
+    /**
+     * 把逐块签名投影到消息级字段：
+     * - 只有一个 thinking 块带签名 ⇒ `message.signature` 就是该块的完整签名（最常见情形）；
+     * - 多个块 ⇒ `message.signature` 留空（一个字段无法表达多份互不相干的凭据，不伪造），
+     *   逐块取值见 `message.thinking_signatures`。
+     */
+    private refreshMessageSignature(): void {
+        const message = this.response.choices[0].message;
+        const entries = [...this.thinkingSignatures.entries()].sort((a, b) => a[0] - b[0]);
+        if (entries.length === 0) {
+            message.signature = "";
+            message.thinking_signatures = undefined;
+            return;
+        }
+        message.thinking_signatures = Object.fromEntries(entries);
+        message.signature = entries.length === 1 ? entries[0][1] : "";
+    }
+
+    /**
      * 添加一条客户端 SSE 事件（原始 data 字符串）
      * 内部解析并检测完成/错误/首个输出。
      */
@@ -163,8 +189,15 @@ export class AnthropicAccumulator extends AccumulatorBase {
                 }
                 this.response.choices[0].message.thinking += msg.delta.thinking;
             } else if (deltaType === 'signature_delta' && msg.delta.signature) {
-                // 保存 thinking 签名（必需，用于工具调用）
-                this.response.choices[0].message.signature = msg.delta.signature;
+                // 签名按**块**累积：同一 thinking 块的签名是分段下发的（多段拼起来才是完整签名），
+                // 不同块的签名互不相干。早先是「整条消息一个字段 + 直接赋值」，两个毛病：
+                // 多段时只留最后一段（PC-009-B）；多块时把不同块的凭据混成一个值。
+                const blockIndex = msg.index ?? 0;
+                this.thinkingSignatures.set(
+                    blockIndex,
+                    (this.thinkingSignatures.get(blockIndex) ?? "") + msg.delta.signature,
+                );
+                this.refreshMessageSignature();
             } else if (deltaType === 'text_delta' && msg.delta.text) {
                 // 累积 text 内容到 choices[0].message.content
                 this.response.choices[0].message.content += msg.delta.text;
@@ -271,6 +304,7 @@ export class AnthropicAccumulator extends AccumulatorBase {
             ],
         };
         this.inputTokens = null;
+        this.thinkingSignatures.clear();
         this.resetState();
     }
 }

@@ -589,7 +589,11 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                         }),
                     });
                 } else if (delta.type === "signature_delta" && item.kind === "reasoning") {
-                    item.signature = delta.signature || item.signature;
+                    // 签名是**分段**下发的（同一 thinking 块可能有多条 signature_delta），
+                    // 必须按到达顺序累积。早先写成 `delta.signature || item.signature`
+                    // 是「覆盖」语义：只有最后一段留下，前面几段丢掉，封包后下一轮
+                    // 恢复出来的签名与上游原始签名不一致（PC-009-B）。
+                    if (delta.signature) item.signature += delta.signature;
                 }
                 break;
             }
