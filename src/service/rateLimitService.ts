@@ -1,10 +1,7 @@
 import SgRule from "../model/sgRule";
 import customError from "../customError";
 import memoryRateLimitStore from "../util/rule/memoryRateLimitStore";
-import SqlRateLimitStore from "../util/rule/sqlRateLimitStore";
 import type { RateLimitStore, RequestContext } from "../util/rule/types";
-import ormService from "./ormService";
-import OrmSqlExecutor from "./sqlExecutorService";
 
 // rpm 的补液窗口：1 分钟（补液速率 = rpm / 60s）
 const WINDOW_MS = 60_000;
@@ -13,26 +10,20 @@ const RETRY_AFTER_OFFLINE_SECONDS = 60;
 
 // 注入的计数器存储实现（测试可替换）
 let storeOverride: RateLimitStore | null = null;
-// worker 下的共享实现（D1 原子扣减），惰性创建
-let workerStore: RateLimitStore | null = null;
 
 /**
- * 解析当前应使用的限流存储：
- * - Node / 桌面模式：内存令牌桶（单进程内天然正确，且无需额外 DB 往返）
- * - Worker：D1 上的 SQL 令牌桶（跨 isolate 共享，修复 P0-2 的「rpm × isolate 数」问题）
+ * 解析当前应使用的限流存储：**一律内存令牌桶**。
+ *
+ * 2026-11-16 Operator 决定（#287）：限流不用数据库。原先 Worker 走 D1 上的
+ * `rate_limit_bucket` 表以跨 isolate 共享（P0-2），该方案连同 migrate_0033 一并撤销。
+ *
+ * 代价要说清：Worker 每个 isolate 各有一份桶，N 个 isolate 下实际 rpm 上限约为
+ * N × 配置值。这是有意接受的取舍 —— 限流是保护上游的软性措施，不值得为它维护一张
+ * 只在 Worker 路径读写的表；需要精确全局配额时应改 Durable Object / Redis
+ * （`src/util/stateStore/` 已留 `durable_object` / `redis` 后端位，实现为空壳会抛错）。
  */
 function resolveStore(): RateLimitStore {
-    if (storeOverride) {
-        return storeOverride;
-    }
-    // isWorker 默认 true，未 init 时不能碰 dbAdapter；未就绪则退回内存实现（单 isolate 语义）
-    if (ormService.isWorker && ormService.isReady) {
-        if (!workerStore) {
-            workerStore = new SqlRateLimitStore(new OrmSqlExecutor());
-        }
-        return workerStore;
-    }
-    return memoryRateLimitStore;
+    return storeOverride ?? memoryRateLimitStore;
 }
 
 function setStore(implementation: RateLimitStore | null): void {
@@ -76,7 +67,7 @@ async function checkAndAdmit(rule: SgRule, ctx: RequestContext, opts: CheckAndAd
 
     const now = Date.now();
     const { capacity, refillPerMs } = tokenBucketParams(rpm);
-    // consume 可能是异步实现（D1），await 对同步实现同样安全
+    // consume 可能是异步实现，await 对同步实现同样安全
     const result = await resolveStore().consume(`rule:${rule.id}:rpm`, now, capacity, refillPerMs);
     if (!result.allowed) {
         // 精确重试时间：补足 (1 - remaining) 个令牌所需毫秒，换算成秒向上取整（最小 1s）
