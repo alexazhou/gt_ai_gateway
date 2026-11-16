@@ -28,6 +28,13 @@ vi.mock('ant-design-vue', () => ({
     message: { success: vi.fn(), error: vi.fn() },
 }));
 
+// 下标访问在本项目的 tsconfig（noUncheckedIndexedAccess）下是 T | undefined，
+// 这里显式解包：缺失时直接抛带名字的错误，而不是让 vue-tsc -b 报 TS2532。
+function must<T>(value: T | undefined, what: string): T {
+    if (value === undefined) throw new Error(`期望存在：${what}`);
+    return value;
+}
+
 // 轻量桩：只保留本用例关心的交互能力（v-model 双向 + 点击）
 const ModalStub = defineComponent({ template: '<div><slot /></div>' });
 const DivStub = defineComponent({ template: '<div><slot /></div>' });
@@ -115,7 +122,7 @@ describe('DialogTest 请求类型（content_mode）', () => {
 
         expect(testVendor).toHaveBeenCalledTimes(1);
         // (id, format, model, autoConvert, contentMode)
-        expect(testVendor.mock.calls[0][4]).toBe('text');
+        expect(must(testVendor.mock.calls[0], '第一次 testVendor 调用')[4]).toBe('text');
     });
 
     it('切到多模态：清空上一次结果，并用 image 发起请求', async () => {
@@ -131,7 +138,7 @@ describe('DialogTest 请求类型（content_mode）', () => {
         // 第二个 radio-group 是「请求类型」（第一个是协议）
         const groups = wrapper.findAllComponents(RadioGroupStub);
         expect(groups.length).toBeGreaterThanOrEqual(2);
-        groups[1].vm.$emit('update:value', 'image');
+        must(groups[1], '「请求类型」单选组').vm.$emit('update:value', 'image');
         await nextTick();
 
         // 切换后结果被清空（不然多模态结果会留在文本模式下面，看起来像文本请求的返回）
@@ -139,7 +146,7 @@ describe('DialogTest 请求类型（content_mode）', () => {
 
         await primaryButton(wrapper)!.trigger('click');
         await new Promise((r) => setTimeout(r, 0));
-        expect(testVendor.mock.calls[1][4]).toBe('image');
+        expect(must(testVendor.mock.calls[1], '第二次 testVendor 调用')[4]).toBe('image');
     });
 
     it('模型可用性测试同样带 content_mode，且打开时重置为 text', async () => {
@@ -149,7 +156,7 @@ describe('DialogTest 请求类型（content_mode）', () => {
         vm.openModelTest('gpt-4o');
         await nextTick();
         const groups = wrapper.findAllComponents(RadioGroupStub);
-        groups[1].vm.$emit('update:value', 'image');
+        must(groups[1], '「请求类型」单选组').vm.$emit('update:value', 'image');
         await nextTick();
 
         // 重新打开对话框 ⇒ 回到 text
@@ -160,6 +167,6 @@ describe('DialogTest 请求类型（content_mode）', () => {
         await new Promise((r) => setTimeout(r, 0));
 
         expect(testModelRoute).toHaveBeenCalledTimes(1);
-        expect(testModelRoute.mock.calls[0][2]).toBe('text');
+        expect(must(testModelRoute.mock.calls[0], '第一次 testModelRoute 调用')[2]).toBe('text');
     });
 });

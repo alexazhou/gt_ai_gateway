@@ -121,7 +121,9 @@
 - [x] `npm run backend:test`（Node 模式）全部通过
 - [x] `npm run backend:test:type` 无类型错误
 - [x] `npm run frontend:build` 构建通过
-- [x] 手工验证：三协议同协议图片测试、一次跨协议图片测试、一次文本模式回归
+- [ ] **手工验证（未做）**：三协议同协议图片测试、一次跨协议图片测试、一次文本模式回归
+      → 实际覆盖来自 API 用例（`vendor-test` 12 用例、`modelRouteContentMode` 4 用例，含跨协议 anthropic→openai），
+        不含界面手工操作，也没有截图记录；原先勾成 `[x]` 属于超出举证（验收人 O1 指出，2026-11-16 修正）
 
 ## 后续专项（不在本次范围）
 

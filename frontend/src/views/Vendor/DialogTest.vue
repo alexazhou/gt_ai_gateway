@@ -18,7 +18,8 @@
                         </div>
                     </template>
 
-                    <a-form-item :label="mode === 'model' ? '客户端请求协议' : '向服务端请求协议'">
+                    <!-- 协议 / 请求类型：标题与选项同一行，各占一行 -->
+                    <a-form-item class="param-line" :label="mode === 'model' ? '客户端请求协议' : '向服务端请求协议'">
                         <a-radio-group v-model:value="format">
                             <a-radio-button value="openai">OpenAI</a-radio-button>
                             <a-radio-button value="anthropic">Anthropic</a-radio-button>
@@ -26,7 +27,7 @@
                         </a-radio-group>
                     </a-form-item>
 
-                    <a-form-item label="请求类型">
+                    <a-form-item class="param-line" label="请求类型">
                         <a-radio-group v-model:value="contentMode">
                             <a-radio-button value="text">文本</a-radio-button>
                             <a-radio-button value="image">多模态（图片）</a-radio-button>
@@ -376,6 +377,38 @@ defineExpose({ openVendorTest, openModelTest });
 
 .test-config {
     margin-bottom: 16px;
+}
+
+/*
+ * 「标题 + 选项」同一行（表单一共仍是两行）。
+ * 表单是 vertical 布局，antd 靠 .ant-form-item-row 的 column 方向把 label 压在选项上方；
+ * 这里只对 .param-line 改回 row，其余表单项（测试模型）仍保持原样。
+ */
+.param-line {
+    margin-bottom: 10px;
+}
+
+.param-line :deep(.ant-form-item-row) {
+    flex-direction: row;
+    align-items: flex-start;
+}
+
+/* 固定标签列宽，两行选项左侧对齐 */
+.param-line :deep(.ant-form-item-label) {
+    flex: 0 0 124px;
+    padding: 5px 12px 0 0;
+    text-align: left;
+    white-space: nowrap;
+}
+
+/*
+ * 关键一条：antd 给 control 设了 width: 100%，而 flex-basis: auto 会退回这个 100%，
+ * 于是 124 + 552 > 552 触发换行，label 又被挤回上一行。必须把 basis 压成 0。
+ */
+.param-line :deep(.ant-form-item-control) {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
 }
 
 .hint-text {
