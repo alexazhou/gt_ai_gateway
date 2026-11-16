@@ -226,6 +226,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                         FailedCode.CONVERSION_ERROR,
                     );
                 }
+                if (!unsealed.sourceChecked) this.credentialSourceUnchecked = true;
                 signature = unsealed.signature;
                 if (unsealed.thinking !== undefined) {
                     thinkingText = unsealed.thinking;

@@ -17,6 +17,7 @@ import mockHelper from "../../helpers/mockHelper";
 import upstreamCaptureHelper from "../../helpers/upstreamCaptureHelper";
 import modelFixtures from "../../fixtures/modelFixtures";
 import dbHelper from "../../helpers/dbHelper";
+import protocolConverterUtil from "../../../src/util/protocolConverter/protocolConverterUtil";
 import { setupAdminUser } from "../../globalSetup";
 import config from "../../config";
 
@@ -158,6 +159,46 @@ describe("#297 PC-009-C / §4.7 端到端：别名路由下客户端看到自己
         const completed = events.find((e) => e.type === "response.completed");
         expect(created?.response?.model).toBe(responsesClientModelName);
         expect(completed?.response?.model).toBe(responsesClientModelName);
+    }, 30000);
+
+    it("老凭据（无 source）回放：通过，但必须在请求记录里留下「来源未校验」的 warn", async () => {
+        // 模拟 #297 之前签发的凭据：payload 里没有 source 字段（现在只有老 token 会这样）
+        const legacy = protocolConverterUtil.sealThinkingSignature("anthropic", "native-sig-legacy", {
+            model: responsesClientModelName,
+            thinking: "legacy think",
+        });
+        expect(legacy).not.toContain("source");
+
+        const marker = `pc009c-legacy-${Date.now()}`;
+        const response = await requestHelper.post(
+            "/llm/v1/responses",
+            {
+                model: responsesClientModelName,
+                input: [
+                    { role: "user", content: [{ type: "input_text", text: marker }] },
+                    {
+                        type: "reasoning",
+                        summary: [{ type: "summary_text", text: "legacy think" }],
+                        encrypted_content: legacy,
+                    },
+                ],
+                stream: false,
+            },
+            testUserToken,
+        );
+        // 老凭据只校验模型、不校验来源 ⇒ 必须放行（否则升级瞬间在途多轮全挂）
+        expect(response.status).toBe(200);
+
+        const records = await requestHelper.get("/record/latest.json?limit=1", adminToken);
+        const recordId = records.body[0].id;
+        const activity = await requestHelper.get(`/record/${recordId}/activity.json`, adminToken);
+        expect(activity.status).toBe(200);
+        const unchecked = (activity.body.activities as any[]).filter(
+            (a) => a.details?.credential_source_checked === false,
+        );
+        expect(unchecked.length, "未校验来源必须在记录里留痕，不能静默通过").toBeGreaterThan(0);
+        expect(unchecked[0].details.reason).toBe("legacy_token_without_source");
+        expect(unchecked[0].level).toBe("warn");
     }, 30000);
 
     it("反方向非流式（客户端 Anthropic ← 上游 OpenAI）：响应 model 是客户端请求名", async () => {

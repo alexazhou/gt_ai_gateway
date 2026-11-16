@@ -236,6 +236,21 @@ async function sendRequestToUpstream(
             to: upstreamFormat,
             converter: converter.constructor.name,
         });
+        // 老凭据（封包无 source 字段）只校验模型、不校验来源：这是**已知缺口**，
+        // 静默通过等于让缺口不可观测，所以在请求记录里留一条 warn（不改协议响应体）。
+        if (converter.isCredentialSourceUnchecked()) {
+            await requestActivityService.append(
+                recordId,
+                RequestActivityStage.CONVERSION,
+                "thinking 凭据来源未校验（老凭据无 source 字段）",
+                {
+                    credential_source_checked: false,
+                    reason: "legacy_token_without_source",
+                    expected_source: `vendor:${vendor.id}`,
+                },
+                ActivityLevel.WARN,
+            );
+        }
     }
 
     let requestModel = "unknown";

@@ -150,6 +150,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                                         FailedCode.CONVERSION_ERROR,
                                     );
                                 }
+                                if (!unsealed.sourceChecked) this.credentialSourceUnchecked = true;
                                 encryptedContent = unsealed.signature;
                                 if (unsealed.thinking !== undefined) {
                                     thinkingText = unsealed.thinking;

@@ -121,7 +121,16 @@ describe("PC-009-C 别名身份往返（客户端 Responses ← 上游 Anthropic
         expect(unsealed?.signature, "凭据必须能解出上游原始签名").toBe("native-sig");
 
         // 下一轮：签名恢复成上游原始值，thinking 明文也在
-        const upstreamReq = replay(reasoning);
+        const replayConv = makeConverter(ApiFormat.RESPONSES, ApiFormat.ANTHROPIC);
+        expect(replayConv.isCredentialSourceUnchecked(), "新凭据的来源必须真的校验过").toBe(false);
+        const upstreamReq = replayConv.convertRequest({
+            model: VENDOR_MODEL,
+            input: [
+                { role: "user", content: [{ type: "input_text", text: "hi" }] },
+                reasoning,
+            ],
+        } as any) as AnyRecord;
+        expect(replayConv.isCredentialSourceUnchecked()).toBe(false);
         const block = thinkingOf(
             (upstreamReq.messages as AnyRecord[]).flatMap((m) => (Array.isArray(m.content) ? m.content : [])),
         );
@@ -167,11 +176,40 @@ describe("PC-009-C 别名身份往返（客户端 Responses ← 上游 Anthropic
         });
         expect(legacy).not.toContain("source");
         const reasoning = { type: "reasoning", summary: [{ type: "summary_text", text: "think" }], encrypted_content: legacy };
-        const upstreamReq = replay(reasoning, CLIENT_MODEL, SOURCE_OTHER);
+
+        const conv = makeConverter(ApiFormat.RESPONSES, ApiFormat.ANTHROPIC, CLIENT_MODEL, SOURCE_OTHER);
+        const upstreamReq = conv.convertRequest({
+            model: VENDOR_MODEL,
+            input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }, reasoning],
+        } as any) as AnyRecord;
         const block = thinkingOf(
             (upstreamReq.messages as AnyRecord[]).flatMap((m) => (Array.isArray(m.content) ? m.content : [])),
         );
         expect(block?.signature).toBe("native-sig");
+        // 通过不等于「校验过」：来源未校验必须留痕，否则缺口不可观测（入口据此写 warn 活动）
+        expect(conv.isCredentialSourceUnchecked(), "老凭据必须标记「来源未校验」").toBe(true);
+    });
+
+    it("A4b 老凭据 + 来源不一致也照样通过（这正是兼容窗口本身，必须显式锁住）", () => {
+        const legacy = protocolConverterUtil.sealThinkingSignature("anthropic", "native-sig", {
+            model: CLIENT_MODEL,
+            thinking: "think",
+        });
+        const reasoning = {
+            type: "reasoning",
+            summary: [{ type: "summary_text", text: "think" }],
+            encrypted_content: legacy,
+        };
+        const conv = makeConverter(ApiFormat.RESPONSES, ApiFormat.ANTHROPIC, CLIENT_MODEL, "vendor:999");
+        const upstreamReq = conv.convertRequest({
+            model: VENDOR_MODEL,
+            input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }, reasoning],
+        } as any) as AnyRecord;
+        const block = thinkingOf(
+            (upstreamReq.messages as AnyRecord[]).flatMap((m) => (Array.isArray(m.content) ? m.content : [])),
+        );
+        expect(block?.signature).toBe("native-sig");
+        expect(conv.isCredentialSourceUnchecked()).toBe(true);
     });
 
     it("A5 上游换了模型名，往返仍然成立（凭据不绑上游名）", () => {

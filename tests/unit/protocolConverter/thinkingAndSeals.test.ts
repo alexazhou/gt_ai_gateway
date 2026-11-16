@@ -81,6 +81,8 @@ describe("thinking 签名：封包 / 验签", () => {
         expect(protocolConverterUtil.unsealThinkingSignature(token, "anthropic", "claude-3")).toEqual({
             signature: "sig-abc",
             thinking: "some thought",
+            // #297：该凭据没有 source 字段（老口径）⇒ 来源未校验；新凭据带 source 时为 true
+            sourceChecked: false,
         });
     });
 
@@ -131,6 +133,7 @@ describe("thinking 签名：封包 / 验签", () => {
 
             expect(protocolConverterUtil.unsealThinkingSignature(token, "anthropic", "m")).toEqual({
                 signature: "sig-abc",
+                sourceChecked: false,
             });
         });
 

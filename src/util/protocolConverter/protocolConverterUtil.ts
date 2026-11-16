@@ -591,7 +591,16 @@ function unsealThinkingSignature(
      * 老凭据没有该字段，保持向后兼容（否则升级瞬间在途多轮对话全部 400）。
      */
     expectedSource?: string,
-): { signature: string; thinking?: string } | null {
+): {
+    signature: string;
+    thinking?: string;
+    /**
+     * 本次是否**真的**核对过来源：
+     * - `true`：凭据自带 `source` 且与期望值相等（新凭据，来源已强制校验）；
+     * - `false`：老凭据没有 `source` 字段 ⇒ 只校验了模型，来源**未校验**（调用方必须留痕）。
+     */
+    sourceChecked: boolean;
+} | null {
     if (!token || !token.startsWith(`${THINKING_SIG_PREFIX}.`)) {
         return null;
     }
@@ -631,6 +640,7 @@ function unsealThinkingSignature(
     return {
         signature: payload.signature,
         thinking: typeof payload.thinking === "string" ? payload.thinking : undefined,
+        sourceChecked: Boolean(expectedSource && typeof payload.source === "string"),
     };
 }
 

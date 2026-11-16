@@ -25,6 +25,8 @@ export abstract class BaseConverter {
      * 封包时写进凭据、回放时用于核对：来源不同或没有来源的凭据不跨来源使用（PC-009-C）。
      */
     protected credentialSource?: string;
+    /** 请求侧出现过「老凭据（无 source）⇒ 来源未校验」时置位，供入口写进 request_activity */
+    protected credentialSourceUnchecked = false;
     protected responseId: string;
     protected contentBlockIndex = 0;
     /** Responses 流事件的 sequence_number 计数 */
@@ -109,6 +111,16 @@ export abstract class BaseConverter {
      */
     public setCredentialSource(source: string) {
         this.credentialSource = source;
+    }
+
+    /**
+     * 本次请求是否出现过「来源未校验」的凭据（老凭据封包里没有 `source` 字段）。
+     *
+     * 为什么必须暴露出来：未校验来源是**已知缺口**（凭据无 TTL，窗口长期存在），
+     * 静默通过等于让缺口不可观测；入口据此在 request_activity 里留一条 warn 记录。
+     */
+    public isCredentialSourceUnchecked(): boolean {
+        return this.credentialSourceUnchecked;
     }
 
     /**
