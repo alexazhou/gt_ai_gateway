@@ -188,3 +188,88 @@ describe("dbMigrationService 反向差异（库里有记录、目录里没有该
         expect(await listTables(db.adapter)).toContain("orphan_leftover_table");
     });
 });
+
+
+/**
+ * 收敛：装过 v1.9.1-beta1 的老库，一次 `migrate()` 就能到当前终态。
+ *
+ * 老库形状：`_migrations` 停在 `migrate_0033`（0033 建的那两张表还在库头），而迁移目录里
+ * 多了一条 `migrate_0034`（#289，`3b8db94`）—— 它只 `DROP` 那两张表，**不动迁移历史**。
+ *
+ * 复现方式（不依赖真实老库、不碰 `local.db`）：干净库上跑完全部迁移 → 把 0033 的两张表
+ * 建回来 → `DELETE` 掉 0034 那条记录，就得到「停在 0033」的形状。
+ * 注意这是**复现老库**的手法，不是收敛手段：收敛只允许 `migrate_0034` 那种
+ * 「新编号迁移 DROP 对象」，`DELETE FROM _migrations` 属于改写历史，明文禁止。
+ *
+ * 断言按 Operator 2026-11-16 23:10 的新口径：两表消失、**0033 记录保留**、0034 记录在、
+ * `pending` 为空、`status()` 版本 34。若有人把 0034 改成删 0033 记录，本用例会红。
+ */
+describe("dbMigrationService 收敛：装过 v1.9.1-beta1 的老库（migrate_0034）", () => {
+    let db: MigrationTestDb | null = null;
+
+    afterEach(async () => {
+        await db?.close();
+        db = null;
+    });
+
+    it("老库跑一次 migrate()：两表消失、0033 记录保留、0034 记录写入、版本 34", async () => {
+        db = await createMigrationTestDb();
+        await dbMigrationService.migrate(db.adapter, "test");
+
+        // 造「装过 beta1」的老库形状。两张表只为占位：断言看的是表名存在性，schema 与本用例无关。
+        await db.adapter.run("CREATE TABLE IF NOT EXISTS rate_limit_bucket (id INTEGER PRIMARY KEY)");
+        await db.adapter.run("CREATE TABLE IF NOT EXISTS upstream_health (id INTEGER PRIMARY KEY)");
+        await db.adapter.run("DELETE FROM _migrations WHERE name = 'migrate_0034'");
+
+        // 前置：库里停在 0033，唯一待应用的就是 0034
+        const before = await dbMigrationService.check(db.adapter);
+        expect(before.applied).toContain("migrate_0033");
+        expect(before.applied).not.toContain("migrate_0034");
+        expect(before.pending).toEqual(["migrate_0034"]);
+        const tablesBefore = await listTables(db.adapter);
+        expect(tablesBefore).toContain("rate_limit_bucket");
+        expect(tablesBefore).toContain("upstream_health");
+
+        // 收敛：跑一次 migrate()，它应当只带上 0034
+        const migrated: string[] = [];
+        const migrateSpy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+            migrated.push(args.map((a) => String(a)).join(" "));
+        });
+        try {
+            await dbMigrationService.migrate(db.adapter, "test");
+        } finally {
+            migrateSpy.mockRestore();
+        }
+        expect(migrated.join("\n")).toContain("Pending: 1");
+
+        // ① 0033 建的两张表被 0034 清掉
+        const tablesAfter = await listTables(db.adapter);
+        expect(tablesAfter, "migrate_0034 应 DROP 掉 0033 的 rate_limit_bucket").not.toContain(
+            "rate_limit_bucket",
+        );
+        expect(tablesAfter, "migrate_0034 应 DROP 掉 0033 的 upstream_health").not.toContain(
+            "upstream_health",
+        );
+
+        // ② 迁移历史只增不改：0033 记录仍在，0034 记录写入，待应用清空
+        const after = await dbMigrationService.check(db.adapter);
+        expect(after.applied, "0033 是历史迁移，记录不许删").toContain("migrate_0033");
+        expect(after.applied, "0034 应被 runner 记进 _migrations").toContain("migrate_0034");
+        expect(after.applied.length, "只多出 0034 一条记录").toBe(before.applied.length + 1);
+        expect(after.pending).toEqual([]);
+
+        // ③ status() 版本 = 34、待应用 0
+        const statusLogs: string[] = [];
+        const statusSpy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+            statusLogs.push(args.map((a) => String(a)).join(" "));
+        });
+        try {
+            await dbMigrationService.status(db.adapter);
+        } finally {
+            statusSpy.mockRestore();
+        }
+        const statusOut = statusLogs.join("\n");
+        expect(statusOut).toContain("Current Database Version: 34");
+        expect(statusOut).toContain("Migrations to apply: 0");
+    });
+});
