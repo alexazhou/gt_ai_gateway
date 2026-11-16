@@ -17,6 +17,11 @@ export interface AccumulatedResponse {
             reasoning_content?: string;
             thinking?: string;
             signature?: string;
+            /**
+             * 按 content block index 的 thinking 签名（逐块完整值）。
+             * 多 thinking 块时用它取逐块凭据：`signature` 只在单块时给值，多块时留空。
+             */
+            thinking_signatures?: Record<number, string>;
             function_call?: {
                 name?: string;
                 arguments: string;
