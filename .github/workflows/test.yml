@@ -208,7 +208,9 @@ jobs:
   test-worker:
     name: Test (Worker Mode)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 → 15（2026-11-18，Operator 批示）：历史耗时 7m47s / 8m34s，本就贴着 10 分钟边；
+    # 本次 1.9_dev@57b8e18 跑到 10m16s 被 cancel（cancel ≠ 失败，无法判断测试好坏），故放宽到 15。
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
