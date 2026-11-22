@@ -150,7 +150,6 @@ function exitDeveloperMode() {
 .developer-settings {
     background: var(--bg-page);
     min-height: calc(100vh - 64px);
-    padding: 24px;
     max-width: 900px;
 }
 

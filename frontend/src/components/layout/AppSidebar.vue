@@ -1,6 +1,19 @@
 <template>
-    <div class="app-sidebar" :class="{ collapsed: collapsed }">
-        <div class="sidebar-content">
+    <div class="app-sidebar" :class="{ collapsed: collapsed, 'app-sidebar--mac': isMacOverlay }">
+        <!-- macOS 无应用顶栏：红绿灯所在行 + 品牌 + 租户入口都收进侧边栏顶部，
+             分割线从窗口最顶部一直延伸到底 -->
+        <div v-if="isMacOverlay" class="mac-sidebar-top">
+            <div class="mac-title-row" data-tauri-drag-region="deep">
+                <ThemeToggleButton v-if="!collapsed" size="small" />
+            </div>
+            <div class="mac-brand-row" data-tauri-drag-region="deep">
+                <AppBrand :collapsed="collapsed" />
+            </div>
+            <div v-if="!collapsed && showTenantSwitcher" class="mac-tenant-row">
+                <TenantSwitcher variant="sidebar" />
+            </div>
+        </div>
+        <div class="sidebar-content" :class="{ 'sidebar-content--mac': isMacOverlay }">
             <a-menu
                 :selected-keys="selectedKeys"
                 mode="inline"
@@ -101,6 +114,10 @@ import { useAuthStore } from '@/stores/auth';
 import { useTenantStore } from '@/stores/tenant';
 import { checkUpdate } from '@/api/system';
 import { getConfig } from '@/api/config';
+import { isMacTauri } from '@/utils/platform';
+import AppBrand from './AppBrand.vue';
+import ThemeToggleButton from './ThemeToggleButton.vue';
+import TenantSwitcher from './TenantSwitcher.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -108,11 +125,15 @@ const appStore = useAppStore();
 const authStore = useAuthStore();
 const tenantStore = useTenantStore();
 
+// macOS 下侧边栏顶部额外承载红绿灯、品牌与主题切换
+const isMacOverlay = isMacTauri();
+
 const hasUpdate = ref(false);
 const updateUrl = ref('');
 
 const collapsed = computed(() => appStore.sidebarCollapsed);
 const version = computed(() => appStore.version);
+const showTenantSwitcher = computed(() => authStore.isSystemAdmin && tenantStore.multiTenantEnabled);
 
 const selectedKeys = computed(() => {
     const path = route.path;
@@ -185,8 +206,42 @@ function toggleSidebar() {
     width: 88px;
 }
 
+.mac-sidebar-top {
+    flex: none;
+}
+
+.mac-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    height: 32px;
+    /* 主题切换右边缘与菜单项右边缘对齐；左侧留出原生红绿灯宽度 */
+    padding: 0 10px 0 78px;
+}
+
+.mac-brand-row {
+    display: flex;
+    align-items: center;
+    height: 34px;
+    padding: 0 24px;
+}
+
+.mac-tenant-row {
+    padding: 0 10px 4px;
+}
+
+.sidebar-content--mac {
+    padding-top: 0;
+}
+
 .app-sidebar.collapsed .sidebar-footer {
     justify-content: center;
+}
+
+/* 折叠后 logo 在 88px 宽度内水平居中 */
+.app-sidebar--mac.collapsed .mac-brand-row {
+    justify-content: center;
+    padding: 0;
 }
 
 .sidebar-content {
@@ -243,7 +298,7 @@ function toggleSidebar() {
 .app-sidebar :deep(.ant-menu-item) {
     height: 48px;
     line-height: 48px;
-    margin: 6px 0;
+    margin: 4px 0;
     padding-inline: 14px !important;
     width: 100%;
     box-sizing: border-box;

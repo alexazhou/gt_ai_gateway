@@ -190,7 +190,6 @@ function getPopupContainer(node: HTMLElement): HTMLElement {
 <style scoped>
 .user-list {
     background: var(--bg-page);
-    padding: 24px;
 }
 
 .table-header {
