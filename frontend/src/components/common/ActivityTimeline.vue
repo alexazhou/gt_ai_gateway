@@ -222,7 +222,7 @@ function formatVendor(item: RecordActivityEntry): string {
 .activity-details {
     margin-top: 6px;
     padding: 8px 10px;
-    background: var(--bg-hover, #f5f5f5);
+    background: var(--bg-info-item, #f5f5f5);
     border-radius: 6px;
     display: flex;
     flex-direction: column;

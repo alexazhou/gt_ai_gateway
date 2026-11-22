@@ -60,7 +60,9 @@ function handleLogout() {
     padding: 0 24px;
     height: 48px;
     background: var(--bg-header);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    /* 深色模式下阴影不可见，用主题边框保证顶栏分割线始终存在 */
+    border-bottom: 1px solid var(--border-color);
+    box-shadow: var(--header-shadow);
     position: relative;
     z-index: 20;
 }

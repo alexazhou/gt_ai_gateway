@@ -77,6 +77,7 @@ html.dark body {
     --component-bg: #ffffff;
     --border-color: #e8edf5;
     --border-info-item: #f0f0f0;
+    --header-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     --text-primary: #243247;
     --text-secondary: #8c8c8c;
     --text-sidebar: #243247;
@@ -136,6 +137,8 @@ html.dark body {
     --component-bg: #1f1f1f;
     --border-color: #303030;
     --border-info-item: #303030;
+    /* 深色背景上黑色阴影需要更高不透明度才与浅色主题观感一致 */
+    --header-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
     --text-primary: rgba(255, 255, 255, 0.85);
     --text-secondary: rgba(255, 255, 255, 0.45);
     --text-sidebar: rgba(255, 255, 255, 0.85);
