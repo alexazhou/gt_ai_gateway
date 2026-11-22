@@ -12,7 +12,6 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
 import { message } from 'ant-design-vue/es';
 import { useAppStore } from '@/stores/app';
 import { isMacTauri } from '@/utils/platform';
@@ -25,7 +24,7 @@ withDefaults(defineProps<{ collapsed?: boolean }>(), {
 const isMacOverlay = isMacTauri();
 const appStore = useAppStore();
 
-const title = computed(() => 'GT AI Gateway');
+const title = 'GT AI Gateway';
 
 let logoClickCount = 0;
 let logoClickTimer: number | null = null;

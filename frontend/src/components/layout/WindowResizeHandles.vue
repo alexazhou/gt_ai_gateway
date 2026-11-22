@@ -8,7 +8,7 @@
             v-for="handle in handles"
             :key="handle.direction"
             :class="['wrh', `wrh-${handle.suffix}`]"
-            @mousedown.prevent="handleResize(handle.direction)"
+            @mousedown.left.prevent="handleResize(handle.direction)"
         ></div>
     </div>
 </template>
@@ -59,7 +59,6 @@ async function handleResize(direction: ResizeDirection) {
     position: absolute;
     pointer-events: auto;
     /* 留白处不遮挡内容交互，仅边缘 4px 生效 */
-    -webkit-app-region: no-drag;
 }
 
 .wrh-n,

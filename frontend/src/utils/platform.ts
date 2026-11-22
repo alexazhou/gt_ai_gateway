@@ -6,14 +6,17 @@ export function isTauri(): boolean {
     return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
+function isTauriOn(platform: 'Mac' | 'Windows'): boolean {
+    return isTauri() && typeof navigator !== 'undefined' && navigator.userAgent.includes(platform);
+}
+
 /**
  * Checks if the application is running in Tauri on macOS.
- * macOS 使用全尺寸内容视图（红绿灯浮在页面内容上），
- * 只有该场景下需要为窗口按钮预留顶部拖动区。
+ * macOS 使用全尺寸内容视图（红绿灯浮在页面内容上），需要为窗口按钮预留顶部拖动区。
  * @returns {boolean} true if running in Tauri on macOS, false otherwise
  */
 export function isMacTauri(): boolean {
-    return isTauri() && typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac');
+    return isTauriOn('Mac');
 }
 
 /**
@@ -22,7 +25,16 @@ export function isMacTauri(): boolean {
  * @returns {boolean} true if running in Tauri on Windows, false otherwise
  */
 export function isWindowsTauri(): boolean {
-    return isTauri() && typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
+    return isTauriOn('Windows');
+}
+
+/**
+ * Checks if the application is running in Tauri on a desktop platform.
+ * macOS / Windows 桌面端共用无应用顶栏的布局。
+ * @returns {boolean} true if running in Tauri on macOS or Windows, false otherwise
+ */
+export function isDesktopTauri(): boolean {
+    return isMacTauri() || isWindowsTauri();
 }
 
 /**

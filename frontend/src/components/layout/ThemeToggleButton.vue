@@ -5,12 +5,24 @@
         :class="`theme-btn--${size}`"
         @click="toggleTheme"
     >
-        <component :is="themeStore.isDark ? SunIcon : MoonIcon" />
+        <svg v-if="themeStore.isDark" v-bind="strokeIconProps">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2.5v2.2" />
+            <path d="M12 19.3v2.2" />
+            <path d="M4.93 4.93l1.56 1.56" />
+            <path d="M17.51 17.51l1.56 1.56" />
+            <path d="M2.5 12h2.2" />
+            <path d="M19.3 12h2.2" />
+            <path d="M4.93 19.07l1.56-1.56" />
+            <path d="M17.51 6.49l1.56-1.56" />
+        </svg>
+        <svg v-else v-bind="strokeIconProps">
+            <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a7.8 7.8 0 1 0 10.5 10.5Z" />
+        </svg>
     </a-button>
 </template>
 
 <script setup lang="ts">
-import { h } from 'vue';
 import { message } from 'ant-design-vue/es';
 import { useThemeStore } from '@/stores/theme';
 
@@ -30,41 +42,7 @@ const strokeIconProps = {
     'stroke-linecap': 'round',
     'stroke-linejoin': 'round',
     'aria-hidden': 'true',
-};
-
-const SunIcon = {
-    render() {
-        return h(
-            'svg',
-            strokeIconProps,
-            [
-                h('circle', { cx: '12', cy: '12', r: '4' }),
-                h('path', { d: 'M12 2.5v2.2' }),
-                h('path', { d: 'M12 19.3v2.2' }),
-                h('path', { d: 'M4.93 4.93l1.56 1.56' }),
-                h('path', { d: 'M17.51 17.51l1.56 1.56' }),
-                h('path', { d: 'M2.5 12h2.2' }),
-                h('path', { d: 'M19.3 12h2.2' }),
-                h('path', { d: 'M4.93 19.07l1.56-1.56' }),
-                h('path', { d: 'M17.51 6.49l1.56-1.56' }),
-            ],
-        );
-    },
-};
-
-const MoonIcon = {
-    render() {
-        return h(
-            'svg',
-            strokeIconProps,
-            [
-                h('path', {
-                    d: 'M20 14.5A8.5 8.5 0 0 1 9.5 4a7.8 7.8 0 1 0 10.5 10.5Z',
-                }),
-            ],
-        );
-    },
-};
+} as const;
 
 function toggleTheme() {
     themeStore.toggleTheme();

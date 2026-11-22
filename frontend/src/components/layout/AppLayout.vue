@@ -40,13 +40,13 @@ import ThemeToggleButton from './ThemeToggleButton.vue';
 import { useAppStore } from '@/stores/app';
 import { useAuthStore } from '@/stores/auth';
 import { useTenantStore } from '@/stores/tenant';
-import { isMacTauri, isWindowsTauri } from '@/utils/platform';
+import { isDesktopTauri, isMacTauri, isWindowsTauri } from '@/utils/platform';
 
 // macOS 红绿灯浮在页面内容之上；Windows 使用无边框窗口与自绘标题栏
 const isMacOverlay = isMacTauri();
 const isWindowsApp = isWindowsTauri();
 // 两端桌面端均无应用顶栏：品牌与操作入口移入侧边栏，顶部保留拖动区
-const isDesktopApp = isMacOverlay || isWindowsApp;
+const isDesktopApp = isDesktopTauri();
 
 const appStore = useAppStore();
 const authStore = useAuthStore();
@@ -111,7 +111,8 @@ onMounted(() => {
     background: var(--bg-page);
 }
 
-/* Windows 自绘标题栏高度与侧边栏品牌行一致，两列内容从同一水平线开始 */
+/* Windows 自绘标题栏高度与侧边栏品牌行一致（见 AppSidebar .desktop-brand-row--windows），
+   两列内容从同一水平线开始 */
 .window-drag-strip--windows {
     flex-basis: 44px;
 }
@@ -124,8 +125,8 @@ onMounted(() => {
     background: var(--bg-page);
 }
 
-/* 桌面端无顶栏：收紧顶部留白，让页面标题与侧边栏品牌行垂直对齐。
-   macOS 拖动区 24px + 13px；Windows 拖动区 32px + 5px，页面内容距窗口顶部保持一致 */
+/* 桌面端无顶栏：收紧顶部留白。
+   macOS 拖动区 24px + 13px；Windows 拖动区 44px（与侧边栏品牌行同高）+ 5px */
 .main-content--mac {
     padding-top: 13px;
 }

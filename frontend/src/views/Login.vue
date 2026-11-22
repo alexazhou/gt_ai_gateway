@@ -48,10 +48,10 @@ import { reactive, ref, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { notifyError, notifySuccess } from '@/utils/requestFeedback';
-import { isTauri, isMacTauri, isWindowsTauri } from '@/utils/platform';
+import { isTauri, isDesktopTauri, isWindowsTauri } from '@/utils/platform';
 
 const isWindowsApp = isWindowsTauri();
-const isDesktopApp = isMacTauri() || isWindowsApp;
+const isDesktopApp = isDesktopTauri();
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -143,6 +143,8 @@ async function handleLogin() {
     height: 24px;
 }
 
+/* 登录页没有品牌行，拖动区只需覆盖 32px 高的窗口按钮；
+   主布局为 44px，与侧边栏品牌行对齐 */
 .window-drag-strip--windows {
     height: 32px;
 }
