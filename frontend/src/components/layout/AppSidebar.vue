@@ -1,17 +1,23 @@
 <template>
-    <div class="app-sidebar" :class="{ collapsed: collapsed, 'app-sidebar--desktop': isDesktopApp, 'app-sidebar--mac': isMacOverlay }">
+    <div class="app-sidebar" :class="{ collapsed: collapsed, 'app-sidebar--desktop': isDesktopApp, 'app-sidebar--mac': isMacOverlay, 'app-sidebar--windows': isWindowsApp }">
         <!-- 桌面端无应用顶栏：品牌、主题与租户入口都收进侧边栏顶部，
-             分割线从窗口最顶部一直延伸到底；macOS 顶部行同时为红绿灯留位 -->
+             分割线从窗口最顶部一直延伸到底；只有 macOS 需要在最上面留一行给原生红绿灯 -->
         <div v-if="isDesktopApp" class="desktop-sidebar-top">
             <div
-                class="desktop-title-row"
-                :class="{ 'desktop-title-row--mac': isMacOverlay }"
+                v-if="isMacOverlay"
+                class="desktop-title-row desktop-title-row--mac"
                 data-tauri-drag-region="deep"
             >
                 <ThemeToggleButton v-if="!collapsed" size="small" />
             </div>
             <div class="desktop-brand-row" data-tauri-drag-region="deep">
                 <AppBrand :collapsed="collapsed" />
+                <!-- Windows 没有红绿灯，品牌行直接顶到窗口顶部，主题切换并到这一行右侧 -->
+                <ThemeToggleButton
+                    v-if="isWindowsApp && !collapsed"
+                    size="small"
+                    class="brand-theme-btn"
+                />
             </div>
             <div v-if="!collapsed && showTenantSwitcher" class="desktop-tenant-row">
                 <TenantSwitcher variant="sidebar" />
@@ -235,6 +241,18 @@ function toggleSidebar() {
     align-items: center;
     height: 34px;
     padding: 0 24px;
+}
+
+/* Windows 无红绿灯：品牌行即侧边栏第一行，高度与主内容区拖动条、窗口按钮对齐 */
+.app-sidebar--windows .desktop-brand-row {
+    justify-content: space-between;
+    height: 44px;
+    /* 右侧 10px 与菜单项、主题按钮的右边缘对齐 */
+    padding: 0 10px 0 24px;
+}
+
+.brand-theme-btn {
+    flex: none;
 }
 
 .desktop-tenant-row {

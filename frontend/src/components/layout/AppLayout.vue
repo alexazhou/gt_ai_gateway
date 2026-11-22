@@ -111,9 +111,9 @@ onMounted(() => {
     background: var(--bg-page);
 }
 
-/* Windows 自绘标题栏高度与系统窗口按钮一致 */
+/* Windows 自绘标题栏高度与侧边栏品牌行一致，两列内容从同一水平线开始 */
 .window-drag-strip--windows {
-    flex-basis: 32px;
+    flex-basis: 44px;
 }
 
 .main-content {

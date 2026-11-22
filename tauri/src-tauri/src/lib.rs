@@ -578,6 +578,8 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     sys::platform::set_dock_visibility(app, true);
     if let Some(window) = app.get_webview_window("main") {
         rust_log("main window already exists, showing it");
+        // 托盘「显示窗口」时窗口可能还处于最小化状态，先还原再显示
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
         return;
@@ -597,6 +599,11 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
 
     match result {
         Ok(window) => {
+            // 无边框窗口必须显式设置窗口图标，否则最小化后任务栏/Alt-Tab 里是一个空白方块，
+            // 用户会以为程序已经退出
+            if let Some(icon) = app.default_window_icon() {
+                let _ = window.set_icon(icon.clone());
+            }
             // 先用默认的浅色主题初始化标题栏底色，前端挂载后会按实际主题纠正
             window_style::apply_window_theme(&window, false);
             rust_log("main window created successfully");

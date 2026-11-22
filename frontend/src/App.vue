@@ -3,6 +3,8 @@
         <div :class="['app-container', themeStore.isDark ? 'dark' : 'light']">
             <router-view />
             <WindowControls v-if="isWindowsApp" />
+            <!-- 无边框窗口补边缘缩放热区（tao 只处理上边缘） -->
+            <WindowResizeHandles v-if="isWindowsApp" />
         </div>
     </a-config-provider>
 </template>
@@ -12,6 +14,7 @@ import { computed, watch } from 'vue';
 import { useThemeStore } from '@/stores/theme';
 import { isTauri, isWindowsTauri } from '@/utils/platform';
 import WindowControls from '@/components/layout/WindowControls.vue';
+import WindowResizeHandles from '@/components/layout/WindowResizeHandles.vue';
 
 const themeStore = useThemeStore();
 // Windows 无边框窗口的标题栏按钮，在所有页面（含登录页）都需常驻
