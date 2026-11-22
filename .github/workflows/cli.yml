@@ -52,7 +52,7 @@ jobs:
           {
             echo "| file | bytes | sha256 | file(1) |"
             echo "|---|---|---|---|"
-            for f in gtgw_*; do
+            for f in gtgw_cli_*; do
               case "$f" in *sha256sums.txt) continue ;; esac
               printf '| %s | %s | %s | %s |\n' "$f" \
                 "$(stat -c%s "$f")" \

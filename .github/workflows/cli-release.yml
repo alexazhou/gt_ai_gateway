@@ -52,7 +52,7 @@ jobs:
           EXPECTED="$(node -p "require('./package.json').version")"
           echo "expected version: $EXPECTED"
           # 本机架构是 amd64：linux/amd64 产物可直接执行，实跑校验版本号
-          ./cli/dist/cli/gtgw_${EXPECTED}_linux_amd64 --version | tee /tmp/ver.txt
+          ./cli/dist/cli/gtgw_cli_${EXPECTED}_linux_amd64 --version | tee /tmp/ver.txt
           grep -q "gtgw version $EXPECTED" /tmp/ver.txt
 
       - name: Upload build artifacts
@@ -76,13 +76,29 @@ jobs:
           submodules: recursive
           token: ${{ github.token }}
 
+      # 与 tauri.yml 的 create-release 保持同一口径：只有纯数字版本 tag 才挂 Release。
+      # beta/rc 等预发布 tag 只保留 Actions Artifacts，不创建 GitHub Release。
+      - name: Check version tag
+        id: version_tag
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$tag" =~ ^v[0-9]+(\.[0-9]+)+$ ]]; then
+            echo "matched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "matched=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping release for non-version tag: $tag"
+          fi
+
       - name: Download artifacts
+        if: steps.version_tag.outputs.matched == 'true'
         uses: actions/download-artifact@v4
         with:
           name: gtgw-cli-release
           path: dist-cli
 
       - name: Attach to release
+        if: steps.version_tag.outputs.matched == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
@@ -91,6 +107,7 @@ jobs:
           ls -l dist-cli
           # 桌面端安装包由 tauri.yml 的 create-release 负责建 release；这里只补 CLI 资产。
           # 若本 job 先跑到（release 还没建），就地建一个空 release 再传，避免竞态失败。
+          # 预发布 tag 已在 Check version tag 一步被挡掉，走不到这里。
           gh release view "$TAG" >/dev/null 2>&1 || \
             gh release create "$TAG" --title "$TAG" --generate-notes || true
 
@@ -99,6 +116,6 @@ jobs:
             sleep 6
           done
 
-          mapfile -t assets < <(find dist-cli -type f -name 'gtgw_*')
+          mapfile -t assets < <(find dist-cli -type f -name 'gtgw_cli_*')
           printf 'uploading:\n%s\n' "${assets[@]}"
           gh release upload "$TAG" "${assets[@]}" --clobber

@@ -6,7 +6,7 @@
 #   OUT_DIR=/tmp/rel bash cli/scripts/release.sh
 #   TARGETS="darwin/arm64 linux/amd64" bash cli/scripts/release.sh
 #
-# 产物命名与 release 里其它资产一致：gtgw_<version>_<os>_<arch>[.exe]
+# 产物命名与 release 里其它资产一致：gtgw_cli_<version>_<os>_<arch>[.exe]
 # 每个目标都走 cli/scripts/build.sh，因此 CGO_ENABLED=0 / -trimpath / ldflags 注入只有一处实现。
 set -euo pipefail
 
@@ -33,7 +33,7 @@ for target in $TARGETS; do
   arch="${target##*/}"
   suffix=""
   [ "$os" = "windows" ] && suffix=".exe"
-  out="$OUT_DIR/gtgw_${VERSION}_${os}_${arch}${suffix}"
+  out="$OUT_DIR/gtgw_cli_${VERSION}_${os}_${arch}${suffix}"
   echo ""
   GOOS="$os" GOARCH="$arch" OUT="$out" GTGW_VERSION="$VERSION" bash "$CLI_DIR/scripts/build.sh"
 done
@@ -41,15 +41,15 @@ done
 echo ""
 echo "[release] sha256:"
 cd "$OUT_DIR"
-: > "gtgw_${VERSION}_sha256sums.txt"
-for f in gtgw_*; do
+: > "gtgw_cli_${VERSION}_sha256sums.txt"
+for f in gtgw_cli_*; do
   case "$f" in
     *sha256sums.txt) continue ;;
   esac
-  sha256sum "$f" >> "gtgw_${VERSION}_sha256sums.txt" 2>/dev/null || shasum -a 256 "$f" >> "gtgw_${VERSION}_sha256sums.txt"
+  sha256sum "$f" >> "gtgw_cli_${VERSION}_sha256sums.txt" 2>/dev/null || shasum -a 256 "$f" >> "gtgw_cli_${VERSION}_sha256sums.txt"
 done
-cat "gtgw_${VERSION}_sha256sums.txt"
+cat "gtgw_cli_${VERSION}_sha256sums.txt"
 
 echo ""
 echo "[release] 产物清单:"
-ls -l "$OUT_DIR" | grep gtgw_ || true
+ls -l "$OUT_DIR" | grep gtgw_cli_ || true

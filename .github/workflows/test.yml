@@ -336,7 +336,7 @@ jobs:
       - name: Assert Linux binaries are static
         run: |
           set -e
-          for f in cli/dist/cli/gtgw_*linux*; do
+          for f in cli/dist/cli/gtgw_cli_*linux*; do
             echo "--- $f"
             file "$f"
             file "$f" | grep -q "statically linked"
@@ -387,5 +387,5 @@ jobs:
         with:
           name: gtgw-cli-binaries
           path: |
-            cli/dist/cli/gtgw_*
+            cli/dist/cli/gtgw_cli_*
           retention-days: 7
