@@ -7,6 +7,16 @@ export function isTauri(): boolean {
 }
 
 /**
+ * Checks if the application is running in Tauri on macOS.
+ * macOS 使用全尺寸内容视图（红绿灯浮在页面内容上），
+ * 只有该场景下需要为窗口按钮预留顶部拖动区。
+ * @returns {boolean} true if running in Tauri on macOS, false otherwise
+ */
+export function isMacTauri(): boolean {
+    return isTauri() && typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac');
+}
+
+/**
  * Opens a URL in the default system browser.
  * In Tauri, it uses the shell plugin to open natively.
  * In Web, it uses window.open.

@@ -1,5 +1,11 @@
 <template>
     <div class="login-container">
+        <!-- macOS 全尺寸内容视图下为原生红绿灯预留的拖动区 -->
+        <div
+            v-if="isMacOverlay"
+            class="window-drag-strip"
+            data-tauri-drag-region="deep"
+        ></div>
         <a-card class="login-card">
             <template #title>
                 <div class="card-title">
@@ -41,7 +47,9 @@ import { reactive, ref, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { notifyError, notifySuccess } from '@/utils/requestFeedback';
-import { isTauri } from '@/utils/platform';
+import { isTauri, isMacTauri } from '@/utils/platform';
+
+const isMacOverlay = isMacTauri();
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -123,6 +131,14 @@ async function handleLogin() {
     background-image: linear-gradient(#e5e5e5 1px, transparent 1px),
         linear-gradient(90deg, #e5e5e5 1px, transparent 1px);
     background-size: 20px 20px;
+}
+
+.window-drag-strip {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 24px;
 }
 
 .login-card {

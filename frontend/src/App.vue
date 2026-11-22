@@ -7,10 +7,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import { useThemeStore } from '@/stores/theme';
+import { isTauri } from '@/utils/platform';
 
 const themeStore = useThemeStore();
+
+// 原生标题栏底色跟随应用主题（macOS 透明标题栏 / Windows 标题栏配色），避免与顶栏之间出现色差和分割线
+if (isTauri()) {
+    watch(
+        () => themeStore.isDark,
+        (isDark) => {
+            import('@tauri-apps/api/core')
+                .then(({ invoke }) => invoke('set_window_theme', { isDark }))
+                .catch(() => {});
+        },
+        { immediate: true },
+    );
+}
 
 const themeConfig = computed(() => themeStore.getAntdThemeConfig());
 </script>

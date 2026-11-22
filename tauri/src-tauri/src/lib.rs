@@ -1,4 +1,5 @@
 mod sys;
+mod window_style;
 pub mod utils;
 
 use crate::utils::{StdioEvent, StdioStream};
@@ -201,6 +202,12 @@ fn get_auth_token(state: tauri::State<AuthToken>) -> String {
 #[tauri::command]
 fn exit_app() {
     std::process::exit(1);
+}
+
+/// Tauri 命令：让原生标题栏底色跟随应用主题
+#[tauri::command]
+fn set_window_theme(window: tauri::WebviewWindow, is_dark: bool) {
+    window_style::apply_window_theme(&window, is_dark);
 }
 
 fn show_splash_window(app: &tauri::AppHandle) -> Result<(), String> {
@@ -575,18 +582,25 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
         let _ = window.set_focus();
         return;
     }
-    let result = tauri::WebviewWindowBuilder::new(
+    let builder = tauri::WebviewWindowBuilder::new(
         app,
         "main",
         tauri::WebviewUrl::App("index.html".into()),
     )
     .title("GT AI Gateway")
     .inner_size(1280.0, 800.0)
-    .resizable(true)
-    .build();
+    .resizable(true);
+
+    let builder = window_style::apply_main_window_style(builder);
+
+    let result = builder.build();
 
     match result {
-        Ok(_) => rust_log("main window created successfully"),
+        Ok(window) => {
+            // 先用默认的浅色主题初始化标题栏底色，前端挂载后会按实际主题纠正
+            window_style::apply_window_theme(&window, false);
+            rust_log("main window created successfully");
+        }
         Err(e) => rust_log(format!("FAILED to create main window: {:?}", e)),
     }
 }
@@ -604,6 +618,7 @@ pub fn run() {
             get_backend_url,
             get_auth_token,
             exit_app,
+            set_window_theme,
             log_to_rust
         ])
         .on_page_load(|webview, payload| {

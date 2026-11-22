@@ -1,7 +1,13 @@
 <template>
-    <div class="app-header">
+    <div class="app-header" :data-tauri-drag-region="isMacOverlay ? 'deep' : undefined">
         <div class="header-left">
-            <img src="/favicon.svg" alt="Logo" class="logo" @click="handleLogoClick">
+            <img
+                src="/favicon.svg"
+                alt="Logo"
+                class="logo"
+                :data-tauri-drag-region="isMacOverlay ? 'false' : undefined"
+                @click="handleLogoClick"
+            >
             <span class="title">{{ title }}</span>
             <a-dropdown v-if="authStore.isSystemAdmin && tenantStore.multiTenantEnabled">
                 <a-button type="text" class="tenant-btn">
@@ -53,6 +59,10 @@ import { useAuthStore } from '@/stores/auth';
 import { useThemeStore } from '@/stores/theme';
 import { useAppStore } from '@/stores/app';
 import { useTenantStore } from '@/stores/tenant';
+import { isMacTauri } from '@/utils/platform';
+
+// macOS 全尺寸内容视图下，顶栏空白处可拖动窗口（logo 与按钮除外）
+const isMacOverlay = isMacTauri();
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -177,7 +187,7 @@ function handleLogoClick() {
     justify-content: space-between;
     align-items: center;
     padding: 0 24px;
-    height: 48px;
+    height: 40px;
     background: var(--bg-header);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     position: relative;

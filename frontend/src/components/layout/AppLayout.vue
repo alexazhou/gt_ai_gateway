@@ -1,5 +1,12 @@
 <template>
     <div class="app-layout">
+        <!-- macOS 全尺寸内容视图下，顶部为原生红绿灯预留拖动区（24px），
+             应用顶栏紧接其下，整体高度从 76px 压缩到 64px -->
+        <div
+            v-if="isMacOverlay"
+            class="window-drag-strip"
+            data-tauri-drag-region="deep"
+        ></div>
         <AppHeader />
         <div class="layout-body">
             <AppSidebar />
@@ -17,6 +24,10 @@ import AppHeader from './AppHeader.vue';
 import AppSidebar from './AppSidebar.vue';
 import { useAuthStore } from '@/stores/auth';
 import { useTenantStore } from '@/stores/tenant';
+import { isMacTauri } from '@/utils/platform';
+
+// 仅在 macOS 桌面端：红绿灯浮在页面内容之上，需要顶部拖动区
+const isMacOverlay = isMacTauri();
 
 const authStore = useAuthStore();
 const tenantStore = useTenantStore();
@@ -51,6 +62,14 @@ onMounted(() => {
     flex-direction: column;
     height: 100vh;
     background: var(--bg-layout);
+}
+
+.window-drag-strip {
+    flex: 0 0 24px;
+    background: var(--bg-header);
+    /* 盖住顶栏 box-shadow 向上溢出的部分，否则拖动区底部会出现一条灰色渐变 */
+    position: relative;
+    z-index: 21;
 }
 
 .layout-body {
