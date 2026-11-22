@@ -1,19 +1,23 @@
 <template>
-    <div class="app-sidebar" :class="{ collapsed: collapsed, 'app-sidebar--mac': isMacOverlay }">
-        <!-- macOS 无应用顶栏：红绿灯所在行 + 品牌 + 租户入口都收进侧边栏顶部，
-             分割线从窗口最顶部一直延伸到底 -->
-        <div v-if="isMacOverlay" class="mac-sidebar-top">
-            <div class="mac-title-row" data-tauri-drag-region="deep">
+    <div class="app-sidebar" :class="{ collapsed: collapsed, 'app-sidebar--desktop': isDesktopApp, 'app-sidebar--mac': isMacOverlay }">
+        <!-- 桌面端无应用顶栏：品牌、主题与租户入口都收进侧边栏顶部，
+             分割线从窗口最顶部一直延伸到底；macOS 顶部行同时为红绿灯留位 -->
+        <div v-if="isDesktopApp" class="desktop-sidebar-top">
+            <div
+                class="desktop-title-row"
+                :class="{ 'desktop-title-row--mac': isMacOverlay }"
+                data-tauri-drag-region="deep"
+            >
                 <ThemeToggleButton v-if="!collapsed" size="small" />
             </div>
-            <div class="mac-brand-row" data-tauri-drag-region="deep">
+            <div class="desktop-brand-row" data-tauri-drag-region="deep">
                 <AppBrand :collapsed="collapsed" />
             </div>
-            <div v-if="!collapsed && showTenantSwitcher" class="mac-tenant-row">
+            <div v-if="!collapsed && showTenantSwitcher" class="desktop-tenant-row">
                 <TenantSwitcher variant="sidebar" />
             </div>
         </div>
-        <div class="sidebar-content" :class="{ 'sidebar-content--mac': isMacOverlay }">
+        <div class="sidebar-content" :class="{ 'sidebar-content--desktop': isDesktopApp }">
             <a-menu
                 :selected-keys="selectedKeys"
                 mode="inline"
@@ -114,7 +118,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useTenantStore } from '@/stores/tenant';
 import { checkUpdate } from '@/api/system';
 import { getConfig } from '@/api/config';
-import { isMacTauri } from '@/utils/platform';
+import { isMacTauri, isWindowsTauri } from '@/utils/platform';
 import AppBrand from './AppBrand.vue';
 import ThemeToggleButton from './ThemeToggleButton.vue';
 import TenantSwitcher from './TenantSwitcher.vue';
@@ -125,8 +129,10 @@ const appStore = useAppStore();
 const authStore = useAuthStore();
 const tenantStore = useTenantStore();
 
-// macOS 下侧边栏顶部额外承载红绿灯、品牌与主题切换
+// 桌面端侧边栏顶部承载品牌、主题与租户切换；macOS 还要为原生红绿灯留位
 const isMacOverlay = isMacTauri();
+const isWindowsApp = isWindowsTauri();
+const isDesktopApp = isMacOverlay || isWindowsApp;
 
 const hasUpdate = ref(false);
 const updateUrl = ref('');
@@ -206,31 +212,36 @@ function toggleSidebar() {
     width: 88px;
 }
 
-.mac-sidebar-top {
+.desktop-sidebar-top {
     flex: none;
 }
 
-.mac-title-row {
+.desktop-title-row {
     display: flex;
     align-items: center;
     justify-content: flex-end;
     height: 32px;
-    /* 主题切换右边缘与菜单项右边缘对齐；左侧留出原生红绿灯宽度 */
-    padding: 0 10px 0 78px;
+    /* 主题切换右边缘与菜单项右边缘对齐 */
+    padding: 0 10px;
 }
 
-.mac-brand-row {
+.desktop-title-row--mac {
+    /* 左侧留出原生红绿灯宽度 */
+    padding-left: 78px;
+}
+
+.desktop-brand-row {
     display: flex;
     align-items: center;
     height: 34px;
     padding: 0 24px;
 }
 
-.mac-tenant-row {
+.desktop-tenant-row {
     padding: 0 10px 4px;
 }
 
-.sidebar-content--mac {
+.sidebar-content--desktop {
     padding-top: 0;
 }
 
@@ -239,7 +250,7 @@ function toggleSidebar() {
 }
 
 /* 折叠后 logo 在 88px 宽度内水平居中 */
-.app-sidebar--mac.collapsed .mac-brand-row {
+.app-sidebar--desktop.collapsed .desktop-brand-row {
     justify-content: center;
     padding: 0;
 }

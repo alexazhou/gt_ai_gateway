@@ -1,5 +1,5 @@
 <template>
-    <div class="app-header" :class="{ 'app-header--desktop': isDesktopApp }">
+    <div class="app-header">
         <div class="header-left">
             <AppBrand />
             <TenantSwitcher variant="header" />
@@ -31,14 +31,11 @@ import { message } from 'ant-design-vue/es';
 import { UserOutlined, LogoutOutlined } from '@ant-design/icons-vue';
 import { useAuthStore } from '@/stores/auth';
 import { useTenantStore } from '@/stores/tenant';
-import { isTauri } from '@/utils/platform';
 import AppBrand from './AppBrand.vue';
 import ThemeToggleButton from './ThemeToggleButton.vue';
 import TenantSwitcher from './TenantSwitcher.vue';
 
-// 顶栏只在 Windows 和 Web 端渲染；macOS 用侧边栏顶部承载品牌与操作入口。
-// 桌面端顶栏与原生标题栏合并，需保持 40px 紧凑高度；Web 保持原有的 48px。
-const isDesktopApp = isTauri();
+// 顶栏只在 Web 端渲染；桌面端（macOS / Windows）用侧边栏顶部承载品牌与操作入口
 const router = useRouter();
 const authStore = useAuthStore();
 const tenantStore = useTenantStore();
@@ -66,11 +63,6 @@ function handleLogout() {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     position: relative;
     z-index: 20;
-}
-
-/* 桌面端与标题栏合并，使用紧凑高度 */
-.app-header--desktop {
-    height: 40px;
 }
 
 .header-left {

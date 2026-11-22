@@ -15,7 +15,20 @@ where
         .hidden_title(true)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+pub fn apply_main_window_style<'a, R, M>(
+    builder: WebviewWindowBuilder<'a, R, M>,
+) -> WebviewWindowBuilder<'a, R, M>
+where
+    R: Runtime,
+    M: Manager<R>,
+{
+    // 无边框窗口：品牌区在侧边栏顶部，窗口按钮由前端右上角自绘，
+    // 保留系统阴影与缩放边框
+    builder.decorations(false).shadow(true)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn apply_main_window_style<'a, R, M>(
     builder: WebviewWindowBuilder<'a, R, M>,
 ) -> WebviewWindowBuilder<'a, R, M>

@@ -17,6 +17,15 @@ export function isMacTauri(): boolean {
 }
 
 /**
+ * Checks if the application is running in Tauri on Windows.
+ * Windows 使用无边框窗口，标题栏由前端自绘，需要渲染窗口控制按钮。
+ * @returns {boolean} true if running in Tauri on Windows, false otherwise
+ */
+export function isWindowsTauri(): boolean {
+    return isTauri() && typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
+}
+
+/**
  * Opens a URL in the default system browser.
  * In Tauri, it uses the shell plugin to open natively.
  * In Web, it uses window.open.

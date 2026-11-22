@@ -1,9 +1,10 @@
 <template>
     <div class="login-container">
-        <!-- macOS 全尺寸内容视图下为原生红绿灯预留的拖动区 -->
+        <!-- 桌面端顶部拖动区：macOS 为原生红绿灯留位，Windows 为自绘标题栏留位 -->
         <div
-            v-if="isMacOverlay"
+            v-if="isDesktopApp"
             class="window-drag-strip"
+            :class="{ 'window-drag-strip--windows': isWindowsApp }"
             data-tauri-drag-region="deep"
         ></div>
         <a-card class="login-card">
@@ -47,9 +48,10 @@ import { reactive, ref, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { notifyError, notifySuccess } from '@/utils/requestFeedback';
-import { isTauri, isMacTauri } from '@/utils/platform';
+import { isTauri, isMacTauri, isWindowsTauri } from '@/utils/platform';
 
-const isMacOverlay = isMacTauri();
+const isWindowsApp = isWindowsTauri();
+const isDesktopApp = isMacTauri() || isWindowsApp;
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -139,6 +141,10 @@ async function handleLogin() {
     left: 0;
     right: 0;
     height: 24px;
+}
+
+.window-drag-strip--windows {
+    height: 32px;
 }
 
 .login-card {

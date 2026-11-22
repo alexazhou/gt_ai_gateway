@@ -2,6 +2,7 @@
     <a-config-provider :theme="themeConfig">
         <div :class="['app-container', themeStore.isDark ? 'dark' : 'light']">
             <router-view />
+            <WindowControls v-if="isWindowsApp" />
         </div>
     </a-config-provider>
 </template>
@@ -9,9 +10,12 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue';
 import { useThemeStore } from '@/stores/theme';
-import { isTauri } from '@/utils/platform';
+import { isTauri, isWindowsTauri } from '@/utils/platform';
+import WindowControls from '@/components/layout/WindowControls.vue';
 
 const themeStore = useThemeStore();
+// Windows 无边框窗口的标题栏按钮，在所有页面（含登录页）都需常驻
+const isWindowsApp = isWindowsTauri();
 
 // 原生标题栏底色跟随应用主题（macOS 透明标题栏 / Windows 标题栏配色），避免与顶栏之间出现色差和分割线
 if (isTauri()) {
@@ -77,6 +81,7 @@ html.dark body {
     --text-version: #95a1b2;
     --text-description: #666;
     --sidebar-hover: #eef5ff;
+    --window-control-hover: rgba(15, 23, 42, 0.08);
     --sidebar-selected: #dcebff;
     --sidebar-selected-border: transparent;
     --sidebar-selected-text: var(--accent-primary);
@@ -135,6 +140,7 @@ html.dark body {
     --text-version: rgba(255, 255, 255, 0.45);
     --text-description: rgba(255, 255, 255, 0.45);
     --sidebar-hover: #223043;
+    --window-control-hover: rgba(255, 255, 255, 0.12);
     --sidebar-selected: #263f5d;
     --sidebar-selected-border: transparent;
     --sidebar-selected-text: var(--accent-primary);
