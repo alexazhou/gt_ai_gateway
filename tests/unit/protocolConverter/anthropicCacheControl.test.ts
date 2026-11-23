@@ -234,9 +234,10 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
         const req: AnthropicRequest = {
             model: "claude-model",
             max_tokens: 64,
-            system: "系统",
+            // 形状由转换层统一产出（方案 B）：这里直接给块数组，补全只加字段
+            system: [{ type: "text", text: "系统" }],
             messages: [
-                { role: "user", content: "第一问" },
+                { role: "user", content: [{ type: "text", text: "第一问" }] },
                 {
                     role: "assistant",
                     content: [{ type: "thinking", thinking: "思考过程", signature: "sig-abc" }],
@@ -272,7 +273,8 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
 
         expect(req.system).toBeUndefined();
         expect(req.tools).toBeUndefined();
-        expect(req.messages[0].content).toBe("");
+        // 方案 B：空内容产出空块数组（不生成占位文本块），因此没有可标记位置
+        expect(req.messages[0].content).toEqual([]);
         expect(collectBreakpoints(req)).toHaveLength(0);
     });
 
@@ -282,7 +284,7 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
             model: "claude-model",
             max_tokens: 64,
             system: [{ type: "text", text: "系统", cache_control: { type: "ephemeral", ttl: "1h" } }],
-            messages: [{ role: "user", content: "问题" }],
+            messages: [{ role: "user", content: [{ type: "text", text: "问题" }] }],
             tools: [{ name: "lookup", input_schema: { type: "object" } }],
         };
 
@@ -442,8 +444,8 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
                 { name: "t2", input_schema: {}, cache_control: EPHEMERAL },
                 { name: "t3", input_schema: {}, cache_control: EPHEMERAL },
             ],
-            system: "系统",
-            messages: [{ role: "user", content: "问题" }],
+            system: [{ type: "text", text: "系统" }],
+            messages: [{ role: "user", content: [{ type: "text", text: "问题" }] }],
         };
 
         const result = protocolConverterUtil.applyAnthropicCacheControl(req);
@@ -454,8 +456,8 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
             "tools[1]",
             "tools[2]",
         ]);
-        // system 没拿到预算 ⇒ 保持原样（仍是字符串）
-        expect(result.system).toBe("系统");
+        // system 没拿到预算 ⇒ 不加字段（形状本就由转换层产出，此处不动）
+        expect(result.system).toEqual([{ type: "text", text: "系统" }]);
     });
 
     // ── 边界：没有 user 消息时不越界标记 assistant（§4.3 末段） ───────────────
@@ -463,10 +465,10 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
         const req: AnthropicRequest = {
             model: "claude-model",
             max_tokens: 64,
-            system: "系统",
+            system: [{ type: "text", text: "系统" }],
             messages: [
-                { role: "user", content: "问题" },
-                { role: "assistant", content: "预填" },
+                { role: "user", content: [{ type: "text", text: "问题" }] },
+                { role: "assistant", content: [{ type: "text", text: "预填" }] },
             ],
             tools: [{ name: "lookup", input_schema: {} }],
         };
@@ -479,6 +481,138 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
             "messages[0].content[0]",
             "system[0]",
             "tools[0]",
+        ]);
+    });
+
+    // ── 方案 B（2026-11-23 Operator 定）：补全只加字段，绝不改请求形状 ──────────
+    it("方案B-1：字符串形态的 system / content 一律跳过，绝不改写成块数组", () => {
+        const req: AnthropicRequest = {
+            model: "claude-model",
+            max_tokens: 64,
+            system: "系统",
+            messages: [{ role: "user", content: "问题" }],
+            tools: [{ name: "lookup", input_schema: {} }],
+        };
+
+        const result = protocolConverterUtil.applyAnthropicCacheControl(req);
+
+        // 字符串位置：形状原样保留（仍是字符串），也没有标记
+        expect(result.system).toBe("系统");
+        expect(result.messages[0].content).toBe("问题");
+        // 只有本来就是对象 / 块的位置拿到标记
+        expect(collectBreakpoints(result).map((m) => m.where)).toEqual(["tools[0]"]);
+    });
+
+    it("方案B-2：转换层产出块数组（与是否补全无关），补全只加字段且幂等", () => {
+        const openaiReq: OpenAIRequest = {
+            model: "claude-model",
+            messages: [
+                { role: "system", content: "系统" },
+                { role: "user", content: "问题" },
+            ],
+            tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }],
+            max_tokens: 64,
+        };
+
+        const req = chatConverter.convertRequest(openaiReq);
+
+        // 形状由转换器给出：system / content 都是块数组，标记是后加的字段
+        expect(req.system).toEqual([{ type: "text", text: "系统", cache_control: EPHEMERAL }]);
+        expect(req.messages[0].content).toEqual([{ type: "text", text: "问题", cache_control: EPHEMERAL }]);
+        expect(collectBreakpoints(req).map((m) => m.where).sort()).toEqual([
+            "messages[0].content[0]",
+            "system[0]",
+            "tools[0]",
+        ]);
+
+        // 再补一次：不新增断点、不重复包裹（幂等）
+        const again = protocolConverterUtil.applyAnthropicCacheControl(req);
+        expect(collectBreakpoints(again)).toHaveLength(3);
+        expect(again.messages[0].content).toEqual([{ type: "text", text: "问题", cache_control: EPHEMERAL }]);
+    });
+
+    // ── 形状与标记解耦：覆盖「不加标记 / 部分加标记」的路径（两条转换路径各两组） ──
+    // 这些用例的意义：方案 B 把形状变更的影响面从「加标记的请求」扩到「全部转 Anthropic 的
+    // 请求」，所以形状必须能在**没有标记**的情况下被独立断言，不能只靠加标记的用例自证。
+    it("解耦-1 Chat：无 system、无 tools，只有字符串 user ⇒ 形状是块数组，只有 1 个消息断点", () => {
+        const openaiReq: OpenAIRequest = {
+            model: "claude-model",
+            messages: [{ role: "user", content: "只有消息" }],
+            max_tokens: 64,
+        };
+
+        const req = chatConverter.convertRequest(openaiReq);
+
+        expect(req.system).toBeUndefined();
+        expect(req.tools).toBeUndefined();
+        expect(req.messages).toHaveLength(1);
+        expect(req.messages[0].content).toEqual([{ type: "text", text: "只有消息", cache_control: EPHEMERAL }]);
+        expect(collectBreakpoints(req).map((m) => m.where)).toEqual(["messages[0].content[0]"]);
+    });
+
+    it("解耦-2 Chat：字符串 system + 字符串 user + 空 tools 数组 ⇒ 2 个断点，空 tools 不产生标记", () => {
+        const openaiReq: OpenAIRequest = {
+            model: "claude-model",
+            messages: [
+                { role: "system", content: "系统" },
+                { role: "user", content: "问题" },
+            ],
+            tools: [],
+            max_tokens: 64,
+        };
+
+        const req = chatConverter.convertRequest(openaiReq);
+
+        expect(req.system).toEqual([{ type: "text", text: "系统", cache_control: EPHEMERAL }]);
+        expect(req.messages[0].content).toEqual([{ type: "text", text: "问题", cache_control: EPHEMERAL }]);
+        expect(req.tools).toEqual([]);
+        expect(collectBreakpoints(req).map((m) => m.where).sort()).toEqual([
+            "messages[0].content[0]",
+            "system[0]",
+        ]);
+    });
+
+    it("解耦-3 Responses：空字符串 input、无 instructions、无 tools ⇒ 0 个断点，形状仍是块数组", () => {
+        const responsesReq: ResponsesRequest = {
+            model: "claude-model",
+            input: "",
+        };
+
+        const req = responsesConverter.convertRequest(responsesReq);
+
+        expect(req.system).toBeUndefined();
+        expect(req.tools).toBeUndefined();
+        // 形状由转换层产出，与是否加标记无关：空文本也是块，只是不可标记
+        expect(req.messages[0].content).toEqual([{ type: "text", text: "" }]);
+        expect(collectBreakpoints(req)).toHaveLength(0);
+    });
+
+    it("解耦-4 Responses：instructions + function_call_output ⇒ 断点落在 tool_result 外层块与 system，tool_use 不加标记", () => {
+        const responsesReq: ResponsesRequest = {
+            model: "claude-model",
+            instructions: "系统提示词",
+            input: [
+                { type: "function_call", call_id: "call_1", name: "lookup", arguments: "{\"key\":\"a\"}" },
+                { type: "function_call_output", call_id: "call_1", output: "结果 A" },
+            ],
+        };
+
+        const req = responsesConverter.convertRequest(responsesReq);
+        const marks = collectBreakpoints(req);
+        const assistant = req.messages[0];
+        const lastUser = req.messages[req.messages.length - 1];
+
+        expect(req.system).toEqual([{ type: "text", text: "系统提示词", cache_control: EPHEMERAL }]);
+        // assistant 的 tool_use 块不加标记
+        expect((assistant.content as AnthropicContentBlock[]).every((b) => b.cache_control === undefined)).toBe(true);
+        // 断点落在 tool_result 外层块（它属于 user 消息的可标记块）
+        const userBlocks = lastUser.content as AnthropicContentBlock[];
+        expect(userBlocks.map((b) => b.type)).toEqual(["tool_result"]);
+        expect(userBlocks[0].cache_control).toEqual(EPHEMERAL);
+        expect(userBlocks[0].content).toBe("结果 A");
+        expect(marks.map((m) => m.where).sort()).toEqual([
+            "messages[1].content[0]",
+            "system[0]",
         ]);
     });
 });

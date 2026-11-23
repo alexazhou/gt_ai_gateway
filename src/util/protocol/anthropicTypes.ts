@@ -38,7 +38,7 @@ export interface AnthropicContentBlock {
     cache_control?: AnthropicCacheControl;
 }
 
-/** `system` 数组中的文本块（字符串形式在补全时会被规范化为本形状）。 */
+/** `system` 数组中的文本块（转换器统一产出块数组，缓存标记只在块上加字段、不改形状）。 */
 export interface AnthropicTextBlock {
     type: "text";
     text: string;

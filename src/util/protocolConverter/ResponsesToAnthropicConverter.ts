@@ -57,7 +57,8 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
         }
 
         if (typeof req.input === "string") {
-            messages.push({ role: "user", content: req.input });
+            // 形状由转换层统一产出（方案 B）：字符串也产出块数组，缓存标记只加字段
+            messages.push({ role: "user", content: [{ type: "text", text: req.input }] });
         } else {
             // 只合并同一轮内连续的 function_call 或连续的 function_call_output，跨阶段时立即 flush 保留轮次
             let pendingToolUses: AnthropicContentBlock[] = [];
@@ -126,7 +127,8 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
         };
 
         if (systemParts.length > 0) {
-            anthropicReq.system = systemParts.join("\n\n");
+            // 形状由转换层统一产出（方案 B）：system 一律给块数组
+            anthropicReq.system = [{ type: "text", text: systemParts.join("\n\n") }];
         }
 
         if (req.temperature !== undefined) {
@@ -264,7 +266,14 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             }
 
             if (typeof content === "string") {
-                protocolConverterUtil.appendAnthropicMessage(messages, role as "user" | "assistant", content);
+                // 形状由转换层统一产出（方案 B）：字符串也产出块数组
+                if (content) {
+                    protocolConverterUtil.appendAnthropicMessage(
+                        messages,
+                        role as "user" | "assistant",
+                        [{ type: "text", text: content }],
+                    );
+                }
                 return;
             }
 

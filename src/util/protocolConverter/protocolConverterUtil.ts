@@ -6,7 +6,6 @@ import type {
     AnthropicContentBlock,
     AnthropicRequest,
     AnthropicStreamUsage,
-    AnthropicTextBlock,
     AnthropicTool,
     AnthropicUsage,
 } from "../protocol/anthropicTypes";
@@ -241,6 +240,8 @@ function appendAnthropicMessage(
 
 
 // ─── Anthropic 请求缓存断点补全（#295，方案见 doc/tech/anthropic_cache_control_design.md）───
+// 口径（2026-11-23 Operator 定，方案 B）：**本段只加字段，绝不改请求形状**。
+// 字符串形态的 system / content 一律跳过（形状由转换层统一产出块数组），见 markLastSystemBlock / markLastUserMessageBlock。
 
 /**
  * 显式缓存断点总数上限。文档 §4.4 第一版按 4 个设计；
@@ -318,16 +319,9 @@ function markLastUserMessageBlock(req: AnthropicRequest): boolean {
             continue;
         }
         if (typeof message.content === "string") {
-            if (message.content.length === 0) {
-                return false;
-            }
-            const block: AnthropicContentBlock = {
-                type: "text",
-                text: message.content,
-                cache_control: { ...ANTHROPIC_EPHEMERAL_CACHE },
-            };
-            message.content = [block];
-            return true;
+            // 只加字段、不改形状（方案 B）：字符串形态由转换层负责产出块数组，
+            // 这里遇到字符串一律跳过，绝不把 content 改写成数组。
+            return false;
         }
         for (let blockIndex = message.content.length - 1; blockIndex >= 0; blockIndex -= 1) {
             const block = message.content[blockIndex];
@@ -355,16 +349,8 @@ function markLastSystemBlock(req: AnthropicRequest): boolean {
         return false;
     }
     if (typeof req.system === "string") {
-        if (req.system.length === 0) {
-            return false;
-        }
-        const block: AnthropicTextBlock = {
-            type: "text",
-            text: req.system,
-            cache_control: { ...ANTHROPIC_EPHEMERAL_CACHE },
-        };
-        req.system = [block];
-        return true;
+        // 只加字段、不改形状（方案 B）：字符串形态一律跳过，不改写成块数组。
+        return false;
     }
     for (let index = req.system.length - 1; index >= 0; index -= 1) {
         const block = req.system[index];
@@ -404,6 +390,8 @@ function markLastTool(req: AnthropicRequest): boolean {
  * - 已有合法标记保留原位置与设置；候选位置已有标记则不重复添加 ⇒ 同一请求重复调用结果相同（幂等）。
  * - 非法标记或已有标记超过上限 ⇒ **明确拒绝**（400），不静默删除客户端配置。
  * - 空 system / 空内容 / 空工具不生成占位块；`thinking` 不加标记。
+ * - **只加字段、不改形状**：遇到字符串形态的 system / message content 直接跳过，
+ *   绝不把字符串改写成块数组（形状由转换器统一产出）。
  *
  * 原地修改并返回同一个请求对象：调用点都是「构造完成后、返回前」，无需额外拷贝。
  */
