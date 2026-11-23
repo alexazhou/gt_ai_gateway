@@ -234,9 +234,10 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
         const req: AnthropicRequest = {
             model: "claude-model",
             max_tokens: 64,
-            system: "系统",
+            // 形状由转换层统一产出（方案 B）：这里直接给块数组，补全只加字段
+            system: [{ type: "text", text: "系统" }],
             messages: [
-                { role: "user", content: "第一问" },
+                { role: "user", content: [{ type: "text", text: "第一问" }] },
                 {
                     role: "assistant",
                     content: [{ type: "thinking", thinking: "思考过程", signature: "sig-abc" }],
@@ -272,7 +273,8 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
 
         expect(req.system).toBeUndefined();
         expect(req.tools).toBeUndefined();
-        expect(req.messages[0].content).toBe("");
+        // 方案 B：空内容产出空块数组（不生成占位文本块），因此没有可标记位置
+        expect(req.messages[0].content).toEqual([]);
         expect(collectBreakpoints(req)).toHaveLength(0);
     });
 
@@ -282,7 +284,7 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
             model: "claude-model",
             max_tokens: 64,
             system: [{ type: "text", text: "系统", cache_control: { type: "ephemeral", ttl: "1h" } }],
-            messages: [{ role: "user", content: "问题" }],
+            messages: [{ role: "user", content: [{ type: "text", text: "问题" }] }],
             tools: [{ name: "lookup", input_schema: { type: "object" } }],
         };
 
@@ -442,8 +444,8 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
                 { name: "t2", input_schema: {}, cache_control: EPHEMERAL },
                 { name: "t3", input_schema: {}, cache_control: EPHEMERAL },
             ],
-            system: "系统",
-            messages: [{ role: "user", content: "问题" }],
+            system: [{ type: "text", text: "系统" }],
+            messages: [{ role: "user", content: [{ type: "text", text: "问题" }] }],
         };
 
         const result = protocolConverterUtil.applyAnthropicCacheControl(req);
@@ -454,8 +456,8 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
             "tools[1]",
             "tools[2]",
         ]);
-        // system 没拿到预算 ⇒ 保持原样（仍是字符串）
-        expect(result.system).toBe("系统");
+        // system 没拿到预算 ⇒ 不加字段（形状本就由转换层产出，此处不动）
+        expect(result.system).toEqual([{ type: "text", text: "系统" }]);
     });
 
     // ── 边界：没有 user 消息时不越界标记 assistant（§4.3 末段） ───────────────
@@ -463,10 +465,10 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
         const req: AnthropicRequest = {
             model: "claude-model",
             max_tokens: 64,
-            system: "系统",
+            system: [{ type: "text", text: "系统" }],
             messages: [
-                { role: "user", content: "问题" },
-                { role: "assistant", content: "预填" },
+                { role: "user", content: [{ type: "text", text: "问题" }] },
+                { role: "assistant", content: [{ type: "text", text: "预填" }] },
             ],
             tools: [{ name: "lookup", input_schema: {} }],
         };
@@ -480,5 +482,52 @@ describe("Anthropic cache_control 补全（#295 §8.1）", () => {
             "system[0]",
             "tools[0]",
         ]);
+    });
+
+    // ── 方案 B（2026-11-23 Operator 定）：补全只加字段，绝不改请求形状 ──────────
+    it("方案B-1：字符串形态的 system / content 一律跳过，绝不改写成块数组", () => {
+        const req: AnthropicRequest = {
+            model: "claude-model",
+            max_tokens: 64,
+            system: "系统",
+            messages: [{ role: "user", content: "问题" }],
+            tools: [{ name: "lookup", input_schema: {} }],
+        };
+
+        const result = protocolConverterUtil.applyAnthropicCacheControl(req);
+
+        // 字符串位置：形状原样保留（仍是字符串），也没有标记
+        expect(result.system).toBe("系统");
+        expect(result.messages[0].content).toBe("问题");
+        // 只有本来就是对象 / 块的位置拿到标记
+        expect(collectBreakpoints(result).map((m) => m.where)).toEqual(["tools[0]"]);
+    });
+
+    it("方案B-2：转换层产出块数组（与是否补全无关），补全只加字段且幂等", () => {
+        const openaiReq: OpenAIRequest = {
+            model: "claude-model",
+            messages: [
+                { role: "system", content: "系统" },
+                { role: "user", content: "问题" },
+            ],
+            tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }],
+            max_tokens: 64,
+        };
+
+        const req = chatConverter.convertRequest(openaiReq);
+
+        // 形状由转换器给出：system / content 都是块数组，标记是后加的字段
+        expect(req.system).toEqual([{ type: "text", text: "系统", cache_control: EPHEMERAL }]);
+        expect(req.messages[0].content).toEqual([{ type: "text", text: "问题", cache_control: EPHEMERAL }]);
+        expect(collectBreakpoints(req).map((m) => m.where).sort()).toEqual([
+            "messages[0].content[0]",
+            "system[0]",
+            "tools[0]",
+        ]);
+
+        // 再补一次：不新增断点、不重复包裹（幂等）
+        const again = protocolConverterUtil.applyAnthropicCacheControl(req);
+        expect(collectBreakpoints(again)).toHaveLength(3);
+        expect(again.messages[0].content).toEqual([{ type: "text", text: "问题", cache_control: EPHEMERAL }]);
     });
 });
