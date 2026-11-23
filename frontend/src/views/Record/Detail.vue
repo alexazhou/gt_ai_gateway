@@ -211,6 +211,7 @@ import { computed, onUnmounted, watch, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { DownloadOutlined, ArrowUpOutlined, ArrowDownOutlined, InfoCircleOutlined } from '@ant-design/icons-vue';
 import { useRecordStore } from '@/stores/record';
+import { useThemeStore } from '@/stores/theme';
 import { deleteRecord } from '@/api/record';
 import { formatDate } from '@/utils/format';
 import JsonDownload from '@/utils/jsonDownload';
@@ -222,6 +223,7 @@ import { message } from 'ant-design-vue/es';
 const router = useRouter();
 const route = useRoute();
 const recordStore = useRecordStore();
+const themeStore = useThemeStore();
 
 const viewerIframe = ref<HTMLIFrameElement | null>(null);
 const activeRequestTab = ref<string>('request_json');
@@ -232,6 +234,7 @@ interface JsonViewerExpose {
 
 interface ViewerBridge {
     setLlmData?: (data: unknown) => void;
+    setTheme?: (themeMode: 'light' | 'dark') => void;
 }
 
 interface ViewerWindow extends Window {
@@ -298,13 +301,27 @@ function sendToViewer(data: unknown): void {
     }
 }
 
+function sendThemeToViewer(): void {
+    const contentWindow = viewerIframe.value?.contentWindow as ViewerWindow | null | undefined;
+    const bridge = contentWindow?.gt_bridge;
+    if (bridge && typeof bridge.setTheme === 'function') {
+        bridge.setTheme(themeStore.isDark ? 'dark' : 'light');
+    }
+}
+
 function onIframeLoad() {
     if (viewerIframe.value && viewerIframe.value.contentWindow) {
         setTimeout(() => {
+            sendThemeToViewer();
             sendToViewer(conversationData.value);
         }, 300);
     }
 }
+
+// iframe 有独立文档，无法继承父页面主题，主题切换时需要显式同步
+watch(() => themeStore.isDark, () => {
+    sendThemeToViewer();
+});
 
 watch(conversationData, (newVal) => {
     if (getMessageCount(newVal) > 0) {

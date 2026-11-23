@@ -3,6 +3,9 @@ import type { ListResult } from '../types';
 import type { Vendor, CreateVendorRequest, UpdateVendorRequest } from '../types/vendor';
 import type { VendorQuery } from '../types/vendor';
 
+// 测试请求的内容模式：text=纯文本；image=多模态（后端内置样图，前端只传模式）
+export type TestContentMode = 'text' | 'image';
+
 export interface VendorTestResponse {
     success: boolean;
     status?: number;
@@ -16,6 +19,8 @@ export interface VendorTestResponse {
     request_body?: unknown;
     response?: unknown;
     error?: unknown;
+    // 后端回显本次实际使用的模式（旧后端不返回该字段，故可选）
+    content_mode?: TestContentMode;
 }
 
 export async function listVendors(params?: VendorQuery): Promise<ListResult<Vendor>> {
@@ -80,6 +85,12 @@ export async function testVendor(
     format: string = 'openai',
     model?: string,
     autoConvert: boolean = false,
+    contentMode: TestContentMode = 'text',
 ): Promise<VendorTestResponse> {
-    return request.post(`/vendor/${id}/test.json`, { format, model, auto_convert: autoConvert });
+    return request.post(`/vendor/${id}/test.json`, {
+        format,
+        model,
+        auto_convert: autoConvert,
+        content_mode: contentMode,
+    });
 }

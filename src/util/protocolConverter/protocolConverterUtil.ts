@@ -2,9 +2,11 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import customError from "../../customError";
 import objectUtil from "../objectUtil";
 import type {
+    AnthropicCacheControl,
     AnthropicContentBlock,
     AnthropicRequest,
     AnthropicStreamUsage,
+    AnthropicTool,
     AnthropicUsage,
 } from "../protocol/anthropicTypes";
 import type { OpenAIStreamUsage, OpenAIUsage } from "../protocol/openaiTypes";
@@ -237,11 +239,201 @@ function appendAnthropicMessage(
 }
 
 
+// ─── Anthropic 请求缓存断点补全（#295，方案见 doc/tech/anthropic_cache_control_design.md）───
+// 口径（2026-11-23 Operator 定，方案 B）：**本段只加字段，绝不改请求形状**。
+// 字符串形态的 system / content 一律跳过（形状由转换层统一产出块数组），见 markLastSystemBlock / markLastUserMessageBlock。
+
+/**
+ * 显式缓存断点总数上限。文档 §4.4 第一版按 4 个设计；
+ * 目标上游与兼容供应商的真实限制需要在有凭据的环境确认（§8.2 第 1 条）。
+ */
+const MAX_ANTHROPIC_CACHE_BREAKPOINTS = 4;
+
+/** 自动补全写入的标记；**不设 ttl**，用目标协议默认短期缓存。 */
+const ANTHROPIC_EPHEMERAL_CACHE: AnthropicCacheControl = { type: "ephemeral" };
+
+/**
+ * 可自动标记的内容块类型。`thinking` 明确**不在**其中（§4.3）：
+ * 不直接给 thinking 块加标记，也不改其明文或 signature。
+ */
+const ANTHROPIC_CACHEABLE_BLOCK_TYPES: ReadonlySet<string> = new Set(["text", "image", "tool_result"]);
+
+function isLegalAnthropicCacheControl(value: unknown): value is AnthropicCacheControl {
+    return objectUtil.isRecord(value) && (value as { type?: unknown }).type === "ephemeral";
+}
+
+/**
+ * 已有断点的扫描结果：
+ * - `count` 合法标记数
+ * - `illegal` 非法标记的位置
+ * - `positions` 合法标记的位置（给「超过上限」的错误文案点名用）
+ */
+interface AnthropicCacheScan {
+    count: number;
+    illegal: string[];
+    positions: string[];
+}
+
+function scanAnthropicCacheBreakpoints(req: AnthropicRequest): AnthropicCacheScan {
+    const illegal: string[] = [];
+    const positions: string[] = [];
+    let count = 0;
+
+    const visit = (holder: { cache_control?: unknown }, where: string): void => {
+        if (holder.cache_control === undefined) {
+            return;
+        }
+        if (isLegalAnthropicCacheControl(holder.cache_control)) {
+            count += 1;
+            positions.push(where);
+        } else {
+            illegal.push(where);
+        }
+    };
+
+    (req.tools ?? []).forEach((tool, index) => visit(tool, `tools[${index}]`));
+
+    if (Array.isArray(req.system)) {
+        req.system.forEach((block, index) => visit(block, `system[${index}]`));
+    }
+
+    req.messages.forEach((message, messageIndex) => {
+        if (!Array.isArray(message.content)) {
+            return;
+        }
+        message.content.forEach((block, blockIndex) => {
+            // 只检查**内容块本身**：tool_result 的嵌套 content、工具 input_schema、
+            // 工具入参里的同名键都是业务数据，不是协议断点（§4.4 末段）。
+            visit(block, `messages[${messageIndex}].content[${blockIndex}]`);
+        });
+    });
+
+    return { count, illegal, positions };
+}
+
+/** 消息断点：最后一条 user 消息里最后一个可标记块；无可标记块时跳过（不越界去标 assistant）。 */
+function markLastUserMessageBlock(req: AnthropicRequest): boolean {
+    for (let index = req.messages.length - 1; index >= 0; index -= 1) {
+        const message = req.messages[index];
+        if (message.role !== "user") {
+            continue;
+        }
+        if (typeof message.content === "string") {
+            // 只加字段、不改形状（方案 B）：字符串形态由转换层负责产出块数组，
+            // 这里遇到字符串一律跳过，绝不把 content 改写成数组。
+            return false;
+        }
+        for (let blockIndex = message.content.length - 1; blockIndex >= 0; blockIndex -= 1) {
+            const block = message.content[blockIndex];
+            if (!ANTHROPIC_CACHEABLE_BLOCK_TYPES.has(block.type)) {
+                continue;
+            }
+            if (block.cache_control !== undefined) {
+                // 该位置已有标记：保留原位置，不重复添加（幂等的关键一环）
+                return false;
+            }
+            if (block.type === "text" && !block.text) {
+                continue;
+            }
+            block.cache_control = { ...ANTHROPIC_EPHEMERAL_CACHE };
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+/** 系统断点：最后一个可标记的 system 文本块；字符串先规范化为单文本块数组。 */
+function markLastSystemBlock(req: AnthropicRequest): boolean {
+    if (req.system === undefined) {
+        return false;
+    }
+    if (typeof req.system === "string") {
+        // 只加字段、不改形状（方案 B）：字符串形态一律跳过，不改写成块数组。
+        return false;
+    }
+    for (let index = req.system.length - 1; index >= 0; index -= 1) {
+        const block = req.system[index];
+        if (block.type !== "text" || !block.text) {
+            continue;
+        }
+        if (block.cache_control !== undefined) {
+            return false;
+        }
+        block.cache_control = { ...ANTHROPIC_EPHEMERAL_CACHE };
+        return true;
+    }
+    return false;
+}
+
+/** 工具断点：最后一个工具定义。 */
+function markLastTool(req: AnthropicRequest): boolean {
+    const tools: AnthropicTool[] | undefined = req.tools;
+    if (!tools || tools.length === 0) {
+        return false;
+    }
+    const tool = tools[tools.length - 1];
+    if (tool.cache_control !== undefined) {
+        return false;
+    }
+    tool.cache_control = { ...ANTHROPIC_EPHEMERAL_CACHE };
+    return true;
+}
+
+/**
+ * 为「转 Anthropic」的请求补全显式缓存断点（Chat→Anthropic 与 Responses→Anthropic 共用）。
+ *
+ * 规则（文档 §4，实现前已定稿，此处只落一份）：
+ * - 三处候选：`tools` 最后一个工具 / `system` 最后一个可标记文本块 /
+ *   `messages` 最后一条 user 消息的最后一个可标记块（含 `tool_result` 外层块）。
+ * - 优先级：消息 → system → tools（§4.4 第 3 条，有限预算时先补最能随对话推进而复用的前缀）。
+ * - 已有合法标记保留原位置与设置；候选位置已有标记则不重复添加 ⇒ 同一请求重复调用结果相同（幂等）。
+ * - 非法标记或已有标记超过上限 ⇒ **明确拒绝**（400），不静默删除客户端配置。
+ * - 空 system / 空内容 / 空工具不生成占位块；`thinking` 不加标记。
+ * - **只加字段、不改形状**：遇到字符串形态的 system / message content 直接跳过，
+ *   绝不把字符串改写成块数组（形状由转换器统一产出）。
+ *
+ * 原地修改并返回同一个请求对象：调用点都是「构造完成后、返回前」，无需额外拷贝。
+ */
+function applyAnthropicCacheControl(req: AnthropicRequest): AnthropicRequest {
+    const scan = scanAnthropicCacheBreakpoints(req);
+    // 两种拒绝的文案都必须自带三件事：**位置**（哪个字段带的问题）、**原因**（非法取值 / 超上限，
+    // 两者要能一眼区分）、**上限值**。只说「invalid cache_control」等于让客户端换个地方猜。
+    if (scan.illegal.length > 0) {
+        throw new customError.AppError(
+            `Invalid cache_control at ${scan.illegal.join(", ")}: unsupported value, `
+            + `only {"type":"ephemeral"} is accepted; this gateway allows at most `
+            + `${MAX_ANTHROPIC_CACHE_BREAKPOINTS} cache breakpoints per request`,
+            400,
+        );
+    }
+    if (scan.count > MAX_ANTHROPIC_CACHE_BREAKPOINTS) {
+        throw new customError.AppError(
+            `Anthropic request carries ${scan.count} cache breakpoints `
+            + `(${scan.positions.join(", ")}), exceeding the limit of `
+            + `${MAX_ANTHROPIC_CACHE_BREAKPOINTS}; refusing to drop client markers`,
+            400,
+        );
+    }
+
+    let remaining = MAX_ANTHROPIC_CACHE_BREAKPOINTS - scan.count;
+    if (remaining > 0 && markLastUserMessageBlock(req)) {
+        remaining -= 1;
+    }
+    if (remaining > 0 && markLastSystemBlock(req)) {
+        remaining -= 1;
+    }
+    if (remaining > 0 && markLastTool(req)) {
+        remaining -= 1;
+    }
+    return req;
+}
+
+
 /**
  * 解析工具调用的 JSON 参数；非法 JSON 或非对象结果时返回空对象。
  */
-function parseToolArguments(args: string): Record<string, unknown> {
-    try {
+function parseToolArguments(args: string): Record<string, unknown> {    try {
         const parsed: unknown = JSON.parse(args);
         return objectUtil.isRecord(parsed) ? parsed : {};
     } catch {
@@ -342,6 +534,8 @@ interface SealedThinkingPayload {
     v: 1;
     src: "anthropic" | "responses";
     model?: string;
+    /** 上游来源标识（`vendor:<id>`）：凭据只对签出它的上游来源有效（PC-009-C） */
+    source?: string;
     thinking?: string;
     signature: string;
 }
@@ -354,7 +548,7 @@ interface SealedThinkingPayload {
 function sealThinkingSignature(
     src: "anthropic" | "responses",
     signature: string,
-    options?: { model?: string; thinking?: string },
+    options?: { model?: string; thinking?: string; source?: string },
 ): string {
     if (!signature) return "";
     const payload: SealedThinkingPayload = {
@@ -362,6 +556,7 @@ function sealThinkingSignature(
         src,
         signature,
         ...(options?.model ? { model: options.model } : {}),
+        ...(options?.source ? { source: options.source } : {}),
         ...(options?.thinking !== undefined ? { thinking: options.thinking } : {}),
     };
     const payloadB64 = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
@@ -379,7 +574,21 @@ function unsealThinkingSignature(
     token: string,
     expectedSrc: "anthropic" | "responses",
     expectedModel?: string,
-): { signature: string; thinking?: string } | null {
+    /**
+     * 期望的上游来源（`vendor:<id>`）。仅在**凭据自身带 source** 时校验：
+     * 老凭据没有该字段，保持向后兼容（否则升级瞬间在途多轮对话全部 400）。
+     */
+    expectedSource?: string,
+): {
+    signature: string;
+    thinking?: string;
+    /**
+     * 本次是否**真的**核对过来源：
+     * - `true`：凭据自带 `source` 且与期望值相等（新凭据，来源已强制校验）；
+     * - `false`：老凭据没有 `source` 字段 ⇒ 只校验了模型，来源**未校验**（调用方必须留痕）。
+     */
+    sourceChecked: boolean;
+} | null {
     if (!token || !token.startsWith(`${THINKING_SIG_PREFIX}.`)) {
         return null;
     }
@@ -413,9 +622,13 @@ function unsealThinkingSignature(
     if (expectedModel && typeof payload.model === "string" && payload.model !== expectedModel) {
         return null;
     }
+    if (expectedSource && typeof payload.source === "string" && payload.source !== expectedSource) {
+        return null;
+    }
     return {
         signature: payload.signature,
         thinking: typeof payload.thinking === "string" ? payload.thinking : undefined,
+        sourceChecked: Boolean(expectedSource && typeof payload.source === "string"),
     };
 }
 
@@ -426,6 +639,7 @@ export default {
     extractResponsesText,
     anthropicImageSourceToUrl,
     anthropicImageSourceFromUrl,
+    applyAnthropicCacheControl,
     mergeOpenAIUsage,
     mergeAnthropicUsage,
     mergeResponsesUsage,

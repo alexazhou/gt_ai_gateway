@@ -1,0 +1,121 @@
+name: CLI Release
+
+# 把 gtgw 的 6 个单文件产物随 Release 一起发布。
+#
+# 版本口径（三点关系，写死在这里，避免以后各说各话）：
+#   * 根 package.json 的 version 是唯一来源（如 1.9.1-beta1）；
+#   * release tag 是 `v` + 该 version（如 v1.9.1-beta1）；
+#   * `gtgw --version` 输出 `gtgw version <version>`，即 tag 去掉前导 `v`。
+# 三者不一致时 bash script/verify_versions.sh 与下面的 grep 断言会直接红。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cli-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build gtgw (Linux/macOS/Windows)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          token: ${{ github.token }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Verify version consistency
+        run: bash script/verify_versions.sh
+
+      - name: Cross compile (6 targets, version injected from package.json)
+        run: bash cli/scripts/release.sh
+
+      - name: Assert version injected into every artifact
+        # 交叉编译产物只能在本机架构上实跑；其余靠构建日志里的 ldflags 断言 + 后续 e2e。
+        run: |
+          set -e
+          EXPECTED="$(node -p "require('./package.json').version")"
+          echo "expected version: $EXPECTED"
+          # 本机架构是 amd64：linux/amd64 产物可直接执行，实跑校验版本号
+          ./cli/dist/cli/gtgw_cli_${EXPECTED}_linux_amd64 --version | tee /tmp/ver.txt
+          grep -q "gtgw version $EXPECTED" /tmp/ver.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtgw-cli-release
+          path: cli/dist/cli/*
+          retention-days: 7
+
+  publish:
+    name: Attach binaries to Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          token: ${{ github.token }}
+
+      # 与 tauri.yml 的 create-release 保持同一口径：只有纯数字版本 tag 才挂 Release。
+      # beta/rc 等预发布 tag 只保留 Actions Artifacts，不创建 GitHub Release。
+      - name: Check version tag
+        id: version_tag
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$tag" =~ ^v[0-9]+(\.[0-9]+)+$ ]]; then
+            echo "matched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "matched=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping release for non-version tag: $tag"
+          fi
+
+      - name: Download artifacts
+        if: steps.version_tag.outputs.matched == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: gtgw-cli-release
+          path: dist-cli
+
+      - name: Attach to release
+        if: steps.version_tag.outputs.matched == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          ls -l dist-cli
+          # 桌面端安装包由 tauri.yml 的 create-release 负责建 release；这里只补 CLI 资产。
+          # 若本 job 先跑到（release 还没建），就地建一个空 release 再传，避免竞态失败。
+          # 预发布 tag 已在 Check version tag 一步被挡掉，走不到这里。
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --title "$TAG" --generate-notes || true
+
+          for _ in $(seq 1 10); do
+            if gh release view "$TAG" >/dev/null 2>&1; then break; fi
+            sleep 6
+          done
+
+          mapfile -t assets < <(find dist-cli -type f -name 'gtgw_cli_*')
+          printf 'uploading:\n%s\n' "${assets[@]}"
+          gh release upload "$TAG" "${assets[@]}" --clobber

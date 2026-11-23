@@ -1,5 +1,13 @@
 # 测试请求支持多模态（图片）输入 - 技术文档
 
+> ## ✅ 实施状态（2026-11-16，任务单 #285）
+>
+> **本文档描述的功能已落地**：实现依据以实施报告 `shared/multimodal-test-request/report.md` 为准；
+> 本文与本实现的差异、以及文中**已失效的前提**，见紧随本节之后的「#285 落地对照」。
+>
+> **正文保持 2026-10-20 原样不改** —— 它是当时的判断记录；改正文会让后来人分不清
+> 「当初没想到」和「想到了但写错」。过时的前提集中标注在下面这一节，不散落在正文里。
+
 > **状态更新（2026-10-21）**：OpenAI ↔ Anthropic 图片转换已补齐，`isImageConversionLossy` 与 `warning` 相关设计不再需要。实现本功能时，模型路由测试可以直接发送跨协议图片请求，其余设计不变。
 
 ## 架构概览
@@ -198,6 +206,40 @@ export function buildModelRouteTestBody(format: ApiFormat, model: string, mode: 
 | API | `tests/api/vendor/vendor-test.test.ts`：`content_mode=image` 时上游捕获到的请求体包含图片（OpenAI / Anthropic 断言各自结构）；非法 `content_mode` 返回 400 |
 | API | `tests/api/model/`：同协议与跨协议多模态路由测试成功 |
 | 前端 | `DialogTest` 组件测试：切换请求类型会清空结果、调用 API 时携带 `content_mode` |
+
+
+## #285 落地对照（2026-11-16）
+
+### A. 已失效的前提（**不得再引用**）
+
+| # | 本文的前提 | 现实 | 处置 |
+|---|---|---|---|
+| A1 | 「OpenAI ↔ Anthropic 转换器不支持图片」⇒ 需要设计跨协议丢图 `warning`、并把「跨协议」列为能力边界 | **六向图片转换已补齐**（`doc/tech/review.md` P2 记录；本文件顶部 2026-10-21 状态更新已提及） | 相关设计**作废**：实现里**没有** `warning` 字段，「跨协议限制」边界**作废**，跨协议路由按普通图片转换验证 |
+
+### B. 实现与设计一致的项（逐条已核，读实现时不必再对照正文）
+
+- 入参名与缺省：`content_mode`（`text` | `image`），缺省 `text`；非法值 **400**，不静默降级；
+- 三协议图片结构：OpenAI `[{type:text},{type:image_url,image_url:{url}}]`、Anthropic `[{type:image,source:{type:base64,media_type,data}},{type:text}]`（图在前）、Responses `input:[{role,content:[{type:input_text},{type:input_image,image_url:<字符串>}]}]`；
+- token 上限：供应商测试文本 5/1/16、图片 **64**；模型路由测试文本 256、图片 **256**；OpenAI 仅模型路由带 `stream:false`；
+- 内置样图：64×64 PNG、base64 常量、< 4KB（实际 **230 字节**，base64 308 字符），无外部依赖；
+- 接口回显：两个入口的响应都补 `content_mode`；
+- 代码落点：`src/util/protocol/testRequestUtil.ts` 新建；`vendorTestService.buildRequest` 拆成 `buildHeaders` + 共享构造器；`modelController.buildTestRequestBody` **已删除**，改用 `buildModelRouteTestBody`；
+- 前端：`DialogTest.vue` 加「请求类型」单选（文本默认 / 多模态图片），`watch(contentMode)` 清空上次结果，打开对话框重置为 `text`；`api/vendor.ts` / `api/model.ts` 带上 `content_mode`。
+
+### C. 实现与设计的偏差（都不改契约，登记备查）
+
+| # | 偏差 | 理由 |
+|---|---|---|
+| C1 | `testRequestUtil` 除了两个 `build*TestBody`，还导出 `normalizeContentMode`（校验）+ `TEST_IMAGE_DATA_URL` + 默认导出对象 | 校验逻辑只能有一份（两个入口共用，避免各写一套「非法值怎么处理」）；`TEST_IMAGE_DATA_URL` 是两种协议都要用的派生常量 |
+| C2 | 图片模式的**文本提示词固定为「请描述这张图片」**，不继承各入口的文本提示词（`ping` / `你好`） | 文本提示词在图片模式下没有意义；固定一条也让「上游收到的图片请求」可被稳定断言 |
+| C3 | 文档未提但实现做了：`TEST_CONTENT_MODES` 常量导出 | 前端「请求类型」的取值来源，避免前后端各写一份字面量 |
+
+### D. 边界（实现未越界，可作验收对照）
+
+- 不支持本地图片上传、图片 URL、音频 / 视频 / 文件输入（仍只发内置样图）；
+- 未改测试请求的计费 / 记录 / 活动时间线链路；
+- 未改真实转发链路（`senderService` / `responseHandlerService`）—— 模型路由测试仍走既有的 `sendRequest({ inspect: true })`；
+- 未新增数据库字段、未写配置文件。
 
 ## 相关文档
 

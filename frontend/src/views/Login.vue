@@ -1,5 +1,12 @@
 <template>
     <div class="login-container">
+        <!-- 桌面端顶部拖动区：macOS 为原生红绿灯留位，Windows 为自绘标题栏留位 -->
+        <div
+            v-if="isDesktopApp"
+            class="window-drag-strip"
+            :class="{ 'window-drag-strip--windows': isWindowsApp }"
+            data-tauri-drag-region="deep"
+        ></div>
         <a-card class="login-card">
             <template #title>
                 <div class="card-title">
@@ -41,7 +48,10 @@ import { reactive, ref, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { notifyError, notifySuccess } from '@/utils/requestFeedback';
-import { isTauri } from '@/utils/platform';
+import { isTauri, isDesktopTauri, isWindowsTauri } from '@/utils/platform';
+
+const isWindowsApp = isWindowsTauri();
+const isDesktopApp = isDesktopTauri();
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -123,6 +133,20 @@ async function handleLogin() {
     background-image: linear-gradient(#e5e5e5 1px, transparent 1px),
         linear-gradient(90deg, #e5e5e5 1px, transparent 1px);
     background-size: 20px 20px;
+}
+
+.window-drag-strip {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 24px;
+}
+
+/* 登录页没有品牌行，拖动区只需覆盖 32px 高的窗口按钮；
+   主布局为 44px，与侧边栏品牌行对齐 */
+.window-drag-strip--windows {
+    height: 32px;
 }
 
 .login-card {

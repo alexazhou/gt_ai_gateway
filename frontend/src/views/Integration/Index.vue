@@ -306,7 +306,6 @@ async function copyText(text: string, label: string) {
 
 <style scoped>
 .integration {
-    padding: 24px;
     max-width: 900px;
     background: var(--bg-page);
     min-height: 100%;

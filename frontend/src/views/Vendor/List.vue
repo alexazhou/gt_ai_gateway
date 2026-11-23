@@ -268,7 +268,6 @@ function getTypeTagStyle(type: VendorType) {
 <style scoped>
 .vendor-list {
     background: var(--bg-page);
-    padding: 24px;
 }
 
 .table-header {

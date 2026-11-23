@@ -294,7 +294,6 @@ function getStatusText(status: string): string {
 <style scoped>
 .api-test {
     height: 100%;
-    padding: 24px;
     background: var(--bg-page);
 }
 

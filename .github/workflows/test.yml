@@ -208,7 +208,9 @@ jobs:
   test-worker:
     name: Test (Worker Mode)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 → 15（2026-11-18，Operator 批示）：历史耗时 7m47s / 8m34s，本就贴着 10 分钟边；
+    # 本次 1.9_dev@57b8e18 跑到 10m16s 被 cancel（cancel ≠ 失败，无法判断测试好坏），故放宽到 15。
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -284,3 +286,106 @@ jobs:
       - name: Run Rust tests
         working-directory: tauri/src-tauri
         run: cargo test --release --target x86_64-pc-windows-msvc
+
+  # CLI 门（gtgw，Go）：vet + 单测 + 6 目标交叉编译 + 真二进制对 mock 的 e2e 冒烟。
+  # 只装 Go、不装 node（cli 是独立 Go module），与其它 job 并行，约 60~90s。
+  # 单独文件的理由：它守的是 cli/ 和 Dockerfile 里的东西，不需要等 npm ci / frontend build。
+  test-cli:
+    name: Test (CLI - Go)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          token: ${{ github.token }}
+
+      # 机械守护（#269）：cli/scripts/*.sh 必须是 100755。
+      # 由来：#263 与 #266 两次因为「写临时文件再 rename」的原子写把脚本执行位丢了（100755→100644），
+      # 而 CI 一律用 `bash x.sh` 调用，所以红不了；`./x.sh` 才会 permission denied。
+      # 放在最早的一步：mode 不对就没必要继续跑后面的门。
+      - name: Assert cli/scripts/*.sh are executable
+        run: |
+          set -e
+          # 判据与本地 script/githook/pre-commit 共用同一个脚本（#271）：
+          # 两处不再各写一份，避免「改一处漏一处」。checks: 索引 mode 全 100755、
+          # 清单内名字不缺、pathspec 0 匹配判红（0 匹配时旧断言会静默变绿）。
+          bash script/check_exec_bits.sh
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: go vet
+        run: cd cli && go vet ./...
+
+      - name: go test
+        run: cd cli && go test ./... -count=1
+
+      # 版本从根 package.json 注入（与 release 同一处实现，避免两套构建逻辑漂移）
+      - name: Build (host, version injected)
+        run: bash cli/scripts/build.sh
+
+      - name: Cross compile (5~6 targets)
+        run: bash cli/scripts/release.sh
+
+      - name: Assert Linux binaries are static
+        run: |
+          set -e
+          for f in cli/dist/cli/gtgw_cli_*linux*; do
+            echo "--- $f"
+            file "$f"
+            file "$f" | grep -q "statically linked"
+          done
+
+      # 真二进制 + 真 mock 网关（HTTP 往返），且连跑两轮 diff 证明幂等
+      - name: e2e smoke against mock gateway (idempotent)
+        run: BIN=cli/dist/gtgw bash cli/scripts/e2e.sh
+
+      # 配置目录判据（#263 的核心，由 #266 补进 CI）：配置必须落 `~/.gtgw/config.json`、
+      # 旧的 `~/.config/gtgw` 不得被读取、真实家目录不得被创建。
+      # 隔离方式：脚本自己把 HOME/USERPROFILE 指到 $TMP/home，所以本 step 不会写 runner 的真实家目录；
+      # 缺依赖或二进制缺失时脚本以 exit 3 明确报红（不是静默跳过），避免这条判据「看起来跑了其实没跑」。
+      - name: config path is ~/.gtgw and legacy path is not read (e2e)
+        run: bash cli/scripts/e2e-config-path.sh cli/dist/gtgw
+
+      # 以下两步是验收人 2026-11-15 追加的两条补测（#259 单上 event 1609）。
+      # 它们需要 P3 的命令（integration env / record clear-payload / --allow-fallback-destructive），
+      # 所以只在「P3 已合入」的树上有意义：本 workflow 一旦在只有 P1 的分支上跑，这两步会以
+      # exit 3 + `SKIP-REASON:` 前缀明确失败（不是静默跳过）。
+      - name: Install extra shells (zsh + fish + pwsh) and print versions
+        run: |
+          set -e
+          # ubuntu-latest 上没有 zsh（实测 2026-11-15：`zsh: command not found`），必须显式装；
+          # pwsh 通常在镜像里，但也不假设——缺了就从 Microsoft 源装，别让它默默变成「command not found」。
+          sudo apt-get update -qq
+          sudo apt-get install -y zsh fish
+          if ! command -v pwsh >/dev/null 2>&1; then
+            curl -sSL -o /tmp/pmp.deb https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb
+            sudo dpkg -i /tmp/pmp.deb
+            sudo apt-get update -qq
+            sudo apt-get install -y powershell
+          fi
+          echo "--- installed shell versions"
+          bash --version | head -1
+          zsh --version
+          fish --version
+          pwsh --version
+
+      - name: integration env in four shells (real eval)
+        run: bash cli/scripts/e2e-shell-env.sh cli/dist/gtgw
+
+      - name: fallback connection blocks destructive commands (e2e)
+        run: bash cli/scripts/e2e-fallback-destructive.sh cli/dist/gtgw
+
+      - name: Upload CLI binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtgw-cli-binaries
+          path: |
+            cli/dist/cli/gtgw_cli_*
+          retention-days: 7

@@ -1,6 +1,33 @@
 <template>
     <div class="app-sidebar" :class="{ collapsed: collapsed }">
-        <div class="sidebar-content">
+        <!-- 桌面端无应用顶栏：品牌、主题与租户入口都收进侧边栏顶部，
+             分割线从窗口最顶部一直延伸到底；只有 macOS 需要在最上面留一行给原生红绿灯 -->
+        <div v-if="isDesktopApp" class="desktop-sidebar-top">
+            <div
+                v-if="isMacOverlay"
+                class="desktop-title-row"
+                data-tauri-drag-region="deep"
+            >
+                <ThemeToggleButton v-if="!collapsed" size="small" />
+            </div>
+            <div
+                class="desktop-brand-row"
+                :class="{ 'desktop-brand-row--windows': isWindowsApp }"
+                data-tauri-drag-region="deep"
+            >
+                <AppBrand :collapsed="collapsed" />
+                <!-- Windows 没有红绿灯，品牌行直接顶到窗口顶部，主题切换并到这一行右侧 -->
+                <ThemeToggleButton
+                    v-if="isWindowsApp && !collapsed"
+                    size="small"
+                    class="brand-theme-btn"
+                />
+            </div>
+            <div v-if="!collapsed && showTenantSwitcher" class="desktop-tenant-row">
+                <TenantSwitcher variant="sidebar" />
+            </div>
+        </div>
+        <div class="sidebar-content" :class="{ 'sidebar-content--desktop': isDesktopApp }">
             <a-menu
                 :selected-keys="selectedKeys"
                 mode="inline"
@@ -101,6 +128,10 @@ import { useAuthStore } from '@/stores/auth';
 import { useTenantStore } from '@/stores/tenant';
 import { checkUpdate } from '@/api/system';
 import { getConfig } from '@/api/config';
+import { isDesktopTauri, isMacTauri, isWindowsTauri } from '@/utils/platform';
+import AppBrand from './AppBrand.vue';
+import ThemeToggleButton from './ThemeToggleButton.vue';
+import TenantSwitcher from './TenantSwitcher.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -108,11 +139,17 @@ const appStore = useAppStore();
 const authStore = useAuthStore();
 const tenantStore = useTenantStore();
 
+// 桌面端侧边栏顶部承载品牌、主题与租户切换；macOS 还要为原生红绿灯留位
+const isMacOverlay = isMacTauri();
+const isWindowsApp = isWindowsTauri();
+const isDesktopApp = isDesktopTauri();
+
 const hasUpdate = ref(false);
 const updateUrl = ref('');
 
 const collapsed = computed(() => appStore.sidebarCollapsed);
 const version = computed(() => appStore.version);
+const showTenantSwitcher = computed(() => authStore.isSystemAdmin && tenantStore.multiTenantEnabled);
 
 const selectedKeys = computed(() => {
     const path = route.path;
@@ -185,8 +222,55 @@ function toggleSidebar() {
     width: 88px;
 }
 
+.desktop-sidebar-top {
+    flex: none;
+}
+
+.desktop-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    height: 32px;
+    /* 左侧留出原生红绿灯宽度；主题切换右边缘与菜单项右边缘对齐 */
+    padding: 0 10px 0 78px;
+}
+
+.desktop-brand-row {
+    display: flex;
+    align-items: center;
+    height: 34px;
+    padding: 0 24px;
+}
+
+/* Windows 无红绿灯：品牌行即侧边栏第一行，高度与主内容区拖动条一致
+   （见 AppLayout .window-drag-strip--windows） */
+.desktop-brand-row--windows {
+    justify-content: space-between;
+    height: 44px;
+    /* 右侧 10px 与菜单项、主题按钮的右边缘对齐 */
+    padding: 0 10px 0 24px;
+}
+
+.brand-theme-btn {
+    flex: none;
+}
+
+.desktop-tenant-row {
+    padding: 0 10px 4px;
+}
+
+.sidebar-content--desktop {
+    padding-top: 0;
+}
+
 .app-sidebar.collapsed .sidebar-footer {
     justify-content: center;
+}
+
+/* 折叠后 logo 在 88px 宽度内水平居中 */
+.app-sidebar.collapsed .desktop-brand-row {
+    justify-content: center;
+    padding: 0;
 }
 
 .sidebar-content {
@@ -243,7 +327,7 @@ function toggleSidebar() {
 .app-sidebar :deep(.ant-menu-item) {
     height: 48px;
     line-height: 48px;
-    margin: 6px 0;
+    margin: 4px 0;
     padding-inline: 14px !important;
     width: 100%;
     box-sizing: border-box;

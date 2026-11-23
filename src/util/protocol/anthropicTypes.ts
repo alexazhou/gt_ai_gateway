@@ -4,6 +4,17 @@
 
 import type { ReasoningEffort } from "./commonTypes";
 
+/**
+ * Anthropic 显式缓存断点标记（Prompt Caching）。
+ *
+ * 只声明协议允许的形态：`type` 目前只有 `ephemeral`；`ttl` 由协议保留，
+ * 本网关第一版**不设置 ttl**（使用目标协议默认短期缓存）。
+ */
+export interface AnthropicCacheControl {
+    type: "ephemeral";
+    ttl?: string;
+}
+
 export interface AnthropicContentBlock {
     type: "text" | "image" | "tool_use" | "tool_result" | "thinking";
     text?: string;
@@ -20,13 +31,28 @@ export interface AnthropicContentBlock {
     tool_use_id?: string;
     thinking?: string;
     signature?: string;
+    /**
+     * 缓存断点。`thinking` 块**不作为**自动补全位置（见
+     * `doc/tech/anthropic_cache_control_design.md` §4.3），此字段仅为类型完整。
+     */
+    cache_control?: AnthropicCacheControl;
+}
+
+/** `system` 数组中的文本块（转换器统一产出块数组，缓存标记只在块上加字段、不改形状）。 */
+export interface AnthropicTextBlock {
+    type: "text";
+    text: string;
+    cache_control?: AnthropicCacheControl;
 }
 
 export interface AnthropicTool {
     name: string;
     description?: string;
     input_schema: Record<string, unknown>;
+    /** 工具定义上的缓存断点（`input_schema` 内的同名键属业务数据，不是断点）。 */
+    cache_control?: AnthropicCacheControl;
 }
+
 
 export interface AnthropicThinkingConfig {
     type: "adaptive" | "enabled" | "disabled";
@@ -44,7 +70,7 @@ export interface AnthropicRequest {
         role: "user" | "assistant";
         content: string | AnthropicContentBlock[];
     }>;
-    system?: string | Array<{ type: "text"; text: string }>;
+    system?: string | AnthropicTextBlock[];
     stream?: boolean;
     temperature?: number;
     top_p?: number;

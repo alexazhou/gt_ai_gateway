@@ -1,0 +1,603 @@
+{
+  "source": "src/routes.ts",
+  "entries": [
+    {
+      "method": "GET",
+      "path": "/balance/recharge/:id",
+      "command": "gtgw balance get <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/balance/recharge/list.json",
+      "command": "gtgw balance list",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/client-config/apply.json",
+      "command": "gtgw client apply --file <json>",
+      "phase": "P3",
+      "reason": null,
+      "category": null
+    },
+    {
+      "method": "POST",
+      "path": "/client-config/backup.json",
+      "command": "gtgw client backup create --file <json>",
+      "phase": "P3",
+      "reason": null,
+      "category": null
+    },
+    {
+      "method": "POST",
+      "path": "/client-config/backup/delete.json",
+      "command": "gtgw client backup delete --file <json>",
+      "phase": "P3",
+      "reason": null,
+      "category": null
+    },
+    {
+      "method": "POST",
+      "path": "/client-config/backup/rename.json",
+      "command": "gtgw client backup rename --file <json>",
+      "phase": "P3",
+      "reason": null,
+      "category": null
+    },
+    {
+      "method": "POST",
+      "path": "/client-config/backup/update.json",
+      "command": "gtgw client backup update --file <json>",
+      "phase": "P3",
+      "reason": null,
+      "category": null
+    },
+    {
+      "method": "POST",
+      "path": "/client-config/create.json",
+      "command": "gtgw client create --file <json>",
+      "phase": "P3",
+      "reason": null,
+      "category": null
+    },
+    {
+      "method": "GET",
+      "path": "/client-config/local.json",
+      "command": "gtgw client local --client <claude-code|codex>",
+      "phase": "P3",
+      "reason": null,
+      "category": null
+    },
+    {
+      "method": "GET",
+      "path": "/client-config/status.json",
+      "command": "gtgw client status",
+      "phase": "P3",
+      "reason": null,
+      "category": null
+    },
+    {
+      "method": "POST",
+      "path": "/client-config/sync-from-local.json",
+      "command": "gtgw client sync-from-local --file <json>",
+      "phase": "P3",
+      "reason": null,
+      "category": null
+    },
+    {
+      "method": "GET",
+      "path": "/config.json",
+      "command": "gtgw config get",
+      "phase": "P1",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "PUT",
+      "path": "/config.json",
+      "command": "gtgw config set",
+      "phase": "P1",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/llm/v1/chat/completions",
+      "command": "gtgw test chat --model <m>",
+      "phase": "P3",
+      "reason": null,
+      "category": null
+    },
+    {
+      "method": "POST",
+      "path": "/llm/v1/messages",
+      "command": "gtgw test messages --model <m>",
+      "phase": "P3",
+      "reason": null,
+      "category": null
+    },
+    {
+      "method": "GET",
+      "path": "/llm/v1/models",
+      "command": "gtgw test models",
+      "phase": "P3",
+      "reason": null,
+      "category": null
+    },
+    {
+      "method": "POST",
+      "path": "/llm/v1/responses",
+      "command": "gtgw test responses --model <m>",
+      "phase": "P3",
+      "reason": null,
+      "category": null
+    },
+    {
+      "method": "DELETE",
+      "path": "/model/:id",
+      "command": "gtgw model delete <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/model/:id",
+      "command": "gtgw model get <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "PUT",
+      "path": "/model/:id",
+      "command": "gtgw model update <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/model/batch.json",
+      "command": null,
+      "phase": null,
+      "reason": "同上：前端批量补全专用",
+      "category": "frontend-only"
+    },
+    {
+      "method": "POST",
+      "path": "/model/create.json",
+      "command": "gtgw model create",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/model/list.json",
+      "command": "gtgw model list",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/model/route-test.json",
+      "command": "gtgw model route-test",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "DELETE",
+      "path": "/record/:id",
+      "command": "gtgw record delete <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/record/:id",
+      "command": "gtgw record get <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/record/:id/activity.json",
+      "command": "gtgw record activity <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "DELETE",
+      "path": "/record/clear-all",
+      "command": "gtgw record clear-all",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/record/clear-orphans/stats.json",
+      "command": "gtgw record clear-orphans",
+      "phase": "P3",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/record/clear-orphans/step",
+      "command": "gtgw record clear-orphans",
+      "phase": "P3",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "DELETE",
+      "path": "/record/clear-payload",
+      "command": "gtgw record clear-payload",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/record/latest.json",
+      "command": "gtgw record watch",
+      "phase": "P3",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/record/list.json",
+      "command": "gtgw record list",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/record/recover-orphans.json",
+      "command": "gtgw record recover-orphans",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "DELETE",
+      "path": "/rule/:id",
+      "command": "gtgw rule delete <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/rule/:id",
+      "command": "gtgw rule get <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "PUT",
+      "path": "/rule/:id",
+      "command": "gtgw rule update <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/rule/create.json",
+      "command": "gtgw rule create",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/rule/list.json",
+      "command": "gtgw rule list",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/stats/dashboard.json",
+      "command": "gtgw dashboard",
+      "phase": "P1",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/stats/recent.json",
+      "command": "gtgw dashboard",
+      "phase": "P1",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/status.json",
+      "command": "gtgw status",
+      "phase": "P1",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/tenant.json",
+      "command": "gtgw tenant list",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/tenant.json",
+      "command": "gtgw tenant create",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "DELETE",
+      "path": "/tenant/:id",
+      "command": "gtgw tenant delete <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/tenant/:id",
+      "command": "gtgw tenant get <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "PUT",
+      "path": "/tenant/:id",
+      "command": "gtgw tenant update <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "DELETE",
+      "path": "/test/cache/clear",
+      "command": null,
+      "phase": null,
+      "reason": "仅测试模式挂载的测试钩子（`TEST_MODE` 才存在，否则 404），不属于用户可见 API",
+      "category": "test-only"
+    },
+    {
+      "method": "GET",
+      "path": "/update.json",
+      "command": "gtgw update check",
+      "phase": "P1",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/user/:id",
+      "command": "gtgw user get <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "PUT",
+      "path": "/user/:id",
+      "command": "gtgw user update <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/user/:id/balance/adjust.json",
+      "command": "gtgw user recharge <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/user/batch.json",
+      "command": null,
+      "phase": null,
+      "reason": "同上：前端批量补全专用",
+      "category": "frontend-only"
+    },
+    {
+      "method": "POST",
+      "path": "/user/create.json",
+      "command": "gtgw user create",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/user/list.json",
+      "command": "gtgw user list",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/vendor-model/batch.json",
+      "command": null,
+      "phase": null,
+      "reason": "同上：前端批量补全专用（vendor-model 按 id 批量取）",
+      "category": "frontend-only"
+    },
+    {
+      "method": "DELETE",
+      "path": "/vendor/:id",
+      "command": "gtgw vendor delete <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/vendor/:id",
+      "command": "gtgw vendor get <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "PUT",
+      "path": "/vendor/:id",
+      "command": "gtgw vendor update <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "DELETE",
+      "path": "/vendor/:id/model/:modelId",
+      "command": "gtgw vendor model delete <vendorId> <modelId>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "PUT",
+      "path": "/vendor/:id/model/:modelId",
+      "command": "gtgw vendor model update <vendorId> <modelId>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/vendor/:id/model/add.json",
+      "command": "gtgw vendor model add <vendorId>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/vendor/:id/model/fetch.json",
+      "command": "gtgw vendor model fetch <vendorId>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/vendor/:id/model/list.json",
+      "command": "gtgw vendor model list <vendorId>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/vendor/:id/model/sync.json",
+      "command": "gtgw vendor model sync <vendorId>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/vendor/:id/test.json",
+      "command": "gtgw vendor test <id>",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "POST",
+      "path": "/vendor/batch.json",
+      "command": null,
+      "phase": null,
+      "reason": "前端列表「按 id 批量补全」专用（一次取多实体）；CLI 命令模型是一次一个实体，无等价交互，step2 也未映射",
+      "category": "frontend-only"
+    },
+    {
+      "method": "POST",
+      "path": "/vendor/create.json",
+      "command": "gtgw vendor create",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/vendor/list.json",
+      "command": "gtgw vendor list",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/vendor/preset-urls.json",
+      "command": "gtgw vendor presets",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
+      "path": "/welcome",
+      "command": null,
+      "phase": null,
+      "reason": "welcome/health 展示页：返回欢迎文案与版本信息，status.json 已覆盖同样的可机读信息，无管理语义",
+      "category": "out-of-scope"
+    }
+  ],
+  "deviations": [
+    {
+      "id": "D1",
+      "doc": "step2：`record list --model/--user/--status`",
+      "code": "recordController.listRecords 只读 user_ids / model_ids（逗号分隔）+ status / start_time / end_time",
+      "cli": "`record list --user-ids --model-ids --status --start-time --end-time`",
+      "reason": "后端不认 --model/--user；按 #257 裁决不做软别名——一个「看起来支持、服务端不认」的 flag 比没有更危险"
+    },
+    {
+      "id": "D2",
+      "doc": "step2：`vendor test --content-mode`",
+      "code": "vendorController.testVendor 只读 format / model / auto_convert",
+      "cli": "`vendor test --format --model --auto-convert`",
+      "reason": "后端无 content_mode 字段；不造该 flag，并在用例里反向断言 body 不含 content_mode"
+    },
+    {
+      "id": "D3",
+      "doc": "step2 / P2 初版：`user create` 与 `user update` 的 `--token`",
+      "code": "userController.createUser/updateUser 的 body.token 是**该用户自己的** Token",
+      "cli": "`--user-token`；旧 `--token` 显式报参数错（退出码 2，零请求）",
+      "reason": "#257 裁决：--token 与全局管理员 --token 同名，会把管理员 Token 静默写进用户记录，故改名且不兼容"
+    },
+    {
+      "id": "D4",
+      "doc": "step2 §3.5 `gtgw client local --client claude_code|codex`",
+      "code": "ClientName 枚举取值为 \"claude-code\" / \"codex\"（src/constants.ts:80-83）",
+      "cli": "只接受 claude-code / codex；传 claude_code 退出码 2，并在提示里指明正确写法（不做软别名）",
+      "reason": "后端 isClientName() 只认连字符形式，传下划线会被 400 拒绝；CLI 提前按参数错误拦下比发出去再报错更省事，也避免养成错误写法"
+    }
+  ]
+}

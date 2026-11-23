@@ -1,4 +1,5 @@
 mod sys;
+mod window_style;
 pub mod utils;
 
 use crate::utils::{StdioEvent, StdioStream};
@@ -201,6 +202,12 @@ fn get_auth_token(state: tauri::State<AuthToken>) -> String {
 #[tauri::command]
 fn exit_app() {
     std::process::exit(1);
+}
+
+/// Tauri 命令：让原生标题栏底色跟随应用主题
+#[tauri::command]
+fn set_window_theme(window: tauri::WebviewWindow, is_dark: bool) {
+    window_style::apply_window_theme(&window, is_dark);
 }
 
 fn show_splash_window(app: &tauri::AppHandle) -> Result<(), String> {
@@ -571,22 +578,36 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     sys::platform::set_dock_visibility(app, true);
     if let Some(window) = app.get_webview_window("main") {
         rust_log("main window already exists, showing it");
+        // 托盘「显示窗口」时窗口可能还处于最小化状态，先还原再显示
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
         return;
     }
-    let result = tauri::WebviewWindowBuilder::new(
+    let builder = tauri::WebviewWindowBuilder::new(
         app,
         "main",
         tauri::WebviewUrl::App("index.html".into()),
     )
     .title("GT AI Gateway")
     .inner_size(1280.0, 800.0)
-    .resizable(true)
-    .build();
+    .resizable(true);
+
+    let builder = window_style::apply_main_window_style(builder);
+
+    let result = builder.build();
 
     match result {
-        Ok(_) => rust_log("main window created successfully"),
+        Ok(window) => {
+            // 无边框窗口必须显式设置窗口图标，否则最小化后任务栏/Alt-Tab 里是一个空白方块，
+            // 用户会以为程序已经退出
+            if let Some(icon) = app.default_window_icon() {
+                let _ = window.set_icon(icon.clone());
+            }
+            // 先用默认的浅色主题初始化标题栏底色，前端挂载后会按实际主题纠正
+            window_style::apply_window_theme(&window, false);
+            rust_log("main window created successfully");
+        }
         Err(e) => rust_log(format!("FAILED to create main window: {:?}", e)),
     }
 }
@@ -604,6 +625,7 @@ pub fn run() {
             get_backend_url,
             get_auth_token,
             exit_app,
+            set_window_theme,
             log_to_rust
         ])
         .on_page_load(|webview, payload| {

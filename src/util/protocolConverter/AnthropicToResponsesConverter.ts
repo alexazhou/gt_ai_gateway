@@ -1,4 +1,5 @@
 import customError from "../../customError";
+import { FailedCode } from "../../constants";
 import { BaseConverter } from "./BaseConverter";
 import type {
     AnthropicContentBlock,
@@ -36,6 +37,10 @@ interface AnthropicStreamBlockState {
     itemId?: string;
     type: "text" | "tool_use" | "thinking";
     closed: boolean;
+    /** thinking 块已收到的文本（收尾封包签名时要用它绑定 thinking，见 PC-009-A） */
+    thinking?: string;
+    /** 该块是否已经发过 signature_delta（done / completed 不得重复发） */
+    signatureSent?: boolean;
 }
 
 /**
@@ -129,17 +134,23 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                             let encryptedContent: string | undefined;
                             let thinkingText = block.thinking || "";
                             if (block.signature) {
+                                // 模型绑定用客户端请求名（PC-009-C / §4.7）：封包侧已统一为客户端名，
+                                // 解封再查 `req.model`（已被替换成 vendor 名）会永远对不上。
                                 const unsealed = protocolConverterUtil.unsealThinkingSignature(
                                     block.signature,
                                     "responses",
-                                    req.model,
+                                    this.clientFacingModel(req.model),
+                                    this.credentialSource,
                                 );
                                 if (!unsealed) {
                                     throw new customError.AppError(
                                         "Incompatible or unverified thinking signature cannot be converted to Responses encrypted_content",
                                         400,
+                                        "invalid_request_error",
+                                        FailedCode.CONVERSION_ERROR,
                                     );
                                 }
+                                if (!unsealed.sourceChecked) this.credentialSourceUnchecked = true;
                                 encryptedContent = unsealed.signature;
                                 if (unsealed.thinking !== undefined) {
                                     thinkingText = unsealed.thinking;
@@ -254,6 +265,8 @@ export class AnthropicToResponsesConverter extends BaseConverter {
     // ─── 非流式响应转换 ───
 
     public convertResponse(upstreamRes: ResponsesNonStreamResponse, requestId?: string): AnthropicResponse {
+        // 记录上游名（仅作无客户端身份时的兜底，不参与正常路径的客户端可见输出）
+        if (upstreamRes?.model) this.upstreamModel = upstreamRes.model;
         const content: AnthropicContentBlock[] = [];
 
         for (const item of upstreamRes.output) {
@@ -272,14 +285,18 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                 });
             } else if (item.type === "reasoning") {
                 const thinkingText = item.summary?.map((s) => s.text).join("\n") || "";
-                if (thinkingText) {
+                // 只有密文、没有摘要的 reasoning 也必须有个可恢复的表示（PC-009-D）：
+                // 可见摘要与 opaque credential 是两种材料，没有摘要 ≠ 没有要接续的东西。
+                // 这里选「表示」而不是「拒绝」：thinking 文本置空 + 封包签名携带密文，
+                // 下一轮 convertRequest 解封后能原样还原 `encrypted_content`（已用往返用例锁住）。
+                if (thinkingText || item.encrypted_content) {
                     content.push({
                         type: "thinking",
                         thinking: thinkingText,
                         signature: protocolConverterUtil.sealThinkingSignature(
                             "responses",
                             item.encrypted_content || "",
-                            { model: upstreamRes.model, thinking: thinkingText },
+                            { model: this.clientFacingModel(), source: this.credentialSource, thinking: thinkingText },
                         ),
                     });
                 }
@@ -302,7 +319,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
             type: "message",
             role: "assistant",
             content,
-            model: upstreamRes.model,
+            model: this.clientFacingModel(),
             stop_reason: stopReason,
             usage: protocolConverterUtil.responsesUsageToAnthropic(
                 protocolConverterUtil.mergeResponsesUsage({}, upstreamRes.usage),
@@ -342,6 +359,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
             case "response.created": {
                 const resp = data.response as ResponsesStreamResponse | undefined;
                 this.responseId = resp?.id || this.responseId;
+                if (resp?.model) this.upstreamModel = resp.model;
                 this.rawUsage = {};
                 protocolConverterUtil.mergeResponsesUsage(this.rawUsage, resp?.usage);
                 const startUsage = protocolConverterUtil.responsesUsageToAnthropic(this.rawUsage);
@@ -359,7 +377,7 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                             type: "message",
                             role: "assistant",
                             content: [],
-                            model: this.requestModel,
+                            model: this.clientFacingModel(),
                             stop_reason: null,
                             usage: {
                                 ...startUsage,
@@ -501,11 +519,14 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                     data.item_id as string | undefined,
                 );
                 if (!block) break;
+                const thinkingDelta = (data.delta as string | undefined) || "";
+                // 攒下本块文本：收尾封包签名时要把它一起绑进凭据（PC-009-A）
+                block.thinking = (block.thinking ?? "") + thinkingDelta;
                 out.push({
                     data: JSON.stringify({
                         type: "content_block_delta",
                         index: block.blockIndex,
-                        delta: { type: "thinking_delta", thinking: (data.delta as string | undefined) || "" },
+                        delta: { type: "thinking_delta", thinking: thinkingDelta },
                     }),
                     event: "content_block_delta",
                 });
@@ -540,6 +561,12 @@ export class AnthropicToResponsesConverter extends BaseConverter {
                 const item = data.item as ResponsesStreamItem | undefined;
                 if (!item) break;
                 const outputIndex = (data.output_index as number | undefined) ?? 0;
+
+                // reasoning 项的恢复凭据（`encrypted_content`）只能在这里拿到：先在块关闭**之前**
+                // 发出 signature_delta，再收口；否则客户端只看到 thinking 文本，历史接续材料丢失（PC-009-A）。
+                if (item.type === "reasoning") {
+                    this.emitThinkingSignatures(out, outputIndex, item);
+                }
 
                 for (const block of this.blocksByKey.values()) {
                     if (block.outputIndex === outputIndex && !block.closed) {
@@ -593,6 +620,55 @@ export class AnthropicToResponsesConverter extends BaseConverter {
         return out;
     }
 
+
+    /**
+     * 为一个 reasoning 输出项的各 thinking 块补发 `signature_delta`（PC-009-A）。
+     *
+     * 约定（一个 reasoning 项可能有多个 summary part ⇒ 多个 thinking 块）：
+     * - **只有最后一个 part 对应的块**携带密文凭据 —— 上游 `encrypted_content` 是「整项一份」，
+     *   逐块封包会让下一轮恢复出多份重复密文；
+     * - 每块封包时把该块自己的 thinking 文本绑进凭据，解封后可还原文本、发现篡改；
+     * - 已在 `output_item.done` 发过就不再发（`completed` 只是最终快照，不能重复发）；
+     * - 没有 `encrypted_content` 时无从恢复，不伪造空签名。
+     */
+    private emitThinkingSignatures(
+        out: ProtocolStreamEvent[],
+        outputIndex: number,
+        item: ResponsesStreamItem,
+    ): void {
+        const thinkingBlocks = [...this.blocksByKey.values()]
+            .filter((block) => block.outputIndex === outputIndex && block.type === "thinking")
+            .sort((a, b) => a.subIndex - b.subIndex);
+        if (thinkingBlocks.length === 0) return;
+
+        const encryptedContent = (item.encrypted_content as string | undefined) || "";
+        const summary = item.summary;
+
+        for (const block of thinkingBlocks) {
+            if (block.closed || block.signatureSent) continue;
+            const isLastPart = block.subIndex === thinkingBlocks[thinkingBlocks.length - 1].subIndex;
+            if (!isLastPart || !encryptedContent) continue;
+
+            // 优先用上游 done 帧给的 summary 文本（客户端看到的就是它），没有就用攒下来的增量
+            const thinkingText = summary?.[block.subIndex]?.text ?? block.thinking ?? "";
+            const signature = protocolConverterUtil.sealThinkingSignature(
+                "responses",
+                encryptedContent,
+                { model: this.clientFacingModel(), source: this.credentialSource, thinking: thinkingText },
+            );
+            if (!signature) continue;
+
+            block.signatureSent = true;
+            out.push({
+                data: JSON.stringify({
+                    type: "content_block_delta",
+                    index: block.blockIndex,
+                    delta: { type: "signature_delta", signature },
+                }),
+                event: "content_block_delta",
+            });
+        }
+    }
 
     private openBlock(
         outputIndex: number,

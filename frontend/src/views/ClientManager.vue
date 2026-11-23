@@ -94,7 +94,6 @@ async function loadStatus(): Promise<void> {
 .client-manager {
     background: var(--bg-page);
     min-height: calc(100vh - 64px);
-    padding: 24px;
     max-width: 980px;
 }
 

@@ -356,7 +356,6 @@ function formatTime(date: Date): string {
 <style scoped>
 .dashboard {
     background: var(--bg-page);
-    padding: 24px;
 }
 
 .stats-header {

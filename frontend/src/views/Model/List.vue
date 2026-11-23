@@ -319,7 +319,6 @@ watch(data, (models) => {
 <style scoped>
 .model-list {
     background: var(--bg-page);
-    padding: 24px;
 }
 
 .table-header {

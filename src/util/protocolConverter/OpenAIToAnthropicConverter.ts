@@ -90,7 +90,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                         }
                     }
 
-                    messages.push({ role: "assistant", content: contentBlocks.length > 0 ? contentBlocks : "" });
+                    messages.push({ role: "assistant", content: contentBlocks });
                     continue;
                 }
             }
@@ -148,7 +148,8 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
         };
 
         if (systemPrompt) {
-            anthropicReq.system = systemPrompt;
+            // 形状由转换层统一产出（方案 B）：system 一律给块数组，让缓存标记只需加字段、不改形状
+            anthropicReq.system = [{ type: "text", text: systemPrompt }];
         }
         if (anthropicTools) {
             anthropicReq.tools = anthropicTools;
@@ -168,19 +169,22 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
             }
         }
 
-        return anthropicReq;
+        // #295：请求构造完成后统一补全缓存断点（与 Responses 路径共用同一个函数）
+        return protocolConverterUtil.applyAnthropicCacheControl(anthropicReq);
     }
 
 
     /**
-     * OpenAI content → Anthropic content：
-     * - 纯文本数组保持原样（两种协议的文本块形状一致）
+     * OpenAI content → Anthropic content（**统一产出块数组**）：
+     * - 字符串 → 单元素 text 块数组（形状在这里定，缓存标记只加字段）
+     * - 纯文本数组 → 逐块转成 text 块
      * - 含 image_url 时逐块转换，图片 URL 拆成 Anthropic 的 base64 / url source
      * - 无法表达的内容块明确报错，不静默丢弃
      */
-    private convertMessageContent(content: OpenAIMessage["content"]): string | AnthropicContentBlock[] {
+    private convertMessageContent(content: OpenAIMessage["content"]): AnthropicContentBlock[] {
         if (!Array.isArray(content)) {
-            return content || "";
+            // 字符串也统一产出块数组（方案 B）：缓存标记只加字段，不在这里改形状
+            return content ? [{ type: "text", text: content }] : [];
         }
 
         const blocks: AnthropicContentBlock[] = [];
@@ -232,6 +236,8 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
 
 
     public convertResponse(upstreamRes: AnthropicResponse, requestId?: string): OpenAIResponse {
+        // 记录上游名（仅作无客户端身份时的兜底，不参与正常路径的客户端可见输出）
+        if (upstreamRes?.model) this.upstreamModel = upstreamRes.model;
         let textContent = "";
         let reasoningContent: string | undefined = undefined;
         let toolCalls: OpenAIMessage["tool_calls"] = undefined;
@@ -261,7 +267,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
             id: finalId.startsWith("chatcmpl-") ? finalId : `chatcmpl-${finalId.replace("msg_", "")}`,
             object: "chat.completion",
             created: Math.floor(Date.now() / 1000),
-            model: upstreamRes.model,
+            model: this.clientFacingModel(),
             choices: [
                 {
                     index: 0,
@@ -300,7 +306,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                 id: this.responseId,
                 object: "chat.completion.chunk",
                 created: Math.floor(Date.now() / 1000),
-                model: this.requestModel,
+                model: this.clientFacingModel(),
                 choices: [
                     {
                         index: 0,
@@ -321,7 +327,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                     id: this.responseId,
                     object: "chat.completion.chunk",
                     created: Math.floor(Date.now() / 1000),
-                    model: this.requestModel,
+                    model: this.clientFacingModel(),
                     choices: [
                         {
                             index: 0,
@@ -346,7 +352,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                     id: this.responseId,
                     object: "chat.completion.chunk",
                     created: Math.floor(Date.now() / 1000),
-                    model: this.requestModel,
+                    model: this.clientFacingModel(),
                     choices: [
                         {
                             index: 0,
@@ -368,7 +374,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                     id: this.responseId,
                     object: "chat.completion.chunk",
                     created: Math.floor(Date.now() / 1000),
-                    model: this.requestModel,
+                    model: this.clientFacingModel(),
                     choices: [
                         {
                             index: 0,
@@ -385,7 +391,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                     id: this.responseId,
                     object: "chat.completion.chunk",
                     created: Math.floor(Date.now() / 1000),
-                    model: this.requestModel,
+                    model: this.clientFacingModel(),
                     choices: [
                         {
                             index: 0,
@@ -402,7 +408,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                     id: this.responseId,
                     object: "chat.completion.chunk",
                     created: Math.floor(Date.now() / 1000),
-                    model: this.requestModel,
+                    model: this.clientFacingModel(),
                     choices: [
                         {
                             index: 0,
@@ -433,7 +439,7 @@ export class OpenAIToAnthropicConverter extends BaseConverter {
                 id: this.responseId,
                 object: "chat.completion.chunk",
                 created: Math.floor(Date.now() / 1000),
-                model: this.requestModel,
+                model: this.clientFacingModel(),
                 choices: [
                     {
                         index: 0,

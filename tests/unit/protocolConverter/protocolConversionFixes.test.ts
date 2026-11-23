@@ -4,7 +4,7 @@ import { ConverterFactory } from "../../../src/util/protocolConverter/ConverterF
 import { ResponsesAccumulator } from "../../../src/util/accumulator/responsesAccumulator";
 import { UpstreamUsageCollector, normalizeUsage, calculateCost } from "../../../src/util/protocolUtil/usageUtil";
 import type { SgModel } from "../../../src/model/sgModel";
-import type { AnthropicResponse } from "../../../src/util/protocol/anthropicTypes";
+import type { AnthropicRequest, AnthropicResponse } from "../../../src/util/protocol/anthropicTypes";
 import type { OpenAIChunk, OpenAIRequest, OpenAIResponse } from "../../../src/util/protocol/openaiTypes";
 import type { ResponsesNonStreamResponse, ResponsesRequest } from "../../../src/util/protocol/responsesTypes";
 
@@ -494,9 +494,12 @@ describe("Protocol Conversion Fixes (PC-001 ~ PC-011)", () => {
                 delta: "hi",
             }))[0].data);
             expect(c1.id).toBe("chatcmpl-upstream");
-            expect(c1.model).toBe("actual_model");
+            // §4.7（#297）改判：面向客户端的 model 一律是**客户端请求名**，不再是上游名；
+            // PC-010 在这里要求的是「跨 chunk 保持一致」，一致性仍然成立，只是取值口径变了。
+            expect(c1.model).toBe("requested_model");
             expect(c2.id).toBe("chatcmpl-upstream");
-            expect(c2.model).toBe("actual_model");
+            expect(c2.model).toBe("requested_model");
+            expect(c2.model).toBe(c1.model);
 
             const r2a = ConverterFactory.create(ApiFormat.RESPONSES, ApiFormat.ANTHROPIC, "claude-3-7-sonnet")!;
             const resp = r2a.convertResponse({
@@ -589,8 +592,11 @@ describe("Protocol Conversion Fixes (PC-001 ~ PC-011)", () => {
                 ],
                 max_tokens: 100,
                 max_completion_tokens: 17,
-            } as OpenAIRequest) as { system?: string; max_tokens: number };
-            expect(aReq.system).toBe("dev rule");
+            } as OpenAIRequest) as AnthropicRequest;
+            // #295：developer 汇总为 system 后规范化为 text 块并带缓存标记（文本逐字一致）
+            expect(aReq.system).toEqual([
+                { type: "text", text: "dev rule", cache_control: { type: "ephemeral" } },
+            ]);
             expect(aReq.max_tokens).toBe(17);
             expect(() => o2a.convertRequest({
                 model: "claude-3-7-sonnet",
@@ -607,8 +613,11 @@ describe("Protocol Conversion Fixes (PC-001 ~ PC-011)", () => {
                     { type: "message", role: "system", content: [{ type: "input_text", text: "third" }] },
                     { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
                 ],
-            }) as { system?: string };
-            expect(r2aReq.system).toBe("top\n\nsecond\n\nthird");
+            }) as AnthropicRequest;
+            // #295：instructions + developer + system 的汇总顺序与分隔符不变，最终 system 块带缓存标记
+            expect(r2aReq.system).toEqual([
+                { type: "text", text: "top\n\nsecond\n\nthird", cache_control: { type: "ephemeral" } },
+            ]);
         });
 
         it("PC-008: tool_choice=none should map to Anthropic { type: 'none' } and back", () => {

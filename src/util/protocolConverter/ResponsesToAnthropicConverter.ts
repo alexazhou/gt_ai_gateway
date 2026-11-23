@@ -1,4 +1,5 @@
 import customError from "../../customError";
+import { FailedCode } from "../../constants";
 import { BaseConverter } from "./BaseConverter";
 import type {
     AnthropicContentBlock,
@@ -56,7 +57,8 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
         }
 
         if (typeof req.input === "string") {
-            messages.push({ role: "user", content: req.input });
+            // 形状由转换层统一产出（方案 B）：字符串也产出块数组，缓存标记只加字段
+            messages.push({ role: "user", content: [{ type: "text", text: req.input }] });
         } else {
             // 只合并同一轮内连续的 function_call 或连续的 function_call_output，跨阶段时立即 flush 保留轮次
             let pendingToolUses: AnthropicContentBlock[] = [];
@@ -125,7 +127,8 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
         };
 
         if (systemParts.length > 0) {
-            anthropicReq.system = systemParts.join("\n\n");
+            // 形状由转换层统一产出（方案 B）：system 一律给块数组
+            anthropicReq.system = [{ type: "text", text: systemParts.join("\n\n") }];
         }
 
         if (req.temperature !== undefined) {
@@ -171,7 +174,8 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             }
         }
 
-        return anthropicReq;
+        // #295：请求构造完成后统一补全缓存断点（与 Chat 路径共用同一个函数）
+        return protocolConverterUtil.applyAnthropicCacheControl(anthropicReq);
     }
 
     private convertInputItem(
@@ -207,17 +211,24 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             let signature = "";
             let thinkingText = item.summary?.map((s) => s.text).join("\n") || "";
             if (item.encrypted_content) {
+                // 模型绑定用**客户端请求名**（PC-009-C）：`targetModel` 是请求体里的 model，
+                // 真实链路中它已被 senderService 替换成 vendor 名，和封包侧的客户端名对不上，
+                // 于是在别名路由下「合法回放」会被网关自己判成不兼容（400）。
                 const unsealed = protocolConverterUtil.unsealThinkingSignature(
                     item.encrypted_content,
                     "anthropic",
-                    targetModel,
+                    this.clientFacingModel(targetModel),
+                    this.credentialSource,
                 );
                 if (!unsealed) {
                     throw new customError.AppError(
                         "Incompatible or unverified reasoning encrypted_content cannot be converted to Anthropic thinking signature",
                         400,
+                        "invalid_request_error",
+                        FailedCode.CONVERSION_ERROR,
                     );
                 }
+                if (!unsealed.sourceChecked) this.credentialSourceUnchecked = true;
                 signature = unsealed.signature;
                 if (unsealed.thinking !== undefined) {
                     thinkingText = unsealed.thinking;
@@ -255,7 +266,14 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             }
 
             if (typeof content === "string") {
-                protocolConverterUtil.appendAnthropicMessage(messages, role as "user" | "assistant", content);
+                // 形状由转换层统一产出（方案 B）：字符串也产出块数组
+                if (content) {
+                    protocolConverterUtil.appendAnthropicMessage(
+                        messages,
+                        role as "user" | "assistant",
+                        [{ type: "text", text: content }],
+                    );
+                }
                 return;
             }
 
@@ -330,6 +348,8 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
     // ─── 非流式响应转换 ───
 
     public convertResponse(upstreamRes: AnthropicResponse, requestId?: string): ResponsesNonStreamResponse {
+        // 记录上游名（仅作无客户端身份时的兜底，不参与正常路径的客户端可见输出）
+        if (upstreamRes?.model) this.upstreamModel = upstreamRes.model;
         const output: ResponsesNonStreamResponse["output"] = [];
         const responseId = requestId || upstreamRes.id || `resp_${Date.now()}`;
 
@@ -359,7 +379,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                     encrypted_content: protocolConverterUtil.sealThinkingSignature(
                         "anthropic",
                         block.signature || "",
-                        { model: upstreamRes.model, thinking: block.thinking },
+                        { model: this.clientFacingModel(), source: this.credentialSource, thinking: block.thinking },
                     ),
                     summary: block.thinking ? [{ type: "summary_text", text: block.thinking }] : [],
                 });
@@ -374,7 +394,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
             ...(upstreamRes.stop_reason === "max_tokens"
                 ? { incomplete_details: { reason: "max_output_tokens" } }
                 : {}),
-            model: upstreamRes.model,
+            model: this.clientFacingModel(),
             output,
             usage: protocolConverterUtil.anthropicUsageToResponses(
                 protocolConverterUtil.mergeAnthropicUsage({}, upstreamRes.usage),
@@ -420,6 +440,9 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                             object: "response",
                             created_at: Math.floor(Date.now() / 1000),
                             status: "in_progress",
+                            // §4.7：流式响应里面向客户端的 model 一律用客户端请求名，
+                            // created 这一帧也不例外（此前整帧缺 model 字段）
+                            model: this.clientFacingModel(),
                             output: [],
                         },
                     }),
@@ -526,7 +549,9 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                                 id: item.id,
                                 type: "reasoning",
                                 status: "in_progress",
-                                encrypted_content: item.signature,
+                                // §4.6：未完成的 reasoning 项不带 encrypted_content（不能塞空串占位），
+                                // 未完成时签名往往还没到，凭据统一只在 done / completed 出现。
+                                ...(item.signature ? { encrypted_content: item.signature } : {}),
                                 summary: [],
                             },
                         }),
@@ -588,7 +613,11 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                         }),
                     });
                 } else if (delta.type === "signature_delta" && item.kind === "reasoning") {
-                    item.signature = delta.signature || item.signature;
+                    // 签名是**分段**下发的（同一 thinking 块可能有多条 signature_delta），
+                    // 必须按到达顺序累积。早先写成 `delta.signature || item.signature`
+                    // 是「覆盖」语义：只有最后一段留下，前面几段丢掉，封包后下一轮
+                    // 恢复出来的签名与上游原始签名不一致（PC-009-B）。
+                    if (delta.signature) item.signature += delta.signature;
                 }
                 break;
             }
@@ -632,7 +661,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                             created_at: Math.floor(Date.now() / 1000),
                             status: isIncomplete ? "incomplete" : "completed",
                             ...(isIncomplete ? { incomplete_details: { reason: "max_output_tokens" } } : {}),
-                            model: this.requestModel,
+                            model: this.clientFacingModel(),
                             output: outputArr,
                             usage: protocolConverterUtil.anthropicUsageToResponses(this.rawUsage),
                         },
@@ -666,7 +695,7 @@ export class ResponsesToAnthropicConverter extends BaseConverter {
                 encrypted_content: protocolConverterUtil.sealThinkingSignature(
                     "anthropic",
                     item.signature,
-                    { model: this.requestModel, thinking: item.thinking },
+                    { model: this.clientFacingModel(), source: this.credentialSource, thinking: item.thinking },
                 ),
                 summary: item.thinking ? [{ type: "summary_text", text: item.thinking }] : [],
             };

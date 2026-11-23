@@ -1,12 +1,12 @@
 import { fetch, Headers } from "undici";
 
 /**
- * Get server config dynamically to respect TEST_MODE at runtime
+ * Get test config dynamically to respect TEST_MODE at runtime
  */
-async function getServerConfig() {
+async function getConfig() {
     // Dynamic import to ensure TEST_MODE is evaluated at runtime
     const config = await import("../config");
-    return config.default.SERVER_CONFIG;
+    return config.default;
 }
 
 /**
@@ -35,11 +35,21 @@ async function request(
     endpoint: string,
     options: RequestOptions = {},
 ): Promise<RequestResponse> {
-    const serverConfig = await getServerConfig();
-    const url = `${serverConfig.baseUrl}${endpoint}`;
+    const config = await getConfig();
+    const url = `${config.SERVER_CONFIG.baseUrl}${endpoint}`;
 
-    const headers = {
+    // worker 模式下服务端是 `wrangler dev`（miniflare 的本地代理），它会自行关闭空闲的
+    // keep-alive 连接；undici 默认连接池可能把请求写到一条对面刚关掉的连接上，客户端看到的是
+    // `TypeError: fetch failed` / `Caused by: SocketError: other side closed`（UND_ERR_SOCKET），
+    // 而服务端日志里那条请求根本不存在（没到 handler）——是传输层竞态，不是接口行为问题。
+    // 实测：全量 worker 门里 `tests/api/record/recoverOrphans.batch.test.ts` 约 2/3 概率撞上
+    // （历史 2026-11-16 / 11-22 / 11-23 均有，与业务改动无关）。
+    // 这里改成 worker 模式「一次请求一条连接」，从前提上消除该竞态；localhost 多一次握手可忽略。
+    const noKeepAlive = config.TEST_MODE === "worker";
+
+    const headers: Record<string, string> = {
         "Content-Type": "application/json",
+        ...(noKeepAlive ? { Connection: "close" } : {}),
         ...options.headers,
     };
 

@@ -21,4 +21,15 @@ if ! bash "$ROOT_DIR/script/verify_versions.sh"; then
     exit 1
 fi
 
+# 脚本执行位守护（#269 立，#271 加固）。
+# 由来：#263 / #266 两次因为「写临时文件再 rename」的原子写丢了执行位（100755→100644）；
+# CI 一律用 `bash x.sh` 调用所以红不了，只有 `./x.sh` 才会 permission denied，肉眼也难发现。
+# 判据只有一份：script/check_exec_bits.sh —— CI 的 test-cli 第 3 步调的是同一个文件。
+# 别在这里内联判据：#269 时两处是两条分头写的表达，等于两套判据（同 verify_versions.sh 的教训）。
+if ! bash "$ROOT_DIR/script/check_exec_bits.sh"; then
+    echo ""
+    echo "❌ cli/scripts 下的脚本可执行位/清单检查未通过，提交被拦截。"
+    exit 1
+fi
+
 exit 0

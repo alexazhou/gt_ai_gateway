@@ -160,7 +160,6 @@ function handleAutoRefreshChange(checked: boolean) {
 <style scoped>
 .record-list {
     background: var(--bg-page);
-    padding: 24px;
 }
 
 .table-header {

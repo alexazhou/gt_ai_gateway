@@ -180,6 +180,19 @@ async function sendRequestToUpstream(
     finalHeaders.set("Content-Type", "application/json");
 
     // 3. 替换上游模型名
+    //
+    // 注意 `body` 此刻仍是客户端原始请求体：客户端请求名要在替换成 vendor 名**之前**取，
+    // 之后所有面向客户端的 model 输出、以及 thinking 凭据的模型绑定都用它（§4.7 / PC-009-C）。
+    // 口径取客户端请求体里的 model；极端情况下取不到再退回网关模型名（modelConfig.name）。
+    let clientModelName = modelConfig.name ?? "unknown";
+    try {
+        const clientBodyJson = JSON.parse(body);
+        if (typeof clientBodyJson?.model === "string" && clientBodyJson.model.trim()) {
+            clientModelName = clientBodyJson.model.trim();
+        }
+    } catch (e) {
+        // 请求体不是合法 JSON 时保持 modelConfig.name（后续转换/上游会各自报错）
+    }
     let upstreamBody = body;
     // 显式上游替换成 vendor model 名；自动上游名与网关模型名一致，替换为无操作
     if (vendorModelName) {
@@ -214,12 +227,30 @@ async function sendRequestToUpstream(
             );
         }
         console.log(`[senderService] Using protocol converter: ${converter.constructor.name}, client=${clientFormat}, upstream=${upstreamFormat}`);
+        // 必须在转换请求体**之前**注入客户端身份与上游来源：请求侧的 thinking 凭据解封要按它们核对绑定
+        converter.updateClientModel(clientModelName);
+        converter.setCredentialSource(`vendor:${vendor.id}`);
         upstreamBody = converter.convertRequestBody(upstreamBody);
         await requestActivityService.append(recordId, RequestActivityStage.CONVERSION, "协议转换", {
             from: clientFormat,
             to: upstreamFormat,
             converter: converter.constructor.name,
         });
+        // 老凭据（封包无 source 字段）只校验模型、不校验来源：这是**已知缺口**，
+        // 静默通过等于让缺口不可观测，所以在请求记录里留一条 warn（不改协议响应体）。
+        if (converter.isCredentialSourceUnchecked()) {
+            await requestActivityService.append(
+                recordId,
+                RequestActivityStage.CONVERSION,
+                "thinking 凭据来源未校验（老凭据无 source 字段）",
+                {
+                    credential_source_checked: false,
+                    reason: "legacy_token_without_source",
+                    expected_source: `vendor:${vendor.id}`,
+                },
+                ActivityLevel.WARN,
+            );
+        }
     }
 
     let requestModel = "unknown";
@@ -394,10 +425,6 @@ async function sendRequest(
     let lastFailureCode: string | null = null;
 
     while (true) {
-        // 路由选路的 isDown 是同步路径（读本 isolate 缓存），这里先按 TTL 从共享存储刷新一次，
-        // 让其他 isolate 刚标记的 DOWN 在本次选路就生效（Worker 跨 isolate 冷却，见 P0-3）
-        await upstreamHealthService.syncFromStore();
-
         let routingResult: ModelRoutingResult;
         try {
             routingResult = await routingService.selectUpstream(

@@ -14,6 +14,19 @@ export type StopReasonSource = "upstream" | "synthesized";
 
 export abstract class BaseConverter {
     protected requestModel: string;
+    /** 构造时传入的模型名（不会被上游事件覆盖），只作为 `clientFacingModel()` 的兜底 */
+    protected readonly initialModel: string;
+    /** 客户端请求的模型名（`modelConfig.name`），只由入口设置一次，不被上游事件覆盖 */
+    protected clientModel?: string;
+    /** 上游实际模型名（记录/排障用，**不参与**客户端可见输出） */
+    protected upstreamModel?: string;
+    /**
+     * 本次请求命中的上游来源标识（`vendor:<id>`），由 senderService 在选定上游后注入。
+     * 封包时写进凭据、回放时用于核对：来源不同或没有来源的凭据不跨来源使用（PC-009-C）。
+     */
+    protected credentialSource?: string;
+    /** 请求侧出现过「老凭据（无 source）⇒ 来源未校验」时置位，供入口写进 request_activity */
+    protected credentialSourceUnchecked = false;
     protected responseId: string;
     protected contentBlockIndex = 0;
     /** Responses 流事件的 sequence_number 计数 */
@@ -27,6 +40,7 @@ export abstract class BaseConverter {
 
     constructor(requestModel: string = "unknown", responseId?: string) {
         this.requestModel = requestModel;
+        this.initialModel = requestModel;
         this.responseId = responseId || `chatcmpl-${Date.now()}`;
     }
 
@@ -64,10 +78,69 @@ export abstract class BaseConverter {
     }
 
     /**
-     * 更新请求模型名称（常用于提取请求体后或第一条流式响应到来时）
+     * 更新请求模型名称（常用于提取请求体后或第一条流式响应到来时）。
+     *
+     * 注意它会被上游事件覆盖成**上游实际模型名**，所以面向客户端的输出与凭据绑定**不能**读它，
+     * 一律走 `clientFacingModel()` / `clientModel`（§4.7 / PC-009-C）。
      */
     public updateModel(model: string) {
         this.requestModel = model;
+        this.upstreamModel = model;
+    }
+
+    /**
+     * 更新「客户端请求的模型名」（`modelConfig.name`）。
+     *
+     * 与 `requestModel` 的区别是本 single 修复的核心（PC-009-C / §4.7）：
+     * - `requestModel` 会被**上游流事件**（`message_start` / `chunk.model`）反复覆盖成
+     *   上游实际模型名，也可能被调用方写成 vendor 名 —— 它反映「这次请求打到上游时用的名字」；
+     * - `clientModel` 只在请求进入网关时设置一次，**永不**被上游事件覆盖，是「客户端认得的身份」。
+     *
+     * 响应里的 `model` 字段与 thinking 凭据的模型绑定都用 `clientModel`：
+     * 否则别名路由（客户端 `alias` → 上游 `actual-version`）下，客户端看到的模型名与它发出去的不一致，
+     * 下一轮回放还会因「封包用上游名、解封用另一侧名字」被网关自己判成不兼容。
+     */
+    public updateClientModel(model: string) {
+        this.clientModel = model;
+    }
+
+    /**
+     * 设置本次请求的上游来源标识（`vendor:<id>`）。封包与解封两侧都用它做来源绑定：
+     * 同一个模型名可能由多个供应商提供，凭据跨供应商使用没有意义（上游会拒绝），
+     * 在网关侧明确拒绝比把上游的报错原样透传更好排障（PC-009-C）。
+     */
+    public setCredentialSource(source: string) {
+        this.credentialSource = source;
+    }
+
+    /**
+     * 本次请求是否出现过「来源未校验」的凭据（老凭据封包里没有 `source` 字段）。
+     *
+     * 为什么必须暴露出来：未校验来源是**已知缺口**（凭据无 TTL，窗口长期存在），
+     * 静默通过等于让缺口不可观测；入口据此在 request_activity 里留一条 warn 记录。
+     */
+    public isCredentialSourceUnchecked(): boolean {
+        return this.credentialSourceUnchecked;
+    }
+
+    /**
+     * 面向客户端的稳定模型名，退让顺序：
+     * 1. `clientModel`：入口（senderService）注入的客户端请求名 —— 生产路径一定有，是唯一权威；
+     * 2. `initialModel`：构造时已知的模型名（老调用点 / 单测直连转换器）；
+     * 3. `fallback`：调用点给的天然兜底（如 `upstreamRes.model`）；
+     * 4. `upstreamModel`：流事件里记录的上游名，仅在前三者都拿不到时兜底，避免输出 `"unknown"`。
+     *
+     * 第 3/4 步只服务「根本没有客户端身份信息」的退化场景，**不要**拿它们当正常路径：
+     * 生产路径靠第 1 步，否则 §4.7（响应 model == 客户端请求名）立刻失效。
+     */
+    protected clientFacingModel(fallback?: string): string {
+        // 1) 入口注入的客户端请求名（生产路径一定有）
+        // 2) 构造时已知的模型名（老调用点/单测直连转换器）
+        // 3) 调用点给的天然兜底（如 `upstreamRes.model`），保持「没有身份信息时不倒退」的老行为
+        // 4) 流事件里记录的上游名
+        if (this.clientModel) return this.clientModel;
+        if (this.initialModel && this.initialModel !== "unknown") return this.initialModel;
+        return fallback || this.upstreamModel || "unknown";
     }
 
     /**

@@ -2,15 +2,36 @@
     <a-config-provider :theme="themeConfig">
         <div :class="['app-container', themeStore.isDark ? 'dark' : 'light']">
             <router-view />
+            <WindowControls v-if="isWindowsApp" />
+            <!-- 无边框窗口补边缘缩放热区（tao 只处理上边缘） -->
+            <WindowResizeHandles v-if="isWindowsApp" />
         </div>
     </a-config-provider>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import { useThemeStore } from '@/stores/theme';
+import { isTauri, isWindowsTauri } from '@/utils/platform';
+import WindowControls from '@/components/layout/WindowControls.vue';
+import WindowResizeHandles from '@/components/layout/WindowResizeHandles.vue';
 
 const themeStore = useThemeStore();
+// Windows 无边框窗口的标题栏按钮，在所有页面（含登录页）都需常驻
+const isWindowsApp = isWindowsTauri();
+
+// 原生标题栏底色跟随应用主题（macOS 透明标题栏 / Windows 标题栏配色），避免与顶栏之间出现色差和分割线
+if (isTauri()) {
+    watch(
+        () => themeStore.isDark,
+        (isDark) => {
+            import('@tauri-apps/api/core')
+                .then(({ invoke }) => invoke('set_window_theme', { isDark }))
+                .catch(() => {});
+        },
+        { immediate: true },
+    );
+}
 
 const themeConfig = computed(() => themeStore.getAntdThemeConfig());
 </script>
@@ -56,6 +77,7 @@ html.dark body {
     --component-bg: #ffffff;
     --border-color: #e8edf5;
     --border-info-item: #f0f0f0;
+    --header-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     --text-primary: #243247;
     --text-secondary: #8c8c8c;
     --text-sidebar: #243247;
@@ -63,6 +85,7 @@ html.dark body {
     --text-version: #95a1b2;
     --text-description: #666;
     --sidebar-hover: #eef5ff;
+    --window-control-hover: rgba(15, 23, 42, 0.08);
     --sidebar-selected: #dcebff;
     --sidebar-selected-border: transparent;
     --sidebar-selected-text: var(--accent-primary);
@@ -114,6 +137,8 @@ html.dark body {
     --component-bg: #1f1f1f;
     --border-color: #303030;
     --border-info-item: #303030;
+    /* 深色背景上黑色阴影需要更高不透明度才与浅色主题观感一致 */
+    --header-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
     --text-primary: rgba(255, 255, 255, 0.85);
     --text-secondary: rgba(255, 255, 255, 0.45);
     --text-sidebar: rgba(255, 255, 255, 0.85);
@@ -121,6 +146,7 @@ html.dark body {
     --text-version: rgba(255, 255, 255, 0.45);
     --text-description: rgba(255, 255, 255, 0.45);
     --sidebar-hover: #223043;
+    --window-control-hover: rgba(255, 255, 255, 0.12);
     --sidebar-selected: #263f5d;
     --sidebar-selected-border: transparent;
     --sidebar-selected-text: var(--accent-primary);

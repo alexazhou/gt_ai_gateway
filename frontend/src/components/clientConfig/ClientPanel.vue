@@ -410,7 +410,7 @@ function onRefresh() {
     font-size: 13px;
     margin-top: 16px;
     padding: 8px 12px;
-    background: var(--bg-hover, #f5f5f5);
+    background: var(--bg-info-item, #f5f5f5);
     border-radius: 6px;
 }
 </style>

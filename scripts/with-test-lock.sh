@@ -28,18 +28,24 @@ LOCK_DIR="${TEST_LOCK_DIR:-/tmp/gw-test.lock}"
 
 release_lock() {
     local code=$?
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-    if [ "$code" -ne 0 ]; then
-        echo "[test-lock] 命令退出码 $code，锁已释放：$LOCK_DIR" >&2
+    rmdir "${LOCK_DIR}" 2>/dev/null || true
+    # 注意：本脚本里所有变量展开一律写 ${VAR}，不要写成裸 $VAR。
+    # macOS 自带的 /bin/bash 3.2.57 在解析「$VAR 紧跟多字节字符」时会把后面的
+    # 全角字符并进变量名，配合 set -u 直接触发 `unbound variable` —— 表现是
+    # **真正要打印的信息被吞掉**（比如「拒绝启动：已有 vitest 进程在运行」、
+    # 「命令退出码 N」），只看到一行 `LOCK_DIR?: unbound variable`，很容易被误判成
+    # 脚本自己崩了。改成 ${VAR} 后变量边界明确，bash 3.2 / 4 / 5 行为一致。
+    if [ "${code}" -ne 0 ]; then
+        echo "[test-lock] 命令退出码 ${code}，锁已释放：${LOCK_DIR}" >&2
     else
-        echo "[test-lock] 运行完成，锁已释放：$LOCK_DIR" >&2
+        echo "[test-lock] 运行完成，锁已释放：${LOCK_DIR}" >&2
     fi
-    exit "$code"
+    exit "${code}"
 }
 
 acquire_lock() {
-    if mkdir "$LOCK_DIR" 2>/dev/null; then
-        echo "[test-lock] 获得锁：$LOCK_DIR (pid $$)" >&2
+    if mkdir "${LOCK_DIR}" 2>/dev/null; then
+        echo "[test-lock] 获得锁：${LOCK_DIR} (pid $$)" >&2
         return 0
     fi
 
@@ -48,18 +54,18 @@ acquire_lock() {
     # `... npx vitest ...`，用裸关键词会把自己的 shell 也当成「有人在跑」，
     # 导致残留锁永远清不掉。
     if pgrep -f "[b]in/vitest" >/dev/null 2>&1; then
-        echo "[test-lock] 拒绝启动：已有 vitest 进程在运行（锁 $LOCK_DIR）。" >&2
+        echo "[test-lock] 拒绝启动：已有 vitest 进程在运行（锁 ${LOCK_DIR}）。" >&2
         echo "[test-lock] 请等对方跑完再执行，不要手工删除该锁目录。" >&2
         exit 1
     fi
 
     echo "[test-lock] 检测到残留锁（无 vitest 进程），清理后重试。" >&2
-    rm -rf "$LOCK_DIR"
-    if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    rm -rf "${LOCK_DIR}"
+    if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
         echo "[test-lock] 抢锁失败（可能有人同时抢到），退出。" >&2
         exit 1
     fi
-    echo "[test-lock] 获得锁：$LOCK_DIR (pid $$)" >&2
+    echo "[test-lock] 获得锁：${LOCK_DIR} (pid $$)" >&2
 }
 
 if [ "$#" -eq 0 ]; then

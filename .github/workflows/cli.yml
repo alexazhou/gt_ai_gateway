@@ -1,0 +1,103 @@
+name: CLI Packaging
+
+# gtgw 的打包门：交叉编译 6 个产物 + 在真实镜像里跑 `gtgw --version`。
+# 触发条件刻意收窄到「只有 cli/、Dockerfile、package.json 变更时」：
+# 主门（Tests）已经跑 vet + 单测 + 交叉编译；这里的 docker 构建要 npm ci 两次 + 前端构建，
+# 放进每个分支 push 会明显拖慢无关改动。
+on:
+  push:
+    branches:
+      - '**'
+    paths:
+      - 'cli/**'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - '.github/workflows/cli.yml'
+      - 'package.json'
+  workflow_dispatch:
+
+concurrency:
+  group: cli-packaging-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cli-artifacts:
+    name: Cross compile gtgw (6 targets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          token: ${{ github.token }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Verify version consistency
+        run: bash script/verify_versions.sh
+
+      - name: Cross compile
+        run: bash cli/scripts/release.sh
+
+      - name: Show artifact table
+        run: |
+          set -e
+          cd cli/dist/cli
+          {
+            echo "| file | bytes | sha256 | file(1) |"
+            echo "|---|---|---|---|"
+            for f in gtgw_cli_*; do
+              case "$f" in *sha256sums.txt) continue ;; esac
+              printf '| %s | %s | %s | %s |\n' "$f" \
+                "$(stat -c%s "$f")" \
+                "$(sha256sum "$f" | cut -d' ' -f1)" \
+                "$(file -b "$f" | cut -c1-80)"
+            done
+          } | tee gtgw-artifact-table.md
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtgw-cli-artifacts
+          path: cli/dist/cli/*
+          retention-days: 14
+
+  cli-docker:
+    name: gtgw inside Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          token: ${{ github.token }}
+
+      # 单架构本地构建，不登录任何 registry、不 push（发布镜像仍是 docker.yml 的职责）
+      - name: Build image (no push)
+        run: docker build -t gtgw-smoke:${GITHUB_SHA::8} .
+
+      - name: gtgw runs inside the final image
+        run: |
+          set -e
+          docker run --rm gtgw-smoke:${GITHUB_SHA::8} gtgw --version | tee /tmp/gtgw-version.txt
+          EXPECTED="$(node -p "require('./package.json').version")"
+          echo "package.json version: $EXPECTED"
+          grep -q "gtgw version $EXPECTED" /tmp/gtgw-version.txt
+          # 二进制确实是静态的：镜像里没有 go、没有 gcc，能跑就说明不依赖编译环境
+          docker run --rm gtgw-smoke:${GITHUB_SHA::8} sh -c 'command -v go || echo "no go in image (expected)"'
+
+      - name: Image size delta
+        run: |
+          set -e
+          SIZE_BYTES=$(docker image inspect gtgw-smoke:${GITHUB_SHA::8} --format '{{.Size}}')
+          echo "final image: $SIZE_BYTES bytes ($((SIZE_BYTES/1024/1024)) MiB)"
+          docker history gtgw-smoke:${GITHUB_SHA::8} --format '{{.Size}}\t{{.CreatedBy}}' | head -12 | tee /tmp/gtgw-history.txt
+          docker run --rm gtgw-smoke:${GITHUB_SHA::8} sh -c 'ls -l /usr/local/bin/gtgw'

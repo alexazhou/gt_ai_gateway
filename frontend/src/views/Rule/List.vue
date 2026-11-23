@@ -212,7 +212,6 @@ function handleDelete(record: Rule): void {
 <style scoped>
 .rule-list {
     background: var(--bg-page);
-    padding: 24px;
 }
 
 .table-header {
