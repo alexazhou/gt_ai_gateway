@@ -22,6 +22,7 @@ import tenantController from "./controller/tenantController";
 import configService from "./service/configService";
 import ruleService from "./service/ruleService";
 import tenantService from "./service/tenantService";
+import stateStoreService from "./service/stateStoreService";
 import ormService from "./service/ormService";
 import objectStorageService from "./service/objectStorageService";
 import authMiddleware from "./middleware/authMiddleware";
@@ -247,6 +248,9 @@ app.delete("/test/cache/clear", async (c) => {
     ruleService.invalidateCache();
     // 测试清表后 main 租户 id 可能变化（SQLite AUTOINCREMENT 不重置），须清 tenantService 缓存
     tenantService.clearMainTenantCache();
+    // 限流桶 / 上游冷却 / 版本检查缓存都在 StateStore 里，清表时必须一起重置，
+    // 否则同一个测试进程里前一个用例的额度或冷却会漏到下一个用例。
+    stateStoreService.reset();
     return c.json({ success: true });
 });
 

@@ -3,6 +3,8 @@ import { ApiFormat, UPSTREAM_FAILURE_COOLDOWN_MS } from "../../../src/constants"
 import upstreamHealthService, {
     UpstreamHealthState,
 } from "../../../src/service/upstreamHealthService";
+import stateStoreService from "../../../src/service/stateStoreService";
+import { StateStoreUnavailableError, type StateStore } from "../../../src/util/stateStore";
 
 const COOLDOWN = UPSTREAM_FAILURE_COOLDOWN_MS;
 const BASE_NOW = 1_700_000_000_000;
@@ -11,22 +13,41 @@ function format(): ApiFormat {
     return ApiFormat.OPENAI;
 }
 
-function statusAt(vendorId: number, vendorModelName: string, now: number) {
+async function statusAt(vendorId: number, vendorModelName: string, now: number) {
     return upstreamHealthService.getHealthStatus(vendorId, vendorModelName, format(), now);
 }
 
+/**
+ * 注入一个「后端不可用」的 StateStore：所有异步方法抛 StateStoreUnavailableError。
+ * 用来验证冷却链路的 fail-open（后端挂了也要放行请求）。
+ */
+function unavailableStore(): StateStore {
+    const fail = async (): Promise<never> => {
+        throw new StateStoreUnavailableError("injected: backend down");
+    };
+    return {
+        consume: fail,
+        incrBy: fail,
+        compareAndSet: fail,
+        get: fail,
+        set: fail,
+        delete: fail,
+    } as unknown as StateStore;
+}
+
 describe("upstreamHealthService", () => {
-    beforeEach(async () => {
-        await upstreamHealthService.clear();
+    beforeEach(() => {
+        // 冷却记录已落在全局 StateStore，测试隔离统一用 stateStoreService.reset()
+        stateStoreService.reset();
     });
 
-    afterEach(async () => {
-        await upstreamHealthService.clear();
+    afterEach(() => {
+        stateStoreService.reset();
         vi.restoreAllMocks();
     });
 
-    it("reports a normal status before any failure", () => {
-        expect(statusAt(3, "claude-sonnet", BASE_NOW)).toEqual({
+    it("reports a normal status before any failure", async () => {
+        expect(await statusAt(3, "claude-sonnet", BASE_NOW)).toEqual({
             state: UpstreamHealthState.NORMAL,
             lastFailureAt: null,
         });
@@ -35,7 +56,7 @@ describe("upstreamHealthService", () => {
     it("marks a failure and becomes down", async () => {
         await upstreamHealthService.markFailure(3, "claude-sonnet", format(), new Date(BASE_NOW));
 
-        expect(statusAt(3, "claude-sonnet", BASE_NOW)).toEqual({
+        expect(await statusAt(3, "claude-sonnet", BASE_NOW)).toEqual({
             state: UpstreamHealthState.DOWN,
             lastFailureAt: BASE_NOW,
         });
@@ -44,11 +65,12 @@ describe("upstreamHealthService", () => {
     it("recovers to normal after UPSTREAM_FAILURE_COOLDOWN_MS", async () => {
         await upstreamHealthService.markFailure(3, "claude-sonnet", format(), new Date(BASE_NOW));
 
-        expect(statusAt(3, "claude-sonnet", BASE_NOW + COOLDOWN - 1)).toEqual({
+        expect(await statusAt(3, "claude-sonnet", BASE_NOW + COOLDOWN - 1)).toEqual({
             state: UpstreamHealthState.DOWN,
             lastFailureAt: BASE_NOW,
         });
-        expect(statusAt(3, "claude-sonnet", BASE_NOW + COOLDOWN)).toEqual({
+        // TTL 边界：到点即过期（expiresAtMs <= nowMs）
+        expect(await statusAt(3, "claude-sonnet", BASE_NOW + COOLDOWN)).toEqual({
             state: UpstreamHealthState.NORMAL,
             lastFailureAt: null,
         });
@@ -57,15 +79,17 @@ describe("upstreamHealthService", () => {
     it("scopes state by vendor, model name, and api format", async () => {
         await upstreamHealthService.markFailure(3, "claude-sonnet", format(), new Date(BASE_NOW));
 
-        expect(statusAt(8, "claude-sonnet", BASE_NOW).state).toBe(UpstreamHealthState.NORMAL);
-        expect(statusAt(3, "claude-opus", BASE_NOW).state).toBe(UpstreamHealthState.NORMAL);
-        expect(statusAt(3, "claude-sonnet", BASE_NOW).state).toBe(UpstreamHealthState.DOWN);
+        expect((await statusAt(8, "claude-sonnet", BASE_NOW)).state).toBe(UpstreamHealthState.NORMAL);
+        expect((await statusAt(3, "claude-opus", BASE_NOW)).state).toBe(UpstreamHealthState.NORMAL);
+        expect((await statusAt(3, "claude-sonnet", BASE_NOW)).state).toBe(UpstreamHealthState.DOWN);
         expect(
-            upstreamHealthService.getHealthStatus(
-                3,
-                "claude-sonnet",
-                ApiFormat.ANTHROPIC,
-                BASE_NOW,
+            (
+                await upstreamHealthService.getHealthStatus(
+                    3,
+                    "claude-sonnet",
+                    ApiFormat.ANTHROPIC,
+                    BASE_NOW,
+                )
             ).state,
         ).toBe(UpstreamHealthState.NORMAL);
     });
@@ -79,13 +103,13 @@ describe("upstreamHealthService", () => {
             new Date(BASE_NOW + 1000),
         );
 
-        expect(statusAt(3, "claude-sonnet", BASE_NOW)).toEqual({
+        expect(await statusAt(3, "claude-sonnet", BASE_NOW)).toEqual({
             state: UpstreamHealthState.DOWN,
             lastFailureAt: BASE_NOW + 1000,
         });
         // 原失败在 BASE_NOW + COOLDOWN 过期，但刷新后仍处于失效状态
-        expect(statusAt(3, "claude-sonnet", BASE_NOW + COOLDOWN).state).toBe(UpstreamHealthState.DOWN);
-        expect(statusAt(3, "claude-sonnet", BASE_NOW + 1000 + COOLDOWN).state).toBe(UpstreamHealthState.NORMAL);
+        expect((await statusAt(3, "claude-sonnet", BASE_NOW + COOLDOWN)).state).toBe(UpstreamHealthState.DOWN);
+        expect((await statusAt(3, "claude-sonnet", BASE_NOW + 1000 + COOLDOWN)).state).toBe(UpstreamHealthState.NORMAL);
     });
 
     it("shouldMarkFailure returns false for client-side 4xx errors", () => {
@@ -104,17 +128,6 @@ describe("upstreamHealthService", () => {
         expect(upstreamHealthService.shouldMarkFailure(null)).toBe(true);
     });
 
-    it("pruneExpired removes only expired upstream health entries", async () => {
-        await upstreamHealthService.markFailure(3, "claude-sonnet", format(), new Date(BASE_NOW));
-        await upstreamHealthService.markFailure(8, "claude-opus", format(), new Date(BASE_NOW));
-
-        const removed = await upstreamHealthService.pruneExpired(BASE_NOW + COOLDOWN);
-
-        expect(removed).toBe(2);
-        expect(statusAt(3, "claude-sonnet", BASE_NOW).lastFailureAt).toBeNull();
-        expect(statusAt(8, "claude-opus", BASE_NOW).lastFailureAt).toBeNull();
-    });
-
     // ---- #287 回滚守卫：限流与冷却不再落库，也没有跨 isolate 同步入口 ----
 
     it("不再暴露持久化注入与跨 isolate 同步入口（#287 回滚的守卫）", () => {
@@ -125,12 +138,30 @@ describe("upstreamHealthService", () => {
         expect(api.syncFromStore).toBeUndefined();
     });
 
-    it("clear() 清空本进程的冷却记录", async () => {
+    // ---- fail-open：冷却只是「少打几次坏上游」的优化，状态后端不可用不能阻断转发 ----
+
+    it("getHealthStatus 在 StateStore 不可用时 fail-open 为 NORMAL（并告警）", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+        // 先写入一条真实冷却记录，确认注入的坏后端完全接管（而不是读到了旧值）
         await upstreamHealthService.markFailure(3, "claude-sonnet", format(), new Date(BASE_NOW));
-        expect(statusAt(3, "claude-sonnet", BASE_NOW).state).toBe(UpstreamHealthState.DOWN);
+        expect((await statusAt(3, "claude-sonnet", BASE_NOW)).state).toBe(UpstreamHealthState.DOWN);
 
-        await upstreamHealthService.clear();
+        stateStoreService.setStore(unavailableStore());
 
-        expect(statusAt(3, "claude-sonnet", BASE_NOW).state).toBe(UpstreamHealthState.NORMAL);
+        expect(await statusAt(3, "claude-sonnet", BASE_NOW)).toEqual({
+            state: UpstreamHealthState.NORMAL,
+            lastFailureAt: null,
+        });
+        expect(warn).toHaveBeenCalled();
+    });
+
+    it("markFailure 在 StateStore 不可用时 fail-open：不抛错、只告警", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+        stateStoreService.setStore(unavailableStore());
+
+        await expect(
+            upstreamHealthService.markFailure(3, "claude-sonnet", format(), new Date(BASE_NOW)),
+        ).resolves.toBeUndefined();
+        expect(warn).toHaveBeenCalled();
     });
 });

@@ -30,17 +30,22 @@ function seededShuffle<T>(items: T[], seed: number): T[] {
 
 
 class LoadBalanceRoutingStrategy extends BaseRoutingStrategy {
-    selectUpstream(
+    async selectUpstream(
         model: SgModel,
         candidates: ModelRoutingResult[],
         routingContext?: RoutingContext,
         seed: number = 0,
-    ): ModelRoutingResult {
+    ): Promise<ModelRoutingResult> {
         const untried = candidates.filter(candidate => !this.isTried(candidate, routingContext));
 
         // 按请求随机：等概率随机选一个可用上游（保持原行为）
         if (model.getRoutingConfig().load_balance_strategy === "request") {
-            const available = untried.filter(candidate => !this.isDown(candidate));
+            const available: ModelRoutingResult[] = [];
+            for (const candidate of untried) {
+                if (!(await this.isDown(candidate))) {
+                    available.push(candidate);
+                }
+            }
             if (available.length === 0) {
                 return ModelRoutingResult.none();
             }
@@ -48,9 +53,14 @@ class LoadBalanceRoutingStrategy extends BaseRoutingStrategy {
         }
 
         // 按用户随机（默认）：以用户 id 为种子确定性乱序，
-        // 逐个跳过冷却中的上游，取第一个可用
+        // 逐个跳过冷却中的上游，取第一个可用（顺序 await，命中即返回，不查剩余候选）
         const shuffled = seededShuffle(untried, seed);
-        return shuffled.find(candidate => !this.isDown(candidate)) ?? ModelRoutingResult.none();
+        for (const candidate of shuffled) {
+            if (!(await this.isDown(candidate))) {
+                return candidate;
+            }
+        }
+        return ModelRoutingResult.none();
     }
 }
 

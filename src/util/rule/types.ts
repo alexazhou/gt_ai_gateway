@@ -39,24 +39,5 @@ export interface RequestContext {
     vendor_id?: number;
 }
 
-/** 令牌桶消费结果 */
-export interface ConsumeResult {
-    /** 是否获得令牌（放行）；false = 桶空被限流 */
-    allowed: boolean;
-    /** allowed=true：扣减后的剩余令牌数；allowed=false：此刻桶内令牌数（< 1，用于计算等待时间） */
-    remaining: number;
-}
-
-/**
- * 限流计数器存储接口。
- * - Node / 桌面：内存令牌桶（单进程内天然正确）
- * - Worker：D1 SQL 令牌桶（跨 isolate 共享；Durable Object 后端可后续按同一接口接入）
- */
-export interface RateLimitStore {
-    /**
-     * 令牌桶消费：按 refillPerMs 补液（封顶 capacity），再尝试扣 1 个令牌。
-     * @param capacity 桶容量（瞬时突发上限，即 rpm）
-     * @param refillPerMs 补液速率（令牌/毫秒 = rpm / 60s）
-     */
-    consume(key: string, now: number, capacity: number, refillPerMs: number): ConsumeResult | Promise<ConsumeResult>;
-}
+// 令牌桶计数器与 ConsumeResult 已收口到 `src/util/stateStore`（StateStore.consume /
+// StateStore 的 ConsumeResult），本文件不再定义限流存储接口（2026-11-24 StateStore 接入）。

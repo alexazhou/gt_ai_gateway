@@ -7,6 +7,7 @@ import { DBAdapter } from "../../src/util/db/dbAdapter";
 import { migrate as runMigrations } from "../../src/service/dbMigrationService";
 import configService from "../../src/service/configService";
 import tenantService from "../../src/service/tenantService";
+import stateStoreService from "../../src/service/stateStoreService";
 
 // Worker mode configuration - use test database
 const TEST_DB_NAME = "gt_ai_gateway_test";
@@ -473,6 +474,11 @@ async function truncate(): Promise<void> {
     if (!adapter) {
         adapter = createAdapter();
     }
+
+    // 限流桶 / 上游冷却 / 版本检查缓存都收口在 StateStore 里：清表时一并重置，
+    // 否则用例之间的额度与冷却状态会互相污染（服务端进程那一份由 clearServerCache() 走
+    // DELETE /test/cache/clear 重置）。
+    stateStoreService.reset();
 
     if (isWorkerMode) {
         // In worker mode, clear D1 tables only (admin user created via API)

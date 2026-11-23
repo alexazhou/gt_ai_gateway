@@ -105,8 +105,11 @@ export interface SetOptions extends TimeOptions {
  * 状态只在该进程 / 该 isolate 的内存里。node/桌面单进程够用；**workerd 下每个 isolate 各一份、
  * isolate 之间不共享**，同一租户的额度会被放大成「isolate 数 × 额度」。
  * 所以 worker 模式跑 memory 只是过渡：**它能过 worker 门，但证明不了跨 isolate 的共享性**。
- * 这条由 S2 的 `StateStoreDO`（一个桶 = 一个 DO 实例 + DO input gate 串行）解决；
- * **在那之前不要把 StateStore 接进 worker 的限流 / 冷却判定链路**。
+ * 这条由 S2 的 `StateStoreDO`（一个桶 = 一个 DO 实例 + DO input gate 串行）解决。
+ *
+ * 接入现状（2026-11-24 S3）：限流（`rateLimitService`）与上游冷却（`upstreamHealthService`）
+ * 已接进本层，**worker 下仍是 per-isolate**（与接入前各自的进程内 Map 等价，无行为放大）；
+ * 真正的跨 isolate 共享要等 S2 的 `StateStoreDO` 落地。
  */
 export interface StateStore {
     /**

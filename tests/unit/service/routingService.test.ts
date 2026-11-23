@@ -8,6 +8,8 @@ import FirstAvailableRoutingStrategy from "../../../src/service/routingService/r
 import LoadBalanceRoutingStrategy from "../../../src/service/routingService/routingStrategy/loadBalanceRoutingStrategy";
 import SingleRoutingStrategy from "../../../src/service/routingService/routingStrategy/singleRoutingStrategy";
 import upstreamHealthService from "../../../src/service/upstreamHealthService";
+import stateStoreService from "../../../src/service/stateStoreService";
+import { StateStoreUnavailableError, type StateStore } from "../../../src/util/stateStore";
 
 function candidate(vendorId: number): ModelRoutingResult {
     return new ModelRoutingResult(
@@ -30,38 +32,55 @@ function model(mode: ModelRoutingMode, loadBalanceStrategy: "user" | "request" =
 }
 
 
+/** 注入「后端不可用」的 StateStore，验证冷却查询 fail-open 后仍能正常选路 */
+function unavailableStore(): StateStore {
+    const fail = async (): Promise<never> => {
+        throw new StateStoreUnavailableError("injected: backend down");
+    };
+    return {
+        consume: fail,
+        incrBy: fail,
+        compareAndSet: fail,
+        get: fail,
+        set: fail,
+        delete: fail,
+    } as unknown as StateStore;
+}
+
+
 beforeEach(() => {
-    upstreamHealthService.clear();
+    // 冷却状态已落在全局 StateStore，隔离统一用 stateStoreService.reset()（原 clear() 已下线）
+    stateStoreService.reset();
 });
 
 afterEach(() => {
-    upstreamHealthService.clear();
+    stateStoreService.reset();
     vi.restoreAllMocks();
 });
 
 
 describe("routing strategies", () => {
-    it("single selects its only upstream", () => {
+    it("single selects its only upstream", async () => {
         const first = candidate(1);
         const strategy = new SingleRoutingStrategy();
 
-        expect(strategy.selectUpstream(
+        expect(await strategy.selectUpstream(
             model(ModelRoutingMode.SINGLE),
             [first],
         )).toBe(first);
     });
 
-    it("load_balance (按用户随机) is deterministic for the same user seed", () => {
+    it("load_balance (按用户随机) is deterministic for the same user seed", async () => {
         const strategy = new LoadBalanceRoutingStrategy();
         const candidates = [candidate(1), candidate(2), candidate(3)];
 
-        const r1 = strategy.selectUpstream(
+        const r1 = await strategy.selectUpstream(
             model(ModelRoutingMode.LOAD_BALANCE, "user"),
             candidates,
             freshRoutingContext(),
             42,
         );
-        const r2 = strategy.selectUpstream(
+        const r2 = await strategy.selectUpstream(
             model(ModelRoutingMode.LOAD_BALANCE, "user"),
             candidates,
             freshRoutingContext(),
@@ -71,13 +90,13 @@ describe("routing strategies", () => {
         expect(r1.vendor?.id).toBe(r2.vendor?.id);
     });
 
-    it("load_balance (按用户随机) distributes across users (different seeds)", () => {
+    it("load_balance (按用户随机) distributes across users (different seeds)", async () => {
         const strategy = new LoadBalanceRoutingStrategy();
         const candidates = [candidate(1), candidate(2), candidate(3)];
         const chosen = new Set<number>();
 
         for (let seed = 1; seed <= 50; seed++) {
-            const result = strategy.selectUpstream(
+            const result = await strategy.selectUpstream(
                 model(ModelRoutingMode.LOAD_BALANCE, "user"),
                 candidates,
                 freshRoutingContext(),
@@ -88,33 +107,33 @@ describe("routing strategies", () => {
         expect(chosen.size).toBeGreaterThan(1);
     });
 
-    it("load_balance (按请求随机) selects randomly via Math.random", () => {
+    it("load_balance (按请求随机) selects randomly via Math.random", async () => {
         const first = candidate(1);
         const second = candidate(2);
         const strategy = new LoadBalanceRoutingStrategy();
         vi.spyOn(Math, "random").mockReturnValue(0.75);
 
-        expect(strategy.selectUpstream(
+        expect(await strategy.selectUpstream(
             model(ModelRoutingMode.LOAD_BALANCE, "request"),
             [first, second],
         )).toBe(second);
     });
 
-    it("first_available selects the first healthy upstream in configuration order", () => {
+    it("first_available selects the first healthy upstream in configuration order", async () => {
         const first = candidate(1);
         const second = candidate(2);
         const strategy = new FirstAvailableRoutingStrategy();
 
-        expect(strategy.selectUpstream(
+        expect(await strategy.selectUpstream(
             model(ModelRoutingMode.FIRST_AVAILABLE),
             [first, second],
         )).toBe(first);
     });
 
-    it("returns an empty result (upstream null) when no healthy upstream remains", () => {
+    it("returns an empty result (upstream null) when no healthy upstream remains", async () => {
         const strategy = new FirstAvailableRoutingStrategy();
 
-        const result = strategy.selectUpstream(
+        const result = await strategy.selectUpstream(
             model(ModelRoutingMode.FIRST_AVAILABLE),
             [],
         );
@@ -127,22 +146,22 @@ describe("routing strategies", () => {
         expect(ModelRoutingResult.none().hasUpstream()).toBe(false);
     });
 
-    it("first_available filters out cooling-down (DOWN) upstreams", () => {
-        upstreamHealthService.markFailure(1, "model-1", ApiFormat.OPENAI, new Date());
+    it("first_available filters out cooling-down (DOWN) upstreams", async () => {
+        await upstreamHealthService.markFailure(1, "model-1", ApiFormat.OPENAI, new Date());
         const strategy = new FirstAvailableRoutingStrategy();
 
-        const result = strategy.selectUpstream(
+        const result = await strategy.selectUpstream(
             model(ModelRoutingMode.FIRST_AVAILABLE),
             [candidate(1), candidate(2)],
         );
         expect(result.vendor?.id).toBe(2);
     });
 
-    it("load_balance (按用户随机) skips cooling-down (DOWN) upstreams", () => {
-        upstreamHealthService.markFailure(1, "model-1", ApiFormat.OPENAI, new Date());
+    it("load_balance (按用户随机) skips cooling-down (DOWN) upstreams", async () => {
+        await upstreamHealthService.markFailure(1, "model-1", ApiFormat.OPENAI, new Date());
         const strategy = new LoadBalanceRoutingStrategy();
 
-        const result = strategy.selectUpstream(
+        const result = await strategy.selectUpstream(
             model(ModelRoutingMode.LOAD_BALANCE, "user"),
             [candidate(1), candidate(2)],
             freshRoutingContext(),
@@ -151,13 +170,13 @@ describe("routing strategies", () => {
         expect(result.vendor?.id).toBe(2);
     });
 
-    it("strategies skip upstreams already tried in this request (failover protection)", () => {
+    it("strategies skip upstreams already tried in this request (failover protection)", async () => {
         const candidates = [candidate(1), candidate(2), candidate(3)];
         const routingContext = freshRoutingContext();
         routingContext.markTried(1, "model-1");
 
         // first_available 跳过已试过的 candidate(1)
-        const faResult = new FirstAvailableRoutingStrategy().selectUpstream(
+        const faResult = await new FirstAvailableRoutingStrategy().selectUpstream(
             model(ModelRoutingMode.FIRST_AVAILABLE),
             candidates,
             routingContext,
@@ -165,7 +184,7 @@ describe("routing strategies", () => {
         expect(faResult.vendor?.id).toBe(2);
 
         // single 也跳过已试过的（避免 failover 死循环）
-        const singleResult = new SingleRoutingStrategy().selectUpstream(
+        const singleResult = await new SingleRoutingStrategy().selectUpstream(
             model(ModelRoutingMode.SINGLE),
             candidates,
             routingContext,
@@ -173,7 +192,7 @@ describe("routing strategies", () => {
         expect(singleResult.vendor?.id).toBe(2);
 
         // load_balance 按用户随机跳过已试过的 candidate(1)
-        const lbResult = new LoadBalanceRoutingStrategy().selectUpstream(
+        const lbResult = await new LoadBalanceRoutingStrategy().selectUpstream(
             model(ModelRoutingMode.LOAD_BALANCE, "user"),
             candidates,
             routingContext,
@@ -182,13 +201,13 @@ describe("routing strategies", () => {
         expect(lbResult.vendor?.id).not.toBe(1);
     });
 
-    it("strategies return none when all upstreams are already tried", () => {
+    it("strategies return none when all upstreams are already tried", async () => {
         const candidates = [candidate(1), candidate(2)];
         const routingContext = freshRoutingContext();
         routingContext.markTried(1, "model-1");
         routingContext.markTried(2, "model-2");
 
-        const result = new FirstAvailableRoutingStrategy().selectUpstream(
+        const result = await new FirstAvailableRoutingStrategy().selectUpstream(
             model(ModelRoutingMode.FIRST_AVAILABLE),
             candidates,
             routingContext,
@@ -196,25 +215,39 @@ describe("routing strategies", () => {
         expect(result.vendor).toBeNull();
     });
 
-    it("load_balance (按请求随机) skips cooling-down (DOWN) upstreams", () => {
-        upstreamHealthService.markFailure(1, "model-1", ApiFormat.OPENAI, new Date());
+    it("load_balance (按请求随机) skips cooling-down (DOWN) upstreams", async () => {
+        await upstreamHealthService.markFailure(1, "model-1", ApiFormat.OPENAI, new Date());
         const strategy = new LoadBalanceRoutingStrategy();
         vi.spyOn(Math, "random").mockReturnValue(0.1);
 
-        const result = strategy.selectUpstream(
+        const result = await strategy.selectUpstream(
             model(ModelRoutingMode.LOAD_BALANCE, "request"),
             [candidate(1), candidate(2)],
         );
         expect(result.vendor?.id).toBe(2);
     });
 
-    it("single ignores health status and returns the fixed upstream", () => {
-        upstreamHealthService.markFailure(1, "model-1", ApiFormat.OPENAI, new Date());
+    it("single ignores health status and returns the fixed upstream", async () => {
+        await upstreamHealthService.markFailure(1, "model-1", ApiFormat.OPENAI, new Date());
         const strategy = new SingleRoutingStrategy();
 
-        const result = strategy.selectUpstream(
+        const result = await strategy.selectUpstream(
             model(ModelRoutingMode.SINGLE),
             [candidate(1)],
+        );
+        expect(result.vendor?.id).toBe(1);
+    });
+
+    // ---- 异步链路 + fail-open：冷却查询失败不能把请求路由掉 ----
+
+    it("冷静态后端不可用（fail-open 为 NORMAL）时仍选中原本被冷却的上游", async () => {
+        vi.spyOn(console, "warn").mockImplementation(() => undefined);
+        await upstreamHealthService.markFailure(1, "model-1", ApiFormat.OPENAI, new Date());
+        stateStoreService.setStore(unavailableStore());
+
+        const result = await new FirstAvailableRoutingStrategy().selectUpstream(
+            model(ModelRoutingMode.FIRST_AVAILABLE),
+            [candidate(1), candidate(2)],
         );
         expect(result.vendor?.id).toBe(1);
     });

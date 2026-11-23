@@ -1,6 +1,7 @@
 import packageJson from "../../package.json";
 import { getLogger } from "../util/loggerUtil";
 import versionUtil from "../util/versionUtil";
+import stateStoreService from "./stateStoreService";
 
 interface GitHubRelease {
     tag_name: string;
@@ -19,18 +20,52 @@ interface UpdateStatus {
     error_message?: string;
 }
 
-// Memory cache for update status
-let cachedStatus: UpdateStatus | null = null;
-let lastCheckTime = 0;
+/** 版本检查结果缓存（纯可丢缓存语义：丢了只是多打一次 GitHub API） */
+const UPDATE_CACHE_KEY = "sys:update:latest";
 const CHECK_INTERVAL = 1000 * 60 * 60 * 12; // 12 hours
+
+/**
+ * 读取缓存。fail-open：StateStore 不可用（`StateStoreUnavailableError`）或内容损坏时
+ * 一律当作「没有缓存」，让调用方继续走在线检查 —— 版本检查是纯优化，不能因为它挂了就报错。
+ */
+async function readCache(): Promise<UpdateStatus | null> {
+    try {
+        const raw = await stateStoreService.getStore().get(UPDATE_CACHE_KEY);
+        if (raw === null) {
+            return null;
+        }
+        const parsed = JSON.parse(raw) as UpdateStatus;
+        // 结构对不上（老版本写进来的形状 / 人为破坏）也按未命中处理
+        if (typeof parsed?.latest_version !== "string") {
+            return null;
+        }
+        return parsed;
+    } catch (e) {
+        getLogger()?.warn(`[updateService] 读取版本检查缓存失败（fail-open，继续在线检查）: ${e}`);
+        return null;
+    }
+}
+
+/** 写缓存。fail-open：写失败只记日志，不影响本次结果返回。 */
+async function writeCache(status: UpdateStatus): Promise<void> {
+    try {
+        await stateStoreService.getStore().set(UPDATE_CACHE_KEY, JSON.stringify(status), {
+            ttlMs: CHECK_INTERVAL,
+        });
+    } catch (e) {
+        getLogger()?.warn(`[updateService] 写入版本检查缓存失败（fail-open）: ${e}`);
+    }
+}
 
 async function checkUpdate(force: boolean = false): Promise<UpdateStatus> {
     const currentVersion = packageJson.version;
-    const now = Date.now();
 
-    // Return cached status if within interval
-    if (!force && cachedStatus && (now - lastCheckTime < CHECK_INTERVAL)) {
-        return cachedStatus;
+    // force=true 跳过缓存直接问 GitHub；否则先看缓存（TTL 12h 由 StateStore 负责）
+    if (!force) {
+        const cached = await readCache();
+        if (cached) {
+            return cached;
+        }
     }
 
     const defaultStatus: UpdateStatus = {
@@ -58,7 +93,7 @@ async function checkUpdate(force: boolean = false): Promise<UpdateStatus> {
 
         const release = await response.json() as GitHubRelease;
         let latestVersion = release.tag_name;
-        
+
         // Remove 'v' prefix if exists
         if (latestVersion.startsWith('v')) {
             latestVersion = latestVersion.substring(1);
@@ -75,9 +110,8 @@ async function checkUpdate(force: boolean = false): Promise<UpdateStatus> {
             release_notes: release.body,
         };
 
-        // Cache the result
-        cachedStatus = status;
-        lastCheckTime = now;
+        // Cache the result（失败不影响返回）
+        await writeCache(status);
 
         return status;
     } catch (e) {
