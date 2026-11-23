@@ -34,7 +34,7 @@ const TOKENS_PER_UNIT = 1000;
 
 /** 键数上界缺省值：超过即触发「先回收、再拒绝」（无界增长 = 内存泄漏） */
 const DEFAULT_MAX_KEYS = 10_000;
-/** 空转满桶的空闲回收阈值，与 src/util/rule/memoryRateLimitStore.ts 的 MAX_IDLE_MS 对齐 */
+/** 空转满桶的空闲回收阈值；取值沿用限流令牌桶历史上的 120s（原 `src/util/rule/memoryRateLimitStore.ts` 已下线） */
 const DEFAULT_IDLE_EVICT_MS = 120_000;
 /** 惰性清扫间隔：两次活跃调用间隔超过该值即清扫一次（不挂常驻定时器，Worker 全局作用域不允许） */
 const DEFAULT_CLEANUP_INTERVAL_MS = 60_000;
