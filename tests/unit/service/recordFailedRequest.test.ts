@@ -15,6 +15,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const createMock = vi.fn();
 const updateMock = vi.fn();
 const activityAppendMock = vi.fn();
+// markFailed 在写活动前会做一次「record 还可能存在吗」的守卫（#332），
+// 本文件只关心「写不写活动」，所以守卫恒真，避免把存在性读也拖进这组用例。
+const recordStillExistsMock = vi.fn();
 
 vi.mock("../../../src/manager/recordManager", () => ({
     default: {
@@ -32,6 +35,7 @@ vi.mock("../../../src/service/configService", () => ({
 vi.mock("../../../src/service/requestActivityService", () => ({
     default: {
         append: (...args: unknown[]) => activityAppendMock(...args),
+        recordStillExists: (...args: unknown[]) => recordStillExistsMock(...args),
     },
 }));
 
@@ -59,6 +63,8 @@ describe("recordFailedRequest 重试与结构化日志（P2-11）", () => {
         createMock.mockReset();
         updateMock.mockReset();
         activityAppendMock.mockReset();
+        recordStillExistsMock.mockReset();
+        recordStillExistsMock.mockResolvedValue(true);
         updateMock.mockResolvedValue(makeRecord());
         activityAppendMock.mockResolvedValue(undefined);
         errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -148,5 +154,28 @@ describe("recordFailedRequest 重试与结构化日志（P2-11）", () => {
 
         expect(activityAppendMock).toHaveBeenCalledTimes(1);
         expect(updateMock.mock.calls[0][1]).toMatchObject({ failed_code: FAILED_CODE });
+    });
+
+    // ---- #332：失败收尾也可能在 record 被删除之后才 fire（waitUntil 迟到 ≈185s）----
+
+    it("#332 守卫：record 已删时 markFailed 不写活动行（不产生孤儿活动）", async () => {
+        createMock.mockResolvedValueOnce(makeRecord());
+        recordStillExistsMock.mockResolvedValue(false);
+
+        await call();
+
+        expect(updateMock, "record 收尾照旧执行（UPDATE 命中 0 行即无副作用）").toHaveBeenCalledTimes(1);
+        expect(activityAppendMock, "record 已删 ⇒ 活动行不能写，否则就是清不掉的孤儿").not.toHaveBeenCalled();
+        expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("#332 守卫：存在性检查抛错时不写活动行（异常由上层兜底，不外泄成 500）", async () => {
+        createMock.mockResolvedValueOnce(makeRecord());
+        recordStillExistsMock.mockRejectedValue(new Error("D1 unavailable"));
+
+        // 异常会从 markFailed 抛给 recordFailedRequest，由它兜底（本文件既有契约：
+        // 失败记账不能反过来把请求打成 500）；关键判据是「没写活动行」。
+        await expect(call()).resolves.toBeUndefined();
+        expect(activityAppendMock).not.toHaveBeenCalled();
     });
 });
