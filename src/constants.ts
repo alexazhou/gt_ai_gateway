@@ -34,6 +34,8 @@ export enum FailedCode {
 export enum RuleType {
     RATE_LIMIT = "rate_limit",
     ACCESS_CONTROL = "forbid_access",
+    // 请求插件规则：匹配后按 (priority, id) 顺序执行内置插件（config = { plugin, pluginConfig }）
+    PLUGIN = "plugin",
 }
 
 export enum RequestActivityStage {
@@ -76,6 +78,12 @@ export const MIN_MODEL_PRICE = 0.0001;
 export const MIN_DEDUCTION_UNIT = 0.000001;
 // 余额整数缩放倍数：1 元 = 1_000_000 微元（DB 存整数微元，避免浮点）
 export const BALANCE_SCALE = 1_000_000;
+
+// 规则执行优先级（migrate_0035 引入）：0 ~ 10000 整数，数值越小越先执行，同优先级按规则 id 升序。
+// 默认 100 让用户规则排在三条系统规则（10 / 20 / 30）之后执行。
+export const RULE_PRIORITY_MIN = 0;
+export const RULE_PRIORITY_MAX = 10000;
+export const RULE_PRIORITY_DEFAULT = 100;
 
 export enum ClientName {
     CLAUDE_CODE = "claude-code",

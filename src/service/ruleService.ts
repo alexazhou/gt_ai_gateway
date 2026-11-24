@@ -1,4 +1,4 @@
-import { RuleType } from "../constants";
+import { RULE_PRIORITY_MAX, RULE_PRIORITY_MIN, RuleType } from "../constants";
 import { SgUser } from "../model/sgUser";
 import { SgModel } from "../model/sgModel";
 import { SgVendor } from "../model/sgVendor";
@@ -7,6 +7,7 @@ import ruleManager from "../manager/ruleManager";
 import rateLimitService from "./rateLimitService";
 import customError from "../customError";
 import scopeExpr from "../util/rule/scopeExpr";
+import pluginRegistry from "../plugin/pluginRegistry";
 import type { RequestContext } from "../util/rule/types";
 import type { TenantScope } from "../middleware/tenantScopeMiddleware";
 
@@ -19,6 +20,8 @@ interface RuleCache {
     nonVendorRules: SgRule[];
     // 含 vendor_id 的启用规则：阶段二（路由后）检查
     vendorRules: SgRule[];
+    // 插件规则：选定上游后按 (priority, id) 顺序执行，不参与上面两个准入阶段
+    pluginRules: SgRule[];
     loadedAt: number;
 }
 
@@ -43,9 +46,13 @@ async function getEnabledRules(tenantId: number, mainTenantId: number): Promise<
     }
 
     const rules = await ruleManager.listEnabled(tenantId, mainTenantId);
+    // 插件规则单独成列：它们不在「路由前 / 路由后」两个准入阶段里跑，而是选定上游后按序执行；
+    // 准入规则保持原有分流语义（含 PLUGIN 的规则不参与准入检查）
+    const accessRules = rules.filter((rule) => rule.type !== RuleType.PLUGIN);
     const cache: RuleCache = {
-        nonVendorRules: rules.filter(rule => !scopeExpr.exprReferencesVendor(rule.scope)),
-        vendorRules: rules.filter(rule => scopeExpr.exprReferencesVendor(rule.scope)),
+        nonVendorRules: accessRules.filter(rule => !scopeExpr.exprReferencesVendor(rule.scope)),
+        vendorRules: accessRules.filter(rule => scopeExpr.exprReferencesVendor(rule.scope)),
+        pluginRules: rules.filter((rule) => rule.type === RuleType.PLUGIN),
         loadedAt: now,
     };
     ruleCacheMap.set(key, cache);
@@ -57,15 +64,26 @@ function invalidateCache(): void {
 }
 
 
-/** 校验规则载荷（create / update 共用）：type 已注册、scope 为合法表达式树、config 按 type 校验 */
+/**
+ * 校验规则载荷（create / update 共用）：type 已注册、scope 为合法表达式树、config 按 type 校验。
+ *
+ * 更新是「局部字段」语义：请求体没带 `priority` 就不校验也不覆盖（库中原值保留）；
+ * 带了就必须是 0~10000 的整数（`null` 也算提供了非法值，不做"清空回默认"的隐式解释）。
+ */
 function validateRule(data: Record<string, any>): void {
     const ruleType = data.type;
-    if (ruleType !== RuleType.RATE_LIMIT && ruleType !== RuleType.ACCESS_CONTROL) {
+    if (
+        ruleType !== RuleType.RATE_LIMIT
+        && ruleType !== RuleType.ACCESS_CONTROL
+        && ruleType !== RuleType.PLUGIN
+    ) {
         throw new customError.AppError(`Unsupported rule type: ${String(ruleType)}`);
     }
 
     // scope：合法表达式树（含空 and/or、非法运算符、const 非 [true]、深度超限等拒绝）
     scopeExpr.validateScope(data.scope);
+
+    validatePriority(data.priority);
 
     if (ruleType === RuleType.RATE_LIMIT) {
         // rpm：非负整数或 null（null / 缺省 = 不限制；0 = 不可用；N > 0 = 滑动窗口上限）
@@ -77,13 +95,68 @@ function validateRule(data: Record<string, any>): void {
         ) {
             throw new customError.AppError("config.rpm must be a non-negative integer or null");
         }
-    } else {
+    } else if (ruleType === RuleType.ACCESS_CONTROL) {
         // forbid_access：config 必须为空 {}
         const config = data.config ?? {};
         if (typeof config !== "object" || config === null || Array.isArray(config) || Object.keys(config).length > 0) {
             throw new customError.AppError("forbid_access rule requires an empty config {}");
         }
+    } else {
+        validatePluginRuleConfig(data.config);
     }
+}
+
+
+/** 优先级：0 ~ 10000 的整数；未提供则跳过（局部更新 / 依赖 DB 默认 100） */
+function validatePriority(priority: unknown): void {
+    if (priority === undefined) {
+        return;
+    }
+    if (
+        typeof priority !== "number"
+        || !Number.isInteger(priority)
+        || priority < RULE_PRIORITY_MIN
+        || priority > RULE_PRIORITY_MAX
+    ) {
+        throw new customError.AppError(
+            `priority must be an integer between ${RULE_PRIORITY_MIN} and ${RULE_PRIORITY_MAX}`,
+        );
+    }
+}
+
+
+/**
+ * 插件规则的 config 校验：`{ plugin, pluginConfig }`，插件必须已注册，参数交给插件的 `validateConfig`。
+ *
+ * 这里**不**做参数的表单化渲染或默认值填充（产品边界：插件参数只提供 JSON 文本 + 后端校验）；
+ * 未填 `pluginConfig` 视为 `{}`。
+ */
+function validatePluginRuleConfig(config: unknown): void {
+    if (typeof config !== "object" || config === null || Array.isArray(config)) {
+        throw new customError.AppError("plugin rule requires a config object { plugin, pluginConfig }");
+    }
+
+    const keys = Object.keys(config as Record<string, unknown>);
+    const unknownKeys = keys.filter((key) => key !== "plugin" && key !== "pluginConfig");
+    if (unknownKeys.length > 0) {
+        throw new customError.AppError(`Unknown plugin rule config field(s): ${unknownKeys.join(", ")}`);
+    }
+
+    const { plugin: pluginName, pluginConfig } = config as { plugin?: unknown; pluginConfig?: unknown };
+    if (typeof pluginName !== "string" || pluginName.trim() === "") {
+        throw new customError.AppError("config.plugin is required for plugin rule");
+    }
+
+    const plugin = pluginRegistry.get(pluginName);
+    if (!plugin) {
+        throw new customError.AppError(`Unknown request plugin: ${pluginName}`);
+    }
+
+    const params = pluginConfig ?? {};
+    if (typeof params !== "object" || params === null || Array.isArray(params)) {
+        throw new customError.AppError("config.pluginConfig must be an object");
+    }
+    plugin.validateConfig?.(params as Record<string, unknown>);
 }
 
 
@@ -148,9 +221,56 @@ async function matchAndCheckVendor(user: SgUser, modelConfig: SgModel, vendor: S
     await checkMatchedRules(vendorRules, ctx, true);
 }
 
+/** 命中一条插件规则的匹配结果：规则本体 + 已解析好的插件名与参数 */
+export interface MatchedPluginRule {
+    rule: SgRule;
+    pluginName: string;
+    pluginConfig: Record<string, unknown>;
+}
+
+
+/**
+ * 匹配本次上游的插件规则（选定供应商之后调用，因此 vendor_id 可用）。
+ *
+ * 返回顺序即执行顺序：`(priority ASC, id ASC)` —— 排序来自 `ruleManager.listEnabled` 的 SQL，
+ * 这里**不再排一次**（重复排序只会掩盖上游漏排）。不去重：一条规则命中一次就执行一次，
+ * 后执行的规则在前序结果上继续改写。
+ */
+async function matchPluginRules(
+    user: SgUser,
+    modelConfig: SgModel,
+    vendor: SgVendor,
+    scope: TenantScope,
+): Promise<MatchedPluginRule[]> {
+    const { pluginRules } = await getEnabledRules(scope.tenantId, scope.mainTenantId);
+    if (pluginRules.length === 0) {
+        return [];
+    }
+    const ctx: RequestContext = {
+        user_id: user.id,
+        model_id: Number(modelConfig.id),
+        vendor_id: Number(vendor.id),
+    };
+    const matched: MatchedPluginRule[] = [];
+    for (const rule of pluginRules) {
+        if (!scopeExpr.evalExpr(rule.scope, ctx)) {
+            continue;
+        }
+        const config = (rule.config ?? {}) as { plugin?: unknown; pluginConfig?: unknown };
+        matched.push({
+            rule,
+            pluginName: String(config.plugin ?? ""),
+            pluginConfig: (config.pluginConfig as Record<string, unknown>) ?? {},
+        });
+    }
+    return matched;
+}
+
+
 export default {
     matchAndCheck,
     matchAndCheckVendor,
+    matchPluginRules,
     validateRule,
     invalidateCache,
 };

@@ -184,6 +184,8 @@ app.delete("/tenant/:id", authMiddleware.requireAdmin, tenantScopeMiddleware.ten
 
 // Rule (需要管理员权限)
 app.get("/rule/list.json", authMiddleware.requireAdmin, ruleController.listRules);
+// 必须排在 `/rule/:id` 之前：否则 "plugins.json" 会被当成 rule id
+app.get("/rule/plugins.json", authMiddleware.requireAdmin, ruleController.listPlugins);
 app.get("/rule/:id", authMiddleware.requireAdmin, ruleController.getRule);
 app.post("/rule/create.json", authMiddleware.requireAdmin, ruleController.createRule);
 app.put("/rule/:id", authMiddleware.requireAdmin, ruleController.updateRule);
