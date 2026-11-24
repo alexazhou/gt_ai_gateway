@@ -1,9 +1,20 @@
 import request from '../utils/request';
 import type { ListResult } from '../types';
-import type { Rule, RuleQuery, CreateRuleRequest, UpdateRuleRequest } from '../types/rule';
+import type {
+    Rule,
+    RuleQuery,
+    CreateRuleRequest,
+    UpdateRuleRequest,
+    PluginDescriptor,
+} from '../types/rule';
 
 export async function listRules(params?: RuleQuery): Promise<ListResult<Rule>> {
     return request.get('/rule/list.json', { params });
+}
+
+/** 可用请求插件清单（后端插件注册表描述，按名字升序） */
+export async function listPlugins(): Promise<PluginDescriptor[]> {
+    return request.get('/rule/plugins.json');
 }
 
 export async function getRule(id: number): Promise<Rule> {

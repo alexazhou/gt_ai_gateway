@@ -1,6 +1,9 @@
 import type { BaseEntity, TableQuery } from './index';
 
-export type RuleType = 'rate_limit' | 'forbid_access';
+export type RuleType = 'rate_limit' | 'forbid_access' | 'plugin';
+
+/** 规则来源：system = 系统预置（只读，开关在高级设置），user = 用户自建 */
+export type RuleSource = 'user' | 'system';
 
 export type ScopeField = 'user_id' | 'model_id' | 'vendor_id';
 export type ScopeOperator = '=' | '!=' | 'in' | 'not in';
@@ -36,7 +39,21 @@ export interface AccessControlConfig {
     [key: string]: never;
 }
 
-export type RuleConfig = RateLimitConfig | AccessControlConfig;
+/** plugin 的 config：插件名 + 插件参数（参数合法性由后端 / 插件自身校验） */
+export interface PluginRuleConfig {
+    plugin: string;
+    pluginConfig: Record<string, unknown>;
+}
+
+export type RuleConfig = RateLimitConfig | AccessControlConfig | PluginRuleConfig;
+
+/** 请求插件描述（GET /rule/plugins.json 的元素） */
+export interface PluginDescriptor {
+    name: string;
+    description: string | null;
+    hooks: string[];
+    configExample: Record<string, unknown> | null;
+}
 
 export interface Rule extends BaseEntity {
     type: RuleType;
@@ -48,10 +65,18 @@ export interface Rule extends BaseEntity {
     tenant_id?: number | null;
     /** 跨租户共享标记：1 = 所有租户生效（仅 main 租户规则可置 1） */
     cross_tenant?: boolean;
+    /** 优先级：数值越小越先执行（0~10000，默认 100） */
+    priority: number;
+    /** 规则来源：system 为系统预置，不可编辑 / 删除 */
+    source: RuleSource;
+    /** 系统规则的稳定业务标识（如 SYS:setting:cch_rewrite），用户规则为 null */
+    biz_id?: string | null;
 }
 
 export interface RuleQuery extends TableQuery {
     keyword?: string;
+    /** 按来源过滤；不传 = 后端默认只返回用户规则 */
+    source?: RuleSource;
 }
 
 export interface CreateRuleRequest {
@@ -61,6 +86,7 @@ export interface CreateRuleRequest {
     config: RuleConfig;
     enabled: boolean;
     cross_tenant?: boolean;
+    priority?: number;
 }
 
 export type UpdateRuleRequest = Partial<CreateRuleRequest>;

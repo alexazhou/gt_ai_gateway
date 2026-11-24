@@ -54,6 +54,10 @@
                 <!-- 请求处理 -->
                 <a-tab-pane key="request" tab="请求处理">
                     <div class="settings-list">
+                        <div class="setting-notes">
+                            以下开关对应「规则」页中预置的<strong>系统规则（请求插件）</strong>：
+                            名称 / 匹配条件 / 参数由系统固定，切换开关即调整其启用状态，立即生效
+                        </div>
                         <div class="setting-item">
                             <div class="setting-info">
                                 <div class="setting-title">强制改写 CCH</div>
@@ -74,8 +78,8 @@
                             </div>
                             <div class="setting-action">
                                 <a-switch
-                                    :checked="form.claude_code_tracking_rewrite_enabled"
-                                    @change="form.claude_code_tracking_rewrite_enabled = $event as boolean"
+                                    :checked="form.claudecode_tracking_rewrite_enabled"
+                                    @change="form.claudecode_tracking_rewrite_enabled = $event as boolean"
                                     :disabled="saving"
                                 />
                             </div>
@@ -418,7 +422,7 @@ type RecordPayloadStorage = 'auto' | 'database' | 'r2';
 const originalConfig = reactive({
     cch_rewrite_enabled: false,
     responses_prompt_cache_key_enabled: false,
-    claude_code_tracking_rewrite_enabled: true,
+    claudecode_tracking_rewrite_enabled: true,
     stream_log_enabled: false,
     record_payload_enabled: true,
     record_payload_storage: 'auto' as RecordPayloadStorage,
@@ -432,7 +436,7 @@ const originalConfig = reactive({
 const form = reactive({
     cch_rewrite_enabled: false,
     responses_prompt_cache_key_enabled: false,
-    claude_code_tracking_rewrite_enabled: true,
+    claudecode_tracking_rewrite_enabled: true,
     stream_log_enabled: false,
     record_payload_enabled: true,
     record_payload_storage: 'auto' as RecordPayloadStorage,
@@ -446,7 +450,7 @@ const form = reactive({
 const isDirty = computed(() => {
     return form.cch_rewrite_enabled !== originalConfig.cch_rewrite_enabled ||
            form.responses_prompt_cache_key_enabled !== originalConfig.responses_prompt_cache_key_enabled ||
-           form.claude_code_tracking_rewrite_enabled !== originalConfig.claude_code_tracking_rewrite_enabled ||
+           form.claudecode_tracking_rewrite_enabled !== originalConfig.claudecode_tracking_rewrite_enabled ||
            form.stream_log_enabled !== originalConfig.stream_log_enabled ||
            form.record_payload_enabled !== originalConfig.record_payload_enabled ||
            form.record_payload_storage !== originalConfig.record_payload_storage ||
@@ -481,8 +485,8 @@ async function loadConfig(): Promise<void> {
         form.responses_prompt_cache_key_enabled = config.responses_prompt_cache_key_enabled !== "false";
         originalConfig.responses_prompt_cache_key_enabled = config.responses_prompt_cache_key_enabled !== "false";
 
-        form.claude_code_tracking_rewrite_enabled = config.claude_code_tracking_rewrite_enabled !== "false";
-        originalConfig.claude_code_tracking_rewrite_enabled = config.claude_code_tracking_rewrite_enabled !== "false";
+        form.claudecode_tracking_rewrite_enabled = config.claudecode_tracking_rewrite_enabled !== "false";
+        originalConfig.claudecode_tracking_rewrite_enabled = config.claudecode_tracking_rewrite_enabled !== "false";
 
         form.stream_log_enabled = config.stream_log_enabled === "true";
         originalConfig.stream_log_enabled = config.stream_log_enabled === "true";
@@ -515,7 +519,7 @@ async function loadConfig(): Promise<void> {
 function cancelChanges() {
     form.cch_rewrite_enabled = originalConfig.cch_rewrite_enabled;
     form.responses_prompt_cache_key_enabled = originalConfig.responses_prompt_cache_key_enabled;
-    form.claude_code_tracking_rewrite_enabled = originalConfig.claude_code_tracking_rewrite_enabled;
+    form.claudecode_tracking_rewrite_enabled = originalConfig.claudecode_tracking_rewrite_enabled;
     form.stream_log_enabled = originalConfig.stream_log_enabled;
     form.record_payload_enabled = originalConfig.record_payload_enabled;
     form.record_payload_storage = originalConfig.record_payload_storage;
@@ -666,7 +670,7 @@ async function saveConfig() {
         await updateConfig({
             cch_rewrite_enabled: form.cch_rewrite_enabled ? "true" : "false",
             responses_prompt_cache_key_enabled: form.responses_prompt_cache_key_enabled ? "true" : "false",
-            claude_code_tracking_rewrite_enabled: form.claude_code_tracking_rewrite_enabled ? "true" : "false",
+            claudecode_tracking_rewrite_enabled: form.claudecode_tracking_rewrite_enabled ? "true" : "false",
             stream_log_enabled: form.stream_log_enabled ? "true" : "false",
             record_payload_enabled: form.record_payload_enabled ? "true" : "false",
             record_payload_storage: form.record_payload_storage,
@@ -679,7 +683,7 @@ async function saveConfig() {
         message.success('配置已保存');
         originalConfig.cch_rewrite_enabled = form.cch_rewrite_enabled;
         originalConfig.responses_prompt_cache_key_enabled = form.responses_prompt_cache_key_enabled;
-        originalConfig.claude_code_tracking_rewrite_enabled = form.claude_code_tracking_rewrite_enabled;
+        originalConfig.claudecode_tracking_rewrite_enabled = form.claudecode_tracking_rewrite_enabled;
         originalConfig.stream_log_enabled = form.stream_log_enabled;
         originalConfig.record_payload_enabled = form.record_payload_enabled;
         originalConfig.record_payload_storage = form.record_payload_storage;
@@ -764,6 +768,15 @@ async function saveConfig() {
     font-size: 15px;
     font-weight: 500;
     margin-bottom: 4px;
+}
+
+.setting-notes {
+    font-size: 13px;
+    color: var(--text-secondary);
+    background: var(--bg-info-item, #f5f5f5);
+    border-radius: 6px;
+    padding: 8px 12px;
+    line-height: 1.6;
 }
 
 .setting-desc {

@@ -46,7 +46,27 @@
                             <InfoCircleOutlined class="field-help-icon" />
                         </a-tooltip>
                     </a-radio-button>
+                    <a-radio-button value="plugin">
+                        请求插件
+                        <a-tooltip title="条件命中时对转发前的请求体 / 请求头做改写（仅能改非受保护字段）">
+                            <InfoCircleOutlined class="field-help-icon" />
+                        </a-tooltip>
+                    </a-radio-button>
                 </a-radio-group>
+            </a-form-item>
+            <a-form-item label="优先级" name="priority">
+                <div class="config-row">
+                    <a-input-number
+                        v-model:value="formState.priority"
+                        :min="0"
+                        :max="10000"
+                        :precision="0"
+                        style="width: 160px"
+                    />
+                    <span class="config-hint">
+                        数值越小越先执行（0 ~ 10000，默认 100）；插件按此顺序依次改写，同一字段后执行的生效
+                    </span>
+                </div>
             </a-form-item>
 
             <a-form-item label="匹配条件（scope）" required>
@@ -70,6 +90,32 @@
                     </span>
                 </div>
             </a-form-item>
+            <template v-else-if="formState.type === 'plugin'">
+                <a-form-item label="请求插件" required>
+                    <div class="config-row">
+                        <a-select
+                            v-model:value="formState.pluginName"
+                            :options="pluginOptions"
+                            :loading="pluginsLoading"
+                            placeholder="选择插件"
+                            style="width: 260px"
+                            @change="handlePluginChange"
+                        />
+                        <span class="config-hint">{{ currentPluginHint }}</span>
+                    </div>
+                </a-form-item>
+                <a-form-item label="插件参数（JSON）">
+                    <a-textarea
+                        v-model:value="formState.pluginConfigText"
+                        :rows="6"
+                        placeholder='留空即 {}；例如 {"cchValue": "A1234"}'
+                        class="plugin-config-textarea"
+                    />
+                    <span class="config-hint">
+                        格式仅在前端校验 JSON 合法性，参数含义与取值范围由后端 / 插件自身校验
+                    </span>
+                </a-form-item>
+            </template>
             <a-form-item v-else label="禁止访问参数">
                 <span class="config-hint">无需参数：条件命中即拒绝（403），可表达白名单（not in）等场景</span>
             </a-form-item>
@@ -80,19 +126,31 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
 import { InfoCircleOutlined } from '@ant-design/icons-vue';
-import { createRule, updateRule } from '@/api/rule';
+import { createRule, listPlugins, updateRule } from '@/api/rule';
 import { useTenantStore } from '@/stores/tenant';
 import { listModels } from '@/api/model';
 import { listUsers } from '@/api/user';
 import { listVendors } from '@/api/vendor';
 import ScopeTreeEditor from '@/components/rule/ScopeTreeEditor.vue';
 import { normalizeListResponse } from '@/utils/listResponse';
-import type { ExprNode, LeafNode, LogicNode, Rule, RuleConfig, RuleType, ScopeOptions } from '@/types/rule';
+import type {
+    ExprNode,
+    LeafNode,
+    LogicNode,
+    PluginDescriptor,
+    PluginRuleConfig,
+    Rule,
+    RuleConfig,
+    RuleType,
+    ScopeOptions,
+} from '@/types/rule';
 import { notifyError, notifyRequestError, notifySuccess } from '@/utils/requestFeedback';
 
 const emit = defineEmits<{
     success: [rule: Rule];
 }>();
+
+const DEFAULT_PRIORITY = 100;
 
 const visible = ref(false);
 const loading = ref(false);
@@ -106,8 +164,11 @@ function createDefaultScope(): ExprNode {
 const formState = reactive({
     name: '',
     type: 'rate_limit' as RuleType,
+    priority: DEFAULT_PRIORITY,
     scope: createDefaultScope() as ExprNode,
     config: { rpm: null as number | null },
+    pluginName: '',
+    pluginConfigText: '',
     enabled: true,
     cross_tenant: false,
 });
@@ -136,10 +197,62 @@ async function loadScopeOptions(): Promise<void> {
     }
 }
 
+// 可用请求插件（后端插件注册表）
+const plugins = ref<PluginDescriptor[]>([]);
+const pluginsLoading = ref(false);
+const pluginOptions = computed(() => plugins.value.map(plugin => ({
+    value: plugin.name,
+    label: plugin.description ? `${plugin.name}（${plugin.description}）` : plugin.name,
+})));
+
+const currentPlugin = computed<PluginDescriptor | undefined>(
+    () => plugins.value.find(plugin => plugin.name === formState.pluginName),
+);
+const currentPluginHint = computed(() => {
+    const plugin = currentPlugin.value;
+    if (!plugin) {
+        return '插件清单来自网关插件注册表';
+    }
+    const hooks = plugin.hooks.length > 0 ? plugin.hooks.join(' / ') : '—';
+    return `执行钩子：${hooks}`;
+});
+
+async function loadPlugins(): Promise<void> {
+    if (plugins.value.length > 0 || pluginsLoading.value) {
+        return;
+    }
+    pluginsLoading.value = true;
+    try {
+        const result = await listPlugins();
+        // 后端返回数组；个别代理会包装成 {data: [...]}，两种都兼容
+        const list = Array.isArray(result) ? result : ((result as unknown as { data?: PluginDescriptor[] }).data ?? []);
+        plugins.value = list;
+    } catch (e) {
+        console.error('[RuleDialog] Failed to load plugins:', e);
+    } finally {
+        pluginsLoading.value = false;
+    }
+}
+
+/** 选中插件后若参数还是空的，用插件自带的 configExample 作起始值 */
+function handlePluginChange(): void {
+    const plugin = currentPlugin.value;
+    if (!plugin) {
+        return;
+    }
+    if (formState.pluginConfigText.trim() !== '') {
+        return;
+    }
+    if (plugin.configExample && Object.keys(plugin.configExample).length > 0) {
+        formState.pluginConfigText = JSON.stringify(plugin.configExample, null, 2);
+    }
+}
+
 function openCreate(): void {
     resetForm();
     currentId.value = 0;
     void loadScopeOptions();
+    void loadPlugins();
     visible.value = true;
 }
 
@@ -148,6 +261,7 @@ function openEdit(rule: Rule): void {
     currentId.value = rule.id;
     formState.name = rule.name;
     formState.type = rule.type;
+    formState.priority = typeof rule.priority === 'number' ? rule.priority : DEFAULT_PRIORITY;
     // 列表数据的 scope 是 Vue 响应式 Proxy，structuredClone 无法克隆；JSON 深拷贝即可
     formState.scope = JSON.parse(JSON.stringify(rule.scope)) as ExprNode;
     formState.enabled = Boolean(rule.enabled);
@@ -158,24 +272,62 @@ function openEdit(rule: Rule): void {
     } else {
         formState.config.rpm = null;
     }
+    if (rule.type === 'plugin') {
+        const config = rule.config as PluginRuleConfig;
+        formState.pluginName = config.plugin ?? '';
+        formState.pluginConfigText = config.pluginConfig
+            ? JSON.stringify(config.pluginConfig, null, 2)
+            : '';
+        void loadPlugins();
+    }
     void loadScopeOptions();
     visible.value = true;
 }
 
-// type 切换时重置 config
+// type 切换时重置 config / 插件参数
 watch(() => formState.type, () => {
-    if (formState.type === 'forbid_access') {
+    if (formState.type !== 'rate_limit') {
         formState.config.rpm = null;
+    }
+    if (formState.type === 'plugin') {
+        void loadPlugins();
+        // 未选插件时默认取第一个，避免提交空插件名
+        const firstPlugin = plugins.value[0];
+        if (!formState.pluginName && firstPlugin) {
+            formState.pluginName = firstPlugin.name;
+            handlePluginChange();
+        }
     }
 });
 
 function resetForm(): void {
     formState.name = '';
     formState.type = 'rate_limit';
+    formState.priority = DEFAULT_PRIORITY;
     formState.scope = createDefaultScope();
     formState.config.rpm = null;
+    formState.pluginName = '';
+    formState.pluginConfigText = '';
     formState.enabled = true;
     formState.cross_tenant = false;
+}
+
+/** 解析插件参数 JSON：空文本视为 {}，非对象 / 非法 JSON 返回 null */
+function parsePluginConfig(text: string): Record<string, unknown> | null {
+    const trimmed = text.trim();
+    if (trimmed === '') {
+        return {};
+    }
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(trimmed);
+    } catch {
+        return null;
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return null;
+    }
+    return parsed as Record<string, unknown>;
 }
 
 async function handleOk(): Promise<void> {
@@ -184,13 +336,28 @@ async function handleOk(): Promise<void> {
         return;
     }
 
-    const config: RuleConfig = formState.type === 'rate_limit'
-        ? { rpm: formState.config.rpm }
-        : {};
+    let config: RuleConfig;
+    if (formState.type === 'rate_limit') {
+        config = { rpm: formState.config.rpm };
+    } else if (formState.type === 'plugin') {
+        if (!formState.pluginName) {
+            notifyError('请选择请求插件');
+            return;
+        }
+        const pluginConfig = parsePluginConfig(formState.pluginConfigText);
+        if (pluginConfig === null) {
+            notifyError('插件参数必须是合法的 JSON 对象');
+            return;
+        }
+        config = { plugin: formState.pluginName, pluginConfig } as PluginRuleConfig;
+    } else {
+        config = {};
+    }
 
     const requestData = {
         type: formState.type,
         name: formState.name.trim(),
+        priority: formState.priority ?? DEFAULT_PRIORITY,
         scope: formState.scope,
         config,
         enabled: formState.enabled,
@@ -271,5 +438,9 @@ defineExpose({ openCreate, openEdit });
 .config-hint {
     color: var(--text-secondary);
     font-size: 12px;
+}
+
+.plugin-config-textarea {
+    font-family: var(--font-mono, monospace);
 }
 </style>

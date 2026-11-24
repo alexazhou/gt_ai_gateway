@@ -23,6 +23,41 @@
                                 <span class="activity-detail-key">{{ getDetailLabel('vendor_name') }}</span>
                                 <span class="activity-detail-value">{{ formatVendor(item) }}</span>
                             </div>
+                            <div v-else-if="key === 'executed'" class="activity-plugin-block">
+                                <div class="activity-detail-key">{{ getDetailLabel(key) }}</div>
+                                <div v-if="asPluginEntries(value).length === 0" class="activity-detail-value">-</div>
+                                <!-- 按后端执行顺序（priority 升序）逐条展示，不再二次排序 -->
+                                <div
+                                    v-for="(entry, entryIndex) in asPluginEntries(value)"
+                                    :key="entryIndex"
+                                    class="activity-plugin-entry"
+                                >
+                                    <a-tag color="purple" class="activity-plugin-hook">
+                                        {{ getHookLabel(entry.hook) }}
+                                    </a-tag>
+                                    <span class="activity-plugin-name">{{ entry.plugin || '-' }}</span>
+                                    <span class="activity-plugin-meta">
+                                        规则：{{ formatPluginRule(entry.rule) }} · 优先级 {{ entry.priority ?? '-' }}
+                                    </span>
+                                    <span class="activity-plugin-paths">生效路径：{{ formatPluginPaths(entry.paths) }}</span>
+                                </div>
+                            </div>
+                            <div v-else-if="key === 'issues'" class="activity-plugin-block">
+                                <div class="activity-detail-key">{{ getDetailLabel(key) }}</div>
+                                <div v-if="asPluginEntries(value).length === 0" class="activity-detail-value">-</div>
+                                <div
+                                    v-for="(issue, issueIndex) in asPluginEntries(value)"
+                                    :key="issueIndex"
+                                    class="activity-plugin-entry"
+                                >
+                                    <a-tag color="orange" class="activity-plugin-hook">
+                                        {{ getHookLabel(issue.hook) }}
+                                    </a-tag>
+                                    <span class="activity-plugin-name">{{ issue.plugin || '-' }}</span>
+                                    <span class="activity-plugin-meta">规则：{{ formatPluginRule(issue.rule) }}</span>
+                                    <span class="activity-plugin-issue">{{ issue.reason || '-' }}</span>
+                                </div>
+                            </div>
                             <div v-else-if="isDetailGroup(value)" class="activity-detail-group">
                                 <div class="activity-detail-group-title">{{ getDetailLabel(key) }}</div>
                                 <div class="activity-detail-group-content">
@@ -102,6 +137,8 @@ const DETAIL_LABELS: Record<string, string> = {
     client: '客户端',
     upstream: '上游',
     strategy: '路由策略',
+    executed: '插件执行',
+    issues: '插件异常',
 };
 
 // 路由策略值 → 中文标签
@@ -116,6 +153,51 @@ const GROUP_INNER_LABELS: Record<string, Record<string, string>> = {
     client: { model: '请求模型', format: '请求协议' },
     upstream: { vendor: '供应商', vendor_model: '上游模型', format: '上游协议' },
 };
+
+/** 插件时间线的单条记录（executed / issues 共用；缺失字段按空渲染） */
+interface PluginEntryView {
+    hook?: string;
+    plugin?: string;
+    rule?: { id?: number; name?: string } | null;
+    priority?: number;
+    paths?: string[];
+    reason?: string;
+}
+
+const HOOK_LABELS: Record<string, string> = {
+    before_conversion: '转换前',
+    after_conversion: '转换后',
+};
+
+function getHookLabel(hook?: string): string {
+    if (!hook) return '-';
+    return HOOK_LABELS[hook] ?? hook;
+}
+
+function asPluginEntries(value: unknown): PluginEntryView[] {
+    if (!Array.isArray(value)) return [];
+    return value.filter(item => item !== null && typeof item === 'object') as PluginEntryView[];
+}
+
+function formatPluginRule(rule?: { id?: number; name?: string } | null): string {
+    if (!rule) return '-';
+    if (rule.name && rule.id != null) return `${rule.name}（#${rule.id}）`;
+    if (rule.name) return rule.name;
+    if (rule.id != null) return `#${rule.id}`;
+    return '-';
+}
+
+// 生效路径：请求体为 JSON Pointer（如 /system/0/text），请求头为 header:<小写头名>
+function formatPluginPaths(paths?: string[]): string {
+    if (!paths || paths.length === 0) return '-';
+    return paths
+        .map((path) => {
+            if (typeof path !== 'string') return String(path);
+            if (path.startsWith('header:')) return `请求头 ${path.slice('header:'.length)}`;
+            return `请求体 ${path}`;
+        })
+        .join('、');
+}
 
 function isDetailGroup(value: unknown): boolean {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -281,6 +363,50 @@ function formatVendor(item: RecordActivityEntry): string {
 .activity-detail-key-inline {
     color: var(--text-secondary, #999);
     flex-shrink: 0;
+}
+
+.activity-plugin-block {
+    margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.activity-plugin-block .activity-detail-key {
+    margin-bottom: 2px;
+}
+
+.activity-plugin-entry {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-left: 8px;
+    border-left: 2px solid var(--border-color, #f0f0f0);
+    font-size: 12px;
+}
+
+.activity-plugin-hook {
+    margin-inline-end: 0;
+}
+
+.activity-plugin-name {
+    color: var(--text-primary, #333);
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
+.activity-plugin-meta {
+    color: var(--text-secondary, #999);
+}
+
+.activity-plugin-paths,
+.activity-plugin-issue {
+    color: var(--text-primary, #333);
+    word-break: break-all;
+}
+
+.activity-plugin-issue {
+    color: var(--color-warning, #d46b08);
 }
 
 .activity-response-block {
