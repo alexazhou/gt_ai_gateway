@@ -104,7 +104,10 @@ describe("Rule API", () => {
         expect(created.body.enabled).toBe(true);
 
         // list
-        const list = await requestHelper.get("/rule/list.json", adminToken);
+        // 注意：列表自 migrate_0035 起按执行顺序 (priority ASC, id ASC) 返回，
+        // 而清表后会重建三条系统规则（priority 10/20/30），所以新建的用户规则（默认 100）
+        // 不再排在第一个 —— 这里按 id 定位而不是取下标 0。
+        const list = await requestHelper.get("/rule/list.json?source=user", adminToken);
         expect(list.status).toBe(200);
         expect(list.body.total).toBe(1);
         expect(list.body.list[0].id).toBe(created.body.id);

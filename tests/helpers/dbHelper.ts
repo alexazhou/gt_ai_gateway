@@ -5,8 +5,9 @@ import { existsSync, unlinkSync } from "fs";
 import config from "../config";
 import { DBAdapter } from "../../src/util/db/dbAdapter";
 import { migrate as runMigrations } from "../../src/service/dbMigrationService";
-import configService from "../../src/service/configService";
+import configService, { ConfigItem } from "../../src/service/configService";
 import tenantService from "../../src/service/tenantService";
+import { RULE_SOURCE, SYSTEM_PLUGIN_RULES } from "../../src/plugin/systemRules";
 import stateStoreService from "../../src/service/stateStoreService";
 
 // Worker mode configuration - use test database
@@ -423,6 +424,42 @@ async function cleanup(): Promise<void> {
 }
 
 /**
+ * 清表后重建三条系统规则（`migrate_0035` 在真库上预置的那三条）。
+ *
+ * 为什么必须在 truncate 里做：系统规则是**请求处理的运行期真源**（插件是否生效、高级设置开关
+ * 是否有效都看它）。truncate 清空 rule 表后不重建的话，会出现两种都很糟的情况：
+ * 1) 改高级设置开关的用例拿到 500（configService 找不到 biz_id 对应的规则）；
+ * 2) 请求路径上三个插件**静默不生效** —— 「没有规则 = 不执行」是正常路径，不会报错，
+ *    于是全量测试照样绿，但没人知道规则没了。
+ *
+ * 内容来源 `SYSTEM_PLUGIN_RULES`（TS 单一真源），`enabled` 取清表后 configService 实际会读到的值
+ * （此时 config 表已清空 ⇒ 三个开关都是默认值），保证「规则状态 == 开关状态」这条不变量在测试库里也成立。
+ */
+async function seedSystemRules(): Promise<void> {
+    const values: string[] = [];
+    for (const definition of SYSTEM_PLUGIN_RULES) {
+        // 刻意不走 configService.getConfig()：它底层是 ORM，而 API 测试进程里 ORM 并未连接
+        // （ORM 只在被测服务子进程里连）。这里用裸 SQL 读现值 + configService 导出的同一份默认值。
+        const rows = await query<{ value: string }>(
+            `SELECT value FROM config WHERE name = '${definition.configKey}'`,
+        );
+        const enabled = new ConfigItem(rows[0]?.value, configService.getConfigDefault(definition.configKey)).getBoolean() ? 1 : 0;
+        const scope = JSON.stringify({ type: "const", values: [true] });
+        const config = JSON.stringify({ plugin: definition.plugin, pluginConfig: definition.pluginConfig });
+        values.push(
+            `('plugin', '${definition.name}', '${scope}', '${config}', ${enabled}, `
+            + `(SELECT id FROM tenant WHERE name = 'main'), 1, ${definition.priority}, `
+            + `'${RULE_SOURCE.SYSTEM}', '${definition.bizId}')`,
+        );
+    }
+    await execute(
+        "INSERT INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id) "
+        + `VALUES ${values.join(", ")}`,
+    );
+}
+
+
+/**
  * 清表后重建 main 主租户（多租户隔离）：truncate 会清掉 tenant 表，不重建则
  * tenantService.getMainTenantId() 失败，所有租户逻辑在测试里不可用。
  */
@@ -488,6 +525,9 @@ async function truncate(): Promise<void> {
         // Clear in-memory config cache so tests don't leak state across runs
         configService.clearCache();
 
+        // 系统规则是运行期真源，清表后必须重建（见 seedSystemRules 注释）
+        await seedSystemRules();
+
         await clearServerCache();
         return;
     }
@@ -522,6 +562,9 @@ async function truncate(): Promise<void> {
 
     // Clear config cache to ensure test isolation
     configService.clearCache();
+
+    // 系统规则是运行期真源，清表后必须重建（见 seedSystemRules 注释）
+    await seedSystemRules();
 
     // Also clear the server process's config cache
     await clearServerCache();
@@ -623,6 +666,7 @@ export default {
     truncate,       // DELETE cleanup
     query,
     execute,
+    seedSystemRules,
     getAdapter,
     close,
 };

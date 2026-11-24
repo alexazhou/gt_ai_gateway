@@ -3,6 +3,7 @@ import { setupAdminUser } from "../../globalSetup";
 import dbHelper from "../../helpers/dbHelper";
 import requestHelper from "../../helpers/requestHelper";
 import userFixtures from "../../fixtures/userFixtures";
+import { SYSTEM_PLUGIN_RULES } from "../../../src/plugin/systemRules";
 
 /**
  * 规则「来源 + 优先级」的接口层行为（T3，design/2026-11-24-generic-plugin step2_technical §3.1~§3.3）：
@@ -14,20 +15,18 @@ import userFixtures from "../../fixtures/userFixtures";
  * - `priority` 校验 `0 ~ 10000` 整数，未传则走 DB 默认值 100；
  * - `GET /rule/plugins.json` 不被 `/rule/:id` 抢路由。
  *
- * 系统规则在测试库里没有"迁移残留"——`dbHelper.truncate()` 会清空 rule 表，
- * 所以这里按迁移产出的形态直插三条（T7 会把这段收口进 truncate 的默认初始化）。
+ * 系统规则由 `dbHelper.truncate()` 在清表后重建（`seedSystemRules`）：运行期的开关真源就是这三条，
+ * 不给它们建好，所有"改开关"的用例都会 500、请求路径上的插件还会静默不生效。
  */
 const adminToken = userFixtures.ADMIN_TOKEN;
 
-const SYSTEM_RULES_SQL = `
-INSERT INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id) VALUES
-('plugin', 'sys-tracking', '{"type":"const","values":[true]}', '{"plugin":"claudeCodeTrackingRewriter","pluginConfig":{}}', 1, (SELECT id FROM tenant WHERE name = 'main'), 1, 10, 'system', 'SYS:setting:claudecode_tracking_rewrite'),
-('plugin', 'sys-cch', '{"type":"const","values":[true]}', '{"plugin":"cchRewriter","pluginConfig":{}}', 1, (SELECT id FROM tenant WHERE name = 'main'), 1, 20, 'system', 'SYS:setting:cch_rewrite'),
-('plugin', 'sys-cache-key', '{"type":"const","values":[true]}', '{"plugin":"responsesPromptCacheKeyRewriter","pluginConfig":{}}', 0, (SELECT id FROM tenant WHERE name = 'main'), 1, 30, 'system', 'SYS:setting:responses_prompt_cache_key')
-`;
-
-async function seedSystemRules(): Promise<void> {
-    await dbHelper.execute(SYSTEM_RULES_SQL);
+/** 系统规则按 biz_id 定位（名字/优先级都来自 SYSTEM_PLUGIN_RULES，避免测试里再写死一份） */
+function systemRuleName(bizId: string): string {
+    const definition = SYSTEM_PLUGIN_RULES.find((item) => item.bizId === bizId);
+    if (!definition) {
+        throw new Error(`unknown system rule: ${bizId}`);
+    }
+    return definition.name;
 }
 
 function userRule(overrides: Record<string, unknown> = {}) {
@@ -51,7 +50,6 @@ describe("Rule API: 来源、优先级与只读保护", () => {
     });
 
     it("列表按 (priority ASC, id ASC) 返回执行顺序，不再是创建时间倒序", async () => {
-        await seedSystemRules();
         const late = await createRule(userRule({ name: "p200", priority: 200 }));
         const early = await createRule(userRule({ name: "p50", priority: 50 }));
         expect(late.status).toBe(200);
@@ -59,7 +57,13 @@ describe("Rule API: 来源、优先级与只读保护", () => {
 
         const list = await requestHelper.get("/rule/list.json", adminToken);
         expect(list.status).toBe(200);
-        expect(list.body.list.map((rule: any) => rule.name)).toEqual(["sys-tracking", "sys-cch", "sys-cache-key", "p50", "p200"]);
+        expect(list.body.list.map((rule: any) => rule.name)).toEqual([
+            systemRuleName("SYS:setting:claudecode_tracking_rewrite"),
+            systemRuleName("SYS:setting:cch_rewrite"),
+            systemRuleName("SYS:setting:responses_prompt_cache_key"),
+            "p50",
+            "p200",
+        ]);
         expect(list.body.list.map((rule: any) => rule.priority)).toEqual([10, 20, 30, 50, 200]);
     });
 
@@ -67,14 +71,14 @@ describe("Rule API: 来源、优先级与只读保护", () => {
         const first = await createRule(userRule({ name: "same-a", priority: 100 }));
         const second = await createRule(userRule({ name: "same-b", priority: 100 }));
 
-        const list = await requestHelper.get("/rule/list.json", adminToken);
+        // 只看用户规则区（系统规则优先级 10/20/30 恒在前）
+        const list = await requestHelper.get("/rule/list.json?source=user", adminToken);
         const names = list.body.list.map((rule: any) => rule.name);
         expect(names).toEqual(["same-a", "same-b"]);
         expect(first.body.id).toBeLessThan(second.body.id);
     });
 
     it("?source= 筛选：system 只有系统规则、user 只有用户规则", async () => {
-        await seedSystemRules();
         await createRule(userRule({ name: "mine", priority: 100 }));
 
         const systemList = await requestHelper.get("/rule/list.json?source=system", adminToken);
@@ -94,7 +98,6 @@ describe("Rule API: 来源、优先级与只读保护", () => {
     });
 
     it("系统规则改 / 删一律 403，且数据未被改动", async () => {
-        await seedSystemRules();
         const list = await requestHelper.get("/rule/list.json?source=system", adminToken);
         const cch = list.body.list.find((rule: any) => rule.biz_id === "SYS:setting:cch_rewrite");
 
@@ -112,12 +115,11 @@ describe("Rule API: 来源、优先级与只读保护", () => {
 
         const detail = await requestHelper.get(`/rule/${cch.id}`, adminToken);
         expect(detail.status).toBe(200);
-        expect(detail.body.name).toBe("sys-cch");
+        expect(detail.body.name).toBe(systemRuleName("SYS:setting:cch_rewrite"));
         expect(detail.body.enabled).toBe(true);
     });
 
     it("系统规则的非法请求体也返回 403（只读判定先于参数校验）", async () => {
-        await seedSystemRules();
         const list = await requestHelper.get("/rule/list.json?source=system", adminToken);
         const target = list.body.list[0];
 
@@ -197,7 +199,8 @@ describe("Rule API: 来源、优先级与只读保护", () => {
         });
         expect(created.status).toBe(400);
 
-        const list = await requestHelper.get("/rule/list.json", adminToken);
+        // 清表后重建的 3 条系统规则仍在，但不应多出这条插件规则
+        const list = await requestHelper.get("/rule/list.json?source=user", adminToken);
         expect(list.body.total).toBe(0);
     });
 });

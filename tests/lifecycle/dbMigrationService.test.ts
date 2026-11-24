@@ -202,7 +202,9 @@ describe("dbMigrationService 反向差异（库里有记录、目录里没有该
  * 「新编号迁移 DROP 对象」，`DELETE FROM _migrations` 属于改写历史，明文禁止。
  *
  * 断言按 Operator 2026-11-16 23:10 的新口径：两表消失、**0033 记录保留**、0034 记录在、
- * `pending` 为空、`status()` 版本 34。若有人把 0034 改成删 0033 记录，本用例会红。
+ * `pending` 为空、`status()` 版本 = **当前最新迁移编号**。若有人把 0034 改成删 0033 记录，本用例会红。
+ *
+ * 版本号会随新迁移变化（migrate_0035 起为 35）：它不是本用例关注点，跟着最新编号一起改即可。
  */
 describe("dbMigrationService 收敛：装过 v1.9.1-beta1 的老库（migrate_0034）", () => {
     let db: MigrationTestDb | null = null;
@@ -212,7 +214,7 @@ describe("dbMigrationService 收敛：装过 v1.9.1-beta1 的老库（migrate_00
         db = null;
     });
 
-    it("老库跑一次 migrate()：两表消失、0033 记录保留、0034 记录写入、版本 34", async () => {
+    it("老库跑一次 migrate()：两表消失、0033 记录保留、0034 记录写入、版本 = 最新迁移编号", async () => {
         db = await createMigrationTestDb();
         await dbMigrationService.migrate(db.adapter, "test");
 
@@ -258,7 +260,7 @@ describe("dbMigrationService 收敛：装过 v1.9.1-beta1 的老库（migrate_00
         expect(after.applied.length, "只多出 0034 一条记录").toBe(before.applied.length + 1);
         expect(after.pending).toEqual([]);
 
-        // ③ status() 版本 = 34、待应用 0
+        // ③ status() 版本 = 最新迁移编号（migrate_0035 起为 35）、待应用 0
         const statusLogs: string[] = [];
         const statusSpy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
             statusLogs.push(args.map((a) => String(a)).join(" "));
@@ -269,7 +271,7 @@ describe("dbMigrationService 收敛：装过 v1.9.1-beta1 的老库（migrate_00
             statusSpy.mockRestore();
         }
         const statusOut = statusLogs.join("\n");
-        expect(statusOut).toContain("Current Database Version: 34");
+        expect(statusOut).toContain("Current Database Version: 35");
         expect(statusOut).toContain("Migrations to apply: 0");
     });
 });

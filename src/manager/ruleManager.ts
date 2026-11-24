@@ -65,6 +65,25 @@ async function findByBizId(bizId: string): Promise<SgRule | null> {
     return await SgRule.query().where("biz_id", bizId).first();
 }
 
+/**
+ * 系统规则启停（**仅供高级设置联动**写入）。
+ *
+ * 为什么单独开一个入口：`update` 会走 `assertRuleWritable` 的用户侧只读保护（系统规则 403），
+ * 但高级设置这条路径恰恰是系统规则的合法写入口。这里刻意把可写面收到**只有 `enabled`**——
+ * 名字、优先级、scope、插件参数都不许从配置侧改，避免"改个开关顺手改了规则语义"。
+ *
+ * 返回 null 表示规则不存在（调用方负责报错，不在这里自动创建）。
+ */
+async function setSystemRuleEnabled(bizId: string, enabled: boolean): Promise<SgRule | null> {
+    const rule = await findByBizId(bizId);
+    if (!rule) {
+        return null;
+    }
+    await rule.update({ enabled });
+    notifyInvalidate();
+    return rule;
+}
+
 
 async function findById(ruleId: number): Promise<SgRule | null> {
     return await SgRule.query().find(ruleId);
@@ -187,6 +206,7 @@ export default {
     listEnabled,
     findById,
     findByBizId,
+    setSystemRuleEnabled,
     findByIdInTenant,
     listRules,
     create,

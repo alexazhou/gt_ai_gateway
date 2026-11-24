@@ -163,12 +163,20 @@ describe("ruleService 插件规则 (node, real db)", () => {
             const p20b = await createPluginRule({ name: "p20b", priority: 20 });
             ruleService.invalidateCache();
 
+            // 清表后 dbHelper 会重建三条系统插件规则（priority 10/20/30），它们也会命中 const true
             const matched = await ruleService.matchPluginRules(user(1), model(5), vendor(9), tenantScope());
-            expect(matched.map((item) => item.rule.name)).toEqual(["p10", "p20", "p20b", "p30"]);
-            expect(matched.map((item) => item.rule.id)).toEqual([p10.id, p20.id, p20b.id, p30.id]);
+            // 全量不变式：priority 单调不减（同优先级谁在前由 id 决定，而 sqlite AUTOINCREMENT
+            // 跨用例不重置，系统规则与新建规则的 id 大小关系不固定，所以只断言优先级单调）
+            const priorities = matched.map((item) => item.rule.priority);
+            expect(priorities).toEqual([...priorities].sort((a, b) => a - b));
+            expect(matched.filter((item) => item.rule.source === "system")).toHaveLength(3);
+
+            const userMatched = matched.filter((item) => item.rule.source === "user");
+            expect(userMatched.map((item) => item.rule.name)).toEqual(["p10", "p20", "p20b", "p30"]);
+            expect(userMatched.map((item) => item.rule.id)).toEqual([p10.id, p20.id, p20b.id, p30.id]);
             // 插件名与参数一并解析出来，管线层不用再拆 config
-            expect(matched[0].pluginName).toBe("testPlugin");
-            expect(matched[0].pluginConfig).toEqual({});
+            expect(userMatched[0].pluginName).toBe("testPlugin");
+            expect(userMatched[0].pluginConfig).toEqual({});
         });
 
         it("按 scope 匹配（user_id / model_id / vendor_id），不命中不返回", async () => {
@@ -182,14 +190,18 @@ describe("ruleService 插件规则 (node, real db)", () => {
             });
             ruleService.invalidateCache();
 
+            // 系统规则（const true）恒命中，按来源切出用户规则来断言 scope 语义
+            const userOnly = (matched: Awaited<ReturnType<typeof ruleService.matchPluginRules>>) =>
+                matched.filter((item) => item.rule.source === "user").map((item) => item.rule.name);
+
             const hit9 = await ruleService.matchPluginRules(user(1), model(5), vendor(9), tenantScope());
-            expect(hit9.map((item) => item.rule.name)).toEqual(["only-vendor-9"]);
+            expect(userOnly(hit9)).toEqual(["only-vendor-9"]);
 
             const hit2 = await ruleService.matchPluginRules(user(2), model(5), vendor(7), tenantScope());
-            expect(hit2.map((item) => item.rule.name)).toEqual(["only-user-2"]);
+            expect(userOnly(hit2)).toEqual(["only-user-2"]);
 
             const none = await ruleService.matchPluginRules(user(3), model(5), vendor(7), tenantScope());
-            expect(none).toEqual([]);
+            expect(userOnly(none)).toEqual([]);
         });
 
         it("停用规则、非插件规则都不参与插件管道", async () => {
@@ -205,7 +217,10 @@ describe("ruleService 插件规则 (node, real db)", () => {
             ruleService.invalidateCache();
 
             const matched = await ruleService.matchPluginRules(user(1), model(5), vendor(9), tenantScope());
-            expect(matched.map((item) => item.rule.name)).toEqual(["enabled-one"]);
+            const userNames = matched
+                .filter((item) => item.rule.source === "user")
+                .map((item) => item.rule.name);
+            expect(userNames).toEqual(["enabled-one"]);
         });
 
         it("插件规则不进准入检查：写错 config 的插件规则不该把请求拒掉", async () => {
