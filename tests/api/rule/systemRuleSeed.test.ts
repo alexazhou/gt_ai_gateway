@@ -6,15 +6,11 @@ import userFixtures from "../../fixtures/userFixtures";
 import { SYSTEM_PLUGIN_RULES } from "../../../src/plugin/systemRules";
 
 /**
- * 测试基座的承重不变量：**清表后三条系统规则必须被重建，且 `enabled` 取自配置现值**。
- *
- * 为什么单独立一个文件钉这条（T7 / #354）：
- * - 系统规则是请求期插件是否执行的唯一真源；`dbHelper.truncate()` 清空 rule 表后若不重建，
- *   「没有规则 = 不执行」是正常路径，全量测试**照样绿**，但三个内置插件已静默失效；
- * - 所以这条不变量必须由一个**会变红的用例**守着：把 `truncate()` 里的 `seedSystemRules()`
- *   调用去掉后，本文件必须红（T7 的 R1 变异证明就是这样跑的）；
- * - 同时钉住 `enabled` 的来源：不是写死 true，而是「清表后运行期能读到的配置值」，
- *   否则 `cch_rewrite_enabled`（migrate_0017 预置为 'false'）在测试库和真库上会不一致。
+ * 删除 rule 表里全部记录后，必须重新创建这三条系统规则；
+ * 它们的启用状态要读后台当前的配置开关，不能写死。
+ * 不重建的话，三个插件就不会再运行，而测试仍然全部通过 ——
+ * 把 truncate() 里的 seedSystemRules() 删掉，这个测试文件就会失败。
+ * 详见 shared/gateway-plugin-t7/report.md §五
  */
 const adminToken = userFixtures.ADMIN_TOKEN;
 

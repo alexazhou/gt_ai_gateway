@@ -200,13 +200,10 @@ function isD1LockError(error: unknown): boolean {
 }
 
 /**
- * Helper to run wrangler D1 commands (worker mode only)
- *
- * 为什么要重试：worker 门里上一个测试文件刚结束时，workerd 可能仍持有本地 D1 的写锁，
- * wrangler 会以 `SQLITE_BUSY / database is locked` 失败。这是**瞬时**状态。
- * 不重试时 `clearD1Tables()` 会把失败吞掉（它只 console.error 不抛），紧接着
- * `seedSystemRules()` 对着没清干净的 rule 表 INSERT，撞 `UNIQUE constraint failed: rule.biz_id`
- * —— 报错点离真凶很远（T7 首次 worker 门就踩到了）。只对锁类错误重试，其它错误立刻抛。
+ * 执行一条 wrangler D1 命令（worker 模式专用）。
+ * 上一个测试文件刚结束时，workerd 可能还占着本地 D1 的写锁，wrangler 会报
+ * `SQLITE_BUSY / database is locked`；不重试的话紧接着的建规则会撞 UNIQUE。
+ * 只对锁类错误重试（6 次、250ms 递增），其它错误立刻抛。详见 shared/gateway-plugin-t7/report.md
  */
 function runD1Command(args: string[]): string {
     for (let attempt = 1; ; attempt += 1) {
@@ -460,22 +457,16 @@ async function cleanup(): Promise<void> {
 }
 
 /**
- * 清表后重建三条系统规则（`migrate_0035` 在真库上预置的那三条）。
- *
- * 为什么必须在 truncate 里做：系统规则是**请求处理的运行期真源**（插件是否生效、高级设置开关
- * 是否有效都看它）。truncate 清空 rule 表后不重建的话，会出现两种都很糟的情况：
- * 1) 改高级设置开关的用例拿到 500（configService 找不到 biz_id 对应的规则）；
- * 2) 请求路径上三个插件**静默不生效** —— 「没有规则 = 不执行」是正常路径，不会报错，
- *    于是全量测试照样绿，但没人知道规则没了。
- *
- * 内容来源 `SYSTEM_PLUGIN_RULES`（TS 单一真源），`enabled` 取清表后 configService 实际会读到的值
- * （此时 config 表已清空 ⇒ 三个开关都是默认值），保证「规则状态 == 开关状态」这条不变量在测试库里也成立。
+ * 删除 rule 表里全部记录后，重新创建这三条系统规则（`migrate_0035` 在真库上预置的那三条）。
+ * 启用状态要读后台当前的配置开关，不能写死。
+ * 不重建的话，三个插件就不会再运行，而全量测试仍然全部通过。
+ * 详见 shared/gateway-plugin-t7/report.md §五
  */
 async function seedSystemRules(): Promise<void> {
     const values: string[] = [];
     for (const definition of SYSTEM_PLUGIN_RULES) {
-        // 刻意不走 configService.getConfig()：它底层是 ORM，而 API 测试进程里 ORM 并未连接
-        // （ORM 只在被测服务子进程里连）。这里用裸 SQL 读现值 + configService 导出的同一份默认值。
+        // 不走 configService.getConfig()：它底层是 ORM，而 API 测试进程里 ORM 没连；
+        // 这里用裸 SQL 读当前值 + configService 导出的同一份默认值。
         const rows = await query<{ value: string }>(
             `SELECT value FROM config WHERE name = '${definition.configKey}'`,
         );
@@ -488,9 +479,7 @@ async function seedSystemRules(): Promise<void> {
             + `'${RULE_SOURCE.SYSTEM}', '${definition.bizId}')`,
         );
     }
-    // 幂等：先删掉已有的系统规则再插。
-    // clearD1Tables() 的失败是被吞掉的（只打日志不抛），所以「表没清干净」是可能的；
-    // 没有这一步时重复播种会直接撞 `UNIQUE constraint failed: rule.biz_id`。
+    // 先删再插：clearD1Tables() 失败只打日志不抛，表里可能还有旧行，重复插入会撞 UNIQUE。
     await execute("DELETE FROM rule WHERE source = 'system'");
     await execute(
         "INSERT INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id) "
