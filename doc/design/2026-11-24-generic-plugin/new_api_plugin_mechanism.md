@@ -154,16 +154,16 @@ pkg/jsplugin（宿主运行时：编译校验 / 沙箱 / 超时 / 并发 / 内�
 
 ## 8. 与 gt_ai_gateway 插件设计的对照
 
-> 已按 step2_technical 修订 v2 同步（2026-11-24）。
+> 已按 step2_technical 修订 v3 同步（2026-11-25）。
 
 | 维度 | new-api | gt_ai_gateway（本目录 step2_technical） |
 |---|---|---|
-| 插件形态 | 运行时上传的沙箱 JS，可版本回滚 | 编译期 TS 代码模块，自注册 |
-| 改写方式 | 声明式 effects（json.patch / header.patch） | 声明式 `jsonPatch`（add/replace/remove）+ `headerPatch`，以插件执行项为单位原子应用 |
+| 插件形态 | 运行时上传的沙箱 JS，可版本回滚 | 编译期 TS 代码模块，自注册（插件自身无优先级） |
+| 改写方式 | 声明式 effects（json.patch / header.patch） | 声明式 `bodyPatch` + `headerPatch`，原子应用 |
 | 阶段 | 钩子名与转换位置硬绑定（ingress/outbound/...） | 两个显式 hook 方法 `beforeConversion` / `afterConversion`，方法内按 `context.currentFormat` 自判 |
-| 激活 | 实例配置（global/groups/models/channel 绑定） | 规则 `scope`（user_id/model_id/vendor_id）+ `enabled`；系统规则（`source=system`）与高级设置联动 |
+| 激活与排序 | 实例配置（global/groups/models/channel 绑定） | 规则 `scope`（user_id/model_id/vendor_id）+ `priority`（0~10000 管道执行序）+ `enabled`；系统规则（`source=system`）与高级设置联动 |
 | 保护 | 阶段效应白名单 + 认证头/计费字段直接拒绝 | 前置拒绝：禁根路径、按首段锁 `model`/`stream`/`stream_options`、保护头对齐 `EXCLUDED_HEADERS`；认证头在插件后写入 |
-| 审计 | 专门记录类型，只记计数与路径，强制截断 | activity 只记插件/规则/修改路径/Header key，不记内容 |
+| 审计 | 专门记录类型，只记计数与路径，强制截断 | activity `details.executed` 只记插件/规则/优先级/修改路径/Header key，不记内容 |
 | 信任模型 | 插件 = 管理员级信任，非硬隔离 | 代码即信任边界，无沙箱需求 |
 
 可借鉴点（按价值排序）：
