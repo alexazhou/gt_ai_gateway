@@ -381,10 +381,19 @@ async function markFailed(
     await update(recordId, updateData);
 
     const label = opts.message ?? failedCode ?? "请求失败";
+    const stage = opts.stage ?? RequestActivityStage.RESULT;
+
+    // 存在性守卫（#332）：失败收尾也可能由 waitUntil 在请求结束很久之后才触发（流式请求要等
+    // 上游空闲超时，实测迟到 ≈185s），那时 record 可能已被删除。给已删记录补写活动行会留下
+    // 清不掉的孤儿（`request_activity` 与 record 无外键、删除路径只按现存 id 清）。
+    // 不存在就跳过活动写入，`recordStillExists` 内部已打可诊断 warn。
+    if (!await requestActivityService.recordStillExists(recordId, stage)) {
+        return;
+    }
 
     await requestActivityService.append(
         recordId,
-        opts.stage ?? RequestActivityStage.RESULT,
+        stage,
         label,
         {
             status: SgRecordStatus.FAILED,

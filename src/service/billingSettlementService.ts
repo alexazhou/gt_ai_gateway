@@ -24,7 +24,9 @@ function isMysqlDialect(): boolean {
  * 3. 事务内不读配置 —— `module_billing_enabled` 由调用方在事务外取好后通过 `chargeUserId` 传入，
  *    避免事务期间产生额外 I/O（Worker 下 I/O 上下文敏感）；
  * 4. 活动日志同事务 —— 审计活动的 JSON 追加需要"读改写"，读在事务外完成（buildAppendedActivities），
- *    事务内只留一条按 record_id 唯一键的 UPSERT，保证「记录 + 扣费 + 活动」三步同生共死。
+ *    事务内只留一条按 record_id 唯一键的 UPSERT，保证「记录 + 扣费 + 活动」三步同生共死；
+ * 5. 活动写入带 record 存在性守卫 —— 结算可能由 `waitUntil` 在请求结束很久之后才触发，
+ *    那时 record 可能已被删除；不存在就不写活动行（详见 settleRecord 内注释）。
  *
  * 响应体（response_data）存对象存储，不在表里，写入是幂等的，因此在事务前完成。
  */
@@ -128,9 +130,16 @@ async function settleRecord(input: RecordSettlementInput): Promise<RecordSettlem
     statements.push(buildRecordUpdateSql(input, now));
 
     if (input.activity) {
-        // 读改写里的"读"必须在事务外：事务内只提交最终 JSON 的幂等 upsert
-        const activitiesJson = await requestActivityService.buildAppendedActivities(input.recordId, input.activity);
-        statements.push(buildActivityUpsertSql(input.recordId, activitiesJson, now));
+        // 存在性守卫（#332）：结算可能由 `waitUntil` 在流式请求结束 ~180s 后才触发，
+        // 此时 record 可能已被删除 / 清表。若照旧写入，就会给已删记录补回一行孤儿活动
+        // （`request_activity.record_id` 只与 record 逻辑关联、无外键，删记录时清不掉它；
+        // 表现为「删掉记录后活动行又长回来」，也是 recordDelete 全表 COUNT 偶发 +1 的根因）。
+        // 不存在就整条活动写入跳过，`recordStillExists` 内部已打可诊断 warn（不静默吞掉）。
+        if (await requestActivityService.recordStillExists(input.recordId, input.activity.stage)) {
+            // 读改写里的"读"必须在事务外：事务内只提交最终 JSON 的幂等 upsert
+            const activitiesJson = await requestActivityService.buildAppendedActivities(input.recordId, input.activity);
+            statements.push(buildActivityUpsertSql(input.recordId, activitiesJson, now));
+        }
     }
 
     await ormService.runAtomically(statements);
