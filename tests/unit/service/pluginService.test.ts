@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import pluginService, { type ApplyPluginsOptions } from "../../../src/service/pluginService";
 import type { MatchedPluginRule } from "../../../src/service/ruleService";
 import pluginRegistry from "../../../src/plugin/pluginRegistry";
+import { BUILTIN_PLUGINS } from "../../../src/plugin/builtinPlugins";
 import type { RequestPlugin } from "../../../src/plugin/types";
 import type SgRule from "../../../src/model/sgRule";
 import { ApiFormat } from "../../../src/constants";
@@ -77,6 +78,10 @@ pluginRegistry.registerAll([headerPlugin, throwingPlugin, forbiddenPatchPlugin, 
 
 afterAll(() => {
     pluginRegistry.resetForTest();
+    // worker 门是 `isolate: false`：同一进程里所有测试文件共享这一份插件注册表。
+    // 只 reset 不还原，排在本文件后面的用例（如 pluginContracts 的「内置插件已注册」）
+    // 就会看到一个空注册表——本文件注册的是自己的假插件，收尾必须把内置插件放回去。
+    pluginRegistry.registerAll(BUILTIN_PLUGINS);
 });
 
 describe("pluginService 管线", () => {

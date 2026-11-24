@@ -180,15 +180,51 @@ function createAdapter(): DBAdapter {
     }
 }
 
+/** D1 锁冲突的重试次数与退避基数（worker 门专用，见 runD1Command 注释） */
+const D1_LOCK_RETRY_ATTEMPTS = 6;
+const D1_LOCK_RETRY_BASE_DELAY_MS = 250;
+
+/** 同步睡一小会儿（worker 门的 helper 是同步 API，不能用 await） */
+function sleepSync(ms: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** 是否是「本地 D1 被别的进程短暂锁住」这类瞬时错误 */
+function isD1LockError(error: unknown): boolean {
+    const text = [
+        error instanceof Error ? error.message : String(error),
+        String((error as { stderr?: unknown })?.stderr ?? ""),
+        String((error as { output?: unknown })?.output ?? ""),
+    ].join("\n");
+    return text.includes("database is locked") || text.includes("SQLITE_BUSY");
+}
+
 /**
  * Helper to run wrangler D1 commands (worker mode only)
+ *
+ * 为什么要重试：worker 门里上一个测试文件刚结束时，workerd 可能仍持有本地 D1 的写锁，
+ * wrangler 会以 `SQLITE_BUSY / database is locked` 失败。这是**瞬时**状态。
+ * 不重试时 `clearD1Tables()` 会把失败吞掉（它只 console.error 不抛），紧接着
+ * `seedSystemRules()` 对着没清干净的 rule 表 INSERT，撞 `UNIQUE constraint failed: rule.biz_id`
+ * —— 报错点离真凶很远（T7 首次 worker 门就踩到了）。只对锁类错误重试，其它错误立刻抛。
  */
 function runD1Command(args: string[]): string {
-    return execFileSync(
-        "npx",
-        ["wrangler", "d1", "execute", TEST_DB_NAME, "--local", "--config", TEST_WRANGLER_CONFIG, ...args],
-        { encoding: "utf-8", stdio: "pipe" },
-    );
+    for (let attempt = 1; ; attempt += 1) {
+        try {
+            return execFileSync(
+                "npx",
+                ["wrangler", "d1", "execute", TEST_DB_NAME, "--local", "--config", TEST_WRANGLER_CONFIG, ...args],
+                { encoding: "utf-8", stdio: "pipe" },
+            );
+        } catch (error) {
+            if (attempt >= D1_LOCK_RETRY_ATTEMPTS || !isD1LockError(error)) {
+                throw error;
+            }
+            const delay = D1_LOCK_RETRY_BASE_DELAY_MS * attempt;
+            console.warn(`[WORKER_SETUP] D1 被锁（第 ${attempt} 次），${delay}ms 后重试`);
+            sleepSync(delay);
+        }
+    }
 }
 
 /**
@@ -452,6 +488,10 @@ async function seedSystemRules(): Promise<void> {
             + `'${RULE_SOURCE.SYSTEM}', '${definition.bizId}')`,
         );
     }
+    // 幂等：先删掉已有的系统规则再插。
+    // clearD1Tables() 的失败是被吞掉的（只打日志不抛），所以「表没清干净」是可能的；
+    // 没有这一步时重复播种会直接撞 `UNIQUE constraint failed: rule.biz_id`。
+    await execute("DELETE FROM rule WHERE source = 'system'");
     await execute(
         "INSERT INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id) "
         + `VALUES ${values.join(", ")}`,
