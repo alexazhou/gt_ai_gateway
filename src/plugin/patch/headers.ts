@@ -10,8 +10,8 @@
  *    会与网关的最终写入打架，实际效果取决于写入顺序——这是不可依赖的行为，直接禁掉；
  * 3. **平台元数据头**：`cf-` / `sec-` 前缀由边缘平台注入，同样不允许插件碰。
  *
- * 注意：`GATEWAY_STRIPPED_HEADERS` 与 `senderService` 里构造上游请求头时的排除清单是**同一份语义**，
- * T5 接入时会把 senderService 的本地清单替换成本文件的导出（单一真源），此处先保持字面一致。
+ * 注意：`senderService` 构造上游请求头时的排除清单**直接用本文件的 `GATEWAY_STRIPPED_HEADERS`**，
+ * 不再各写一份（两份清单必然漂移：插件挡住某个头、上游却把客户端那份透传过去）。
  */
 
 /** 鉴权头：任何情况下插件都不得设置或删除 */
@@ -49,6 +49,17 @@ export const PROTECTED_HEADER_PREFIXES: readonly string[] = ["cf-", "sec-"];
 
 /** 受保护头集合（全小写，便于大小写无关比较） */
 export const PROTECTED_HEADERS: ReadonlySet<string> = new Set([
+    ...PROTECTED_AUTH_HEADERS,
+    ...GATEWAY_MANAGED_HEADERS,
+]);
+
+/**
+ * 网关构造上游请求头时要**剥掉**的客户端头集合（大小写无关）。
+ *
+ * 与上面两张表同源：鉴权头由网关重写、管控头由网关重写，客户端带来的都不该透传。
+ * `senderService` 直接用它，避免"插件保护清单"与"上游头过滤清单"各写一份而漂移。
+ */
+export const GATEWAY_STRIPPED_HEADERS: ReadonlySet<string> = new Set([
     ...PROTECTED_AUTH_HEADERS,
     ...GATEWAY_MANAGED_HEADERS,
 ]);

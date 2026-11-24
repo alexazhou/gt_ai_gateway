@@ -23,6 +23,8 @@ import upstreamHealthService from "./upstreamHealthService";
 import abortTimeoutUtil from "../util/abortTimeoutUtil";
 import RoutingContext from "./routingService/routingContext";
 import ruleService from "./ruleService";
+import type { PluginExecutionEntry, PluginIssue } from "./pluginService";
+import { GATEWAY_STRIPPED_HEADERS } from "../plugin/patch/headers";
 
 
 // 可重试的 HTTP 错误响应转成异常，与网络异常汇入同一个失败处理点
@@ -88,6 +90,48 @@ function sanitizeUpstreamHeaders(headers: Headers): Record<string, string> {
 }
 
 
+/**
+ * 写插件时间线。
+ *
+ * 口径（产品文档「执行与容错体验」）：**只有实际发生改写或出问题时才留痕**；
+ * 一次请求一条 `plugin` 事件，`details.executed` 是按执行顺序的数组，前端按 hooks 展示。
+ * - 有改写、无问题 → info；
+ * - 有改写也有问题 → warn（问题放在 details.issues）；
+ * - 只有问题（插件异常/补丁被拒）→ warn，消息写明"执行异常"，此时请求体未被修改。
+ */
+async function writePluginTimeline(
+    recordId: number,
+    executed: PluginExecutionEntry[],
+    issues: PluginIssue[],
+): Promise<void> {
+    if (executed.length === 0 && issues.length === 0) {
+        return;
+    }
+
+    if (executed.length > 0) {
+        await requestActivityService.append(
+            recordId,
+            RequestActivityStage.PLUGIN,
+            "应用请求插件",
+            {
+                executed,
+                ...(issues.length > 0 ? { issues } : {}),
+            },
+            issues.length > 0 ? ActivityLevel.WARN : ActivityLevel.INFO,
+        );
+        return;
+    }
+
+    await requestActivityService.append(
+        recordId,
+        RequestActivityStage.PLUGIN,
+        "请求插件执行异常（未改写，请求已照常转发）",
+        { issues },
+        ActivityLevel.WARN,
+    );
+}
+
+
 async function sendRequestToUpstream(
     c: Context,
     user: SgUser,
@@ -123,61 +167,28 @@ async function sendRequestToUpstream(
         upstream_format: upstreamFormat !== clientFormat ? upstreamFormat : null,
     });
 
-    // 2. 构建上游请求 headers，过滤掉 Cloudflare 注入的 cf- 前缀 header
-    // 并且必须排除客户端自带的鉴权 header，避免泄露或导致合并错误
-    // 同时排除浏览器相关的元数据 header，避免上游校验失败
-    const finalHeaders = new Headers();
+    // 2. 构建上游请求头：**这一步只拷客户端头，鉴权头与 Content-Type 等插件跑完再写**（见步骤 8）
+    //
+    // 为什么要拆成两步：插件可以通过 headerPatch 改请求头，而鉴权头必须由网关最后注入
+    // （双重保障）——若先把 x-api-key 写进去，插件就有机会改到它（虽然补丁层也会拒，
+    // 但"靠两层都拦"不如"让插件根本碰不到"）。
+    // 过滤规则：边缘平台注入的 cf-/sec- 前缀头 + 客户端自带的鉴权头/浏览器元数据头
+    // （清单与插件保护清单同源：`GATEWAY_STRIPPED_HEADERS`）。
+    let finalHeaders = new Headers();
     // 客户端声明的 anthropic-version 透传给上游（不同版本的能力集不同，写死等于锁死上游版本）；
     // 客户端没带时回落到我们适配过的默认版本
     const clientAnthropicVersion = c.req.header("anthropic-version");
-    const EXCLUDED_HEADERS = [
-        "authorization",
-        "x-api-key",
-        "anthropic-version",
-        "content-length",
-        "host",
-        "origin",
-        "referer",
-        "connection",
-        "keep-alive",
-        "proxy-authenticate",
-        "proxy-authorization",
-        "te",
-        "trailer",
-        "transfer-encoding",
-        "upgrade",
-        "cookie",
-        "accept",
-        "accept-encoding",
-        "accept-language",
-        "priority",
-        "user-agent",
-    ];
 
     for (const [key, value] of c.req.raw.headers.entries()) {
         const lowerKey = key.toLowerCase();
         if (
             !lowerKey.startsWith("cf-") &&
             !lowerKey.startsWith("sec-") &&
-            !EXCLUDED_HEADERS.includes(lowerKey)
+            !GATEWAY_STRIPPED_HEADERS.has(lowerKey)
         ) {
             finalHeaders.set(key, value);
         }
     }
-
-    if (upstreamFormat === ApiFormat.ANTHROPIC) {
-        if (vendor.config.auth_mode === VendorAuthMode.BEARER_TOKEN) {
-            finalHeaders.set("Authorization", vendor.token.startsWith("Bearer ") ? vendor.token : `Bearer ${vendor.token}`);
-        } else {
-            finalHeaders.set("x-api-key", vendor.token);
-            finalHeaders.set("anthropic-version", clientAnthropicVersion || DEFAULT_ANTHROPIC_VERSION);
-        }
-    } else {
-        finalHeaders.set("Authorization", vendor.token.startsWith("Bearer ") ? vendor.token : `Bearer ${vendor.token}`);
-    }
-
-    // 强制设置 content-type
-    finalHeaders.set("Content-Type", "application/json");
 
     // 3. 替换上游模型名
     //
@@ -205,17 +216,31 @@ async function sendRequestToUpstream(
         }
     }
 
-    // 4. 应用插件 (转换前)
+    // 4. 匹配本次上游命中的插件规则（选定上游后才有 vendor_id；failover 换供应商会重新走到这里）
     const hostKey = await hostService.getHostKey();
-    const prePluginBody = upstreamBody;
-    upstreamBody = await pluginService.applyRequestPlugins(upstreamBody, clientFormat, hostKey, user.name);
-    if (upstreamBody !== prePluginBody) {
-        await requestActivityService.append(recordId, RequestActivityStage.PLUGIN, "应用请求插件（转换前）", {
-            format: clientFormat,
-            body_len_before: prePluginBody.length,
-            body_len_after: upstreamBody.length,
-        });
-    }
+    const matchedPluginRules = await ruleService.matchPluginRules(user, modelConfig, vendor, c.get("tenantScope")!);
+    const pluginContext = {
+        clientModel: clientModelName,
+        clientFormat,
+        upstreamFormat,
+        hostKey,
+        clientName: user.name,
+    };
+    const pluginExecuted: PluginExecutionEntry[] = [];
+    const pluginIssues: PluginIssue[] = [];
+
+    // 5. 应用插件（转换前）：按 (priority ASC, id ASC) 逐条执行，补丁落在请求体/头上
+    const beforePlugins = await pluginService.applyRequestPlugins({
+        hook: "before_conversion",
+        body: upstreamBody,
+        headers: finalHeaders,
+        matchedRules: matchedPluginRules,
+        context: { ...pluginContext, currentFormat: clientFormat },
+    });
+    upstreamBody = beforePlugins.body;
+    finalHeaders = beforePlugins.headers;
+    pluginExecuted.push(...beforePlugins.executed);
+    pluginIssues.push(...beforePlugins.issues);
 
     let converter: BaseConverter | null = null;
     if (needsConversion) {
@@ -260,7 +285,7 @@ async function sendRequestToUpstream(
     } catch (e) {}
     converter?.updateModel(requestModel);
 
-    // 5. OpenAI 流式请求注入 stream_options，让上游在最后一帧返回 usage
+    // 6. OpenAI 流式请求注入 stream_options，让上游在最后一帧返回 usage
     if (upstreamFormat === ApiFormat.OPENAI) {
         try {
             const bodyJson = JSON.parse(upstreamBody);
@@ -273,18 +298,39 @@ async function sendRequestToUpstream(
         }
     }
 
-    // 6. 应用插件 (转换后)
+    // 7. 应用插件（转换后）：仅跨协议时触发（同协议直通没有"转换后"阶段）
     if (needsConversion) {
-        const prePostPluginBody = upstreamBody;
-        upstreamBody = await pluginService.applyRequestPlugins(upstreamBody, upstreamFormat, hostKey, user.name);
-        if (upstreamBody !== prePostPluginBody) {
-            await requestActivityService.append(recordId, RequestActivityStage.PLUGIN, "应用请求插件（转换后）", {
-                format: upstreamFormat,
-                body_len_before: prePostPluginBody.length,
-                body_len_after: upstreamBody.length,
-            });
-        }
+        const afterPlugins = await pluginService.applyRequestPlugins({
+            hook: "after_conversion",
+            body: upstreamBody,
+            headers: finalHeaders,
+            matchedRules: matchedPluginRules,
+            context: { ...pluginContext, currentFormat: upstreamFormat },
+        });
+        upstreamBody = afterPlugins.body;
+        finalHeaders = afterPlugins.headers;
+        pluginExecuted.push(...afterPlugins.executed);
+        pluginIssues.push(...afterPlugins.issues);
     }
+
+    // 8. 插件跑完之后才写鉴权头与 Content-Type（双重保障：插件永远改不到鉴权头）
+    if (upstreamFormat === ApiFormat.ANTHROPIC) {
+        if (vendor.config.auth_mode === VendorAuthMode.BEARER_TOKEN) {
+            finalHeaders.set("Authorization", vendor.token.startsWith("Bearer ") ? vendor.token : `Bearer ${vendor.token}`);
+        } else {
+            finalHeaders.set("x-api-key", vendor.token);
+            finalHeaders.set("anthropic-version", clientAnthropicVersion || DEFAULT_ANTHROPIC_VERSION);
+        }
+    } else {
+        finalHeaders.set("Authorization", vendor.token.startsWith("Bearer ") ? vendor.token : `Bearer ${vendor.token}`);
+    }
+
+    // 强制设置 content-type
+    finalHeaders.set("Content-Type", "application/json");
+
+    // 9. 插件留痕：一次请求只写**一条** plugin 阶段事件，`details.executed` 是按执行顺序的数组
+    // （元素含 hook / plugin / rule / priority / paths，只记路径不记内容）
+    await writePluginTimeline(recordId, pluginExecuted, pluginIssues);
 
     await streamLogService.writeRequestLog(record, upstreamBody);
 
