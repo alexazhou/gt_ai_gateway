@@ -8,8 +8,8 @@ import { SYSTEM_PLUGIN_RULES } from "../../../src/plugin/systemRules";
 /**
  * 删除 rule 表里全部记录后，必须重新创建这三条系统规则；
  * 它们的启用状态要读后台当前的配置开关，不能写死。
- * 不重建的话，三个插件就不会再运行，而测试仍然全部通过 ——
- * 把 truncate() 里的 seedSystemRules() 删掉，这个测试文件就会失败。
+ * 不重建的话，三个插件就不会再运行，这个测试文件也会失败。
+ * 实测：把 truncate() 里的 seedSystemRules() 删掉，全量 1818 例里有 23 例变红（8 个文件）。
  * 详见 shared/gateway-plugin-t7/report.md §五
  */
 const adminToken = userFixtures.ADMIN_TOKEN;

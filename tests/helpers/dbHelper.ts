@@ -459,7 +459,7 @@ async function cleanup(): Promise<void> {
 /**
  * 删除 rule 表里全部记录后，重新创建这三条系统规则（`migrate_0035` 在真库上预置的那三条）。
  * 启用状态要读后台当前的配置开关，不能写死。
- * 不重建的话，三个插件就不会再运行，而全量测试仍然全部通过。
+ * 不重建的话，三个插件就不会再运行；把 truncate() 里的本函数删掉，全量用例会红 23 例（8 个文件）。
  * 详见 shared/gateway-plugin-t7/report.md §五
  */
 async function seedSystemRules(): Promise<void> {
