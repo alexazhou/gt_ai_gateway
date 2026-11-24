@@ -8,6 +8,8 @@ import rateLimitService from "./rateLimitService";
 import customError from "../customError";
 import scopeExpr from "../util/rule/scopeExpr";
 import pluginRegistry from "../plugin/pluginRegistry";
+// 内置插件注册（模块副作用）：保存规则时要按名校验 config.plugin 是否存在
+import "../plugin/builtinPlugins";
 import type { RequestContext } from "../util/rule/types";
 import type { TenantScope } from "../middleware/tenantScopeMiddleware";
 
