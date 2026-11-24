@@ -315,6 +315,14 @@
     },
     {
       "method": "GET",
+      "path": "/rule/plugins.json",
+      "command": "gtgw rule plugins",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
       "path": "/stats/dashboard.json",
       "command": "gtgw dashboard",
       "phase": "P1",

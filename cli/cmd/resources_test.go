@@ -492,6 +492,14 @@ func TestP2CommandRoutes(t *testing.T) {
 		},
 		{name: "tenant delete -y", args: []string{"tenant", "delete", "3", "-y"}, method: http.MethodDelete, path: "/tenant/3"},
 		{name: "rule list", args: []string{"rule", "list"}, method: http.MethodGet, path: "/rule/list.json"},
+		{
+			// v3 起列表按来源切分：--source 必须原样透传成后端参数（不带 = 服务端默认只回用户规则）
+			name:   "rule list --source system",
+			args:   []string{"rule", "list", "--source", "system"},
+			method: http.MethodGet, path: "/rule/list.json",
+			query: map[string]string{"source": "system"},
+		},
+		{name: "rule plugins", args: []string{"rule", "plugins"}, method: http.MethodGet, path: "/rule/plugins.json"},
 		{name: "rule get", args: []string{"rule", "get", "5"}, method: http.MethodGet, path: "/rule/5"},
 		{
 			name:   "rule create",
@@ -762,6 +770,22 @@ func TestRecordActivityEmptyTimeline(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "没有活动日志") {
 		t.Fatalf("stderr 应提示没有活动日志，实际：%q", errOut.String())
+	}
+}
+
+// TestRuleListSourceInvalidRejected 固化「枚举 flag 在客户端就拦住」的口径：
+// --source 非法时退出码 2 且零请求，不把脏参数发给后端（后端会 400，但 CLI 应更早失败）。
+func TestRuleListSourceInvalidRejected(t *testing.T) {
+	gw := newResourceGateway(t, nil)
+	app, _, errOut := newEnvTestApp(t, gw.URL, testToken)
+	if code := runCLI(app, "rule", "list", "--source", "all"); code != 2 {
+		t.Fatalf("退出码 = %d, 期望 2（stderr=%s）", code, errOut.String())
+	}
+	if paths := gw.rec.paths(); len(paths) != 0 {
+		t.Fatalf("非法 --source 被拒绝了却发出了请求：%v", paths)
+	}
+	if !strings.Contains(errOut.String(), "--source") {
+		t.Fatalf("错误提示应指出 --source，实际：%q", errOut.String())
 	}
 }
 
