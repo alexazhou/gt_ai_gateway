@@ -242,6 +242,59 @@ describe("T5 插件管线（sender 集成）", () => {
         await clearServerCaches();
     });
 
+    it("failover 切到新供应商后按新 vendor 重新匹配插件规则", async () => {
+        const mockBaseUrl = config.UPSTREAM_CONFIG.mock.url;
+
+        // A 指向错误端点（首个上游必失败），B 正常
+        const vendorA = await requestHelper.post("/vendor/create.json", {
+            type: "other",
+            name: `failover-a-${Date.now()}`,
+            token: "mock-token-a",
+            urls: { anthropic: `${mockBaseUrl}/messages/error` },
+        }, adminToken);
+        const vendorB = await requestHelper.post("/vendor/create.json", vendorFixtures.VENDOR_FIXTURES.anthropic(), adminToken);
+        expect(vendorA.status).toBe(200);
+        expect(vendorB.status).toBe(200);
+
+        const modelName = `failover-model-${Date.now()}`;
+        // first_available 自动上游：两个供应商都要有同名 vendor model
+        await requestHelper.post(`/vendor/${vendorA.body.id}/model/add.json`, { model_id: modelName }, adminToken);
+        await requestHelper.post(`/vendor/${vendorB.body.id}/model/add.json`, { model_id: modelName }, adminToken);
+
+        const model = await requestHelper.post("/model/create.json", {
+            name: modelName,
+            routing_mode: "first_available",
+            routing_config: {
+                upstreams: [
+                    { vendor_id: vendorA.body.id, enabled: true },
+                    { vendor_id: vendorB.body.id, enabled: true },
+                ],
+                failover: { enabled: true },
+            },
+        }, adminToken);
+        expect(model.status).toBe(200);
+
+        // 规则只对 B 生效：只有在"切到 B 之后重新匹配"才会看到这条规则的改写
+        await createUserPluginRule({
+            scope: { type: "vendor_id", oper: "=", values: [vendorB.body.id] },
+            config: { plugin: "cchRewriter", pluginConfig: { cchValue: "C9999" } },
+            priority: 50,
+        });
+
+        const marker = `failover-${randomUUID()}`;
+        const response = await requestHelper.post("/llm/v1/messages", {
+            ...mockHelper.generateAnthropicMessageRequest({ model: modelName, stream: false }),
+            system: systemPromptWith(marker),
+        }, userToken);
+        expect(response.status).toBe(200);
+
+        const upstream = await waitForUpstream(marker);
+        const systemText = systemTextOf(upstream.json);
+        // 系统规则先改 A1234，走到 B 时命中的用户规则再改成 C9999
+        expect(systemText).toContain("cch=C9999;");
+        expect(systemText).not.toContain("A1234");
+    });
+
     it("跨协议（openai 客户端 → anthropic 上游）时插件在转换后阶段生效", async () => {
         // 直接调 anthropic 风格端点，但声明 openai 格式的上游 —— 需要一条 openai→anthropic 的模型
         const vendor = await requestHelper.post("/vendor/create.json", {
