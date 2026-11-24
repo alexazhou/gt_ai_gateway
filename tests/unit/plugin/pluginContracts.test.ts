@@ -1,7 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ApiFormat } from "../../../src/constants";
-import pluginRegistry from "../../../src/plugin/pluginRegistry";
-import { BUILTIN_PLUGINS } from "../../../src/plugin/builtinPlugins";
 import { cchRewriter, planCchRewrite, rewriteCchInSystemPrompt } from "../../../src/plugin/cchRewriter";
 import { claudeCodeTrackingRewriter, planTrackingMarkerRemoval } from "../../../src/plugin/claudeCodeTrackingRewriter";
 import { planPromptCacheKeyInjection, responsesPromptCacheKeyRewriter } from "../../../src/plugin/responsesPromptCacheKeyRewriter";
@@ -40,11 +38,20 @@ function applyHookResult(body: Record<string, unknown>, result: ReturnType<Plugi
 }
 
 describe("内置插件注册", () => {
-    it("三个内置插件都注册在 registry 里，且都声明了转换前后两个钩子", () => {
-        for (const plugin of BUILTIN_PLUGINS) {
-            expect(pluginRegistry.has(plugin.name)).toBe(true);
+    it("三个内置插件都注册在 registry 里，且都声明了转换前后两个钩子", async () => {
+        // worker 门里所有测试文件共用同一份注册表，别的文件可能已经把它清空了。
+        // 重建模块图后重新导入：新注册表应当是空的，导入 builtinPlugins 时由副作用填满。
+        vi.resetModules();
+        const freshRegistry = (await import("../../../src/plugin/pluginRegistry")).default;
+        expect(freshRegistry.names()).toEqual([]);
+        const freshBuiltins = await import("../../../src/plugin/builtinPlugins");
+
+        expect(freshBuiltins.BUILTIN_PLUGINS.map((plugin) => plugin.name).sort())
+            .toEqual(["cchRewriter", "claudeCodeTrackingRewriter", "responsesPromptCacheKeyRewriter"]);
+        for (const plugin of freshBuiltins.BUILTIN_PLUGINS) {
+            expect(freshRegistry.has(plugin.name)).toBe(true);
         }
-        const described = pluginRegistry.describe();
+        const described = freshRegistry.describe();
         for (const name of ["cchRewriter", "claudeCodeTrackingRewriter", "responsesPromptCacheKeyRewriter"]) {
             const entry = described.find((item) => item.name === name);
             expect(entry, `${name} 应出现在插件列表`).toBeTruthy();

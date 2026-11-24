@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import pluginRegistry from "../../../src/plugin/pluginRegistry";
 import type { RequestPlugin } from "../../../src/plugin/types";
 
@@ -11,7 +11,8 @@ function makePlugin(name: string, overrides: Partial<RequestPlugin> = {}): Reque
 }
 
 describe("pluginRegistry", () => {
-    afterEach(() => {
+    // worker 门里所有测试文件共用同一份注册表，所以"空注册表"这个前提必须自己建立
+    beforeEach(() => {
         pluginRegistry.resetForTest();
     });
 
