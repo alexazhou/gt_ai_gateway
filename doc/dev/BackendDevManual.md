@@ -20,11 +20,14 @@
 .
 ├── src/                   # 后端源代码
 │   ├── controller/        # 控制器层
-│   ├── middleware/        # 中间件
+│   ├── manager/           # 数据访问层（封装模型查询与租户隔离）
+│   ├── middleware/        # 中间件层（CORS、管理端鉴权、LLM 端鉴权与模型准入）
 │   ├── model/            # 数据模型
-│   ├── service/          # 服务层
+│   ├── service/          # 服务层（核心业务逻辑与领域规则）
+│   ├── util/             # 工具函数
 │   ├── constants.ts      # 常量定义
-│   ├── routes.ts         # 路由配置
+│   ├── customError.ts    # 自定义异常与 LLM 错误格式转换
+│   ├── routes.ts         # 路由配置与全局错误处理
 │   └── local.ts          # 本地服务器入口
 ├── tests/                # 测试目录
 ├── resource/migrate/     # 数据库迁移文件
@@ -290,14 +293,32 @@ Docker 部署相关内容已单独整理，包括 Docker Compose 部署和独立
 
 ## 核心架构与规范
 
-### MVC 架构
+### 分层架构
 
-项目遵循 MVC 架构模式：
+项目遵循分层 MVC 架构模式（`Controller / Middleware → Service → Manager → Model`）：
 
-- **Model**: `src/model/` - 数据模型和计算逻辑
-- **View**: (前端部分)
-- **Controller**: `src/controller/` - 处理 HTTP 请求和响应
-- **Service**: `src/service/` - 核心业务逻辑
+- **Middleware (`src/middleware/`)**: 请求前置守卫（跨域、身份认证、租户作用域解析、角色/模型准入校验）
+- **Controller (`src/controller/`)**: 处理 HTTP 请求参数解析与响应序列化，调用 Service / Manager
+- **Service (`src/service/`)**: 核心业务逻辑（用户认证 `userService`、租户作用域解析 `tenantService`、模型路由、规则匹配、协议转换等）
+- **Manager (`src/manager/`)**: 数据访问层，封装 ORM 查询并强制执行租户隔离过滤（`tenantId` / `TenantScope`）
+- **Model (`src/model/`)**: 数据模型定义和模型自身的属性计算逻辑
+- **View**: 前端部分（`frontend/`）
+
+### 认证与权限守卫（Middleware）
+
+所有受保护的请求在进入 Controller 前，统一由中间件按 **Step 1（身份认证）→ Step 2（租户作用域解析 `tenantScope`）→ Step 3（权限/准入守卫）** 顺序校验，遇错直接抛出 `customError.AppError`，由 `src/routes.ts` 的 `app.onError` 统一格式化返回：
+
+1. **管理端守卫（`src/middleware/authMiddleware.ts`）**
+   仅接受 `Authorization: Bearer <TOKEN>`，认证通过后在 Context 中注入 `c.get("user")` 与 `c.get("tenantScope")`：
+   - `authMiddleware.requireAdmin`：要求管理员（`ADMIN` 或 `ROOT`），用于常规租户业务管理接口（如 `/vendor/*`、`/model/*`、`/user/*`、`/rule/*`、`/record/*`、`/stats/*`、`/status.json`、`GET /config.json`）。
+   - `authMiddleware.requireMainView`：在管理员基础上要求当前处于 `main` 租户视角（`scope.tenantId === scope.mainTenantId`），用于全局配置修改（`PUT /config.json`）与客户端配置（`/client-config/*`）。
+   - `authMiddleware.requireSystemAdmin`：在管理员基础上要求系统管理员身份（`ROOT` 或归属 `main` 租户的 `ADMIN`），用于租户管理接口（`/tenant.json`、`/tenant/:id`）。
+   - `authMiddleware.requireRoot`：严格要求 `ROOT` 身份，用于跨租户全局维护接口（如 `/record/clear-orphans/*`）。
+
+2. **LLM 端守卫（`src/middleware/llmApiMiddleware.ts`）**
+   支持 `Authorization: Bearer <TOKEN>` 与 `x-api-key: <TOKEN>` 两种凭证，挂载时显式传入 `ApiFormat`（中间件入口注入 `c.set("api_format", format)`，确保错误响应符合对应协议规范）：
+   - `llmApiMiddleware.requireLlmAuth(format)`：完成 LLM 用户认证 + 注入 `user` 与 `tenantScope`，用于 `GET /llm/v1/models`。
+   - `llmApiMiddleware.requireModelAccess(format)`：在 `requireLlmAuth` 基础上，进一步校验请求体大小上限、解析 `model` 并注入 `modelConfig` 与 `requestBody`、执行路由前规则准入与限流检查（`ruleService.matchAndCheck`），用于 `POST /llm/v1/chat/completions`、`POST /llm/v1/messages`、`POST /llm/v1/responses`。
 
 ### 资源服务说明
 
@@ -313,16 +334,17 @@ Node 模式下，后端服务器可以提供前端构建后的静态文件：
 1. **代码缩进**：使用 4 个空格，方法之间空两行
 2. **模块划分**：
    - 业务逻辑 → service 层
-   - controller 层 → 简单逻辑 + 调用 service
+   - 数据查询与租户过滤 → manager 层
+   - controller 层 → 简单逻辑 + 调用 service / manager
    - model 层 → 数据模型和计算逻辑
-3. **API 风格**：REST 风格，URL 以 `.json` 结尾
-4. **导出方式**：统一使用默认导出
+3. **API 风格**：REST 风格，URL 以 `.json` 结尾（带路径参数的资源详情/操作如 `/vendor/:id` 除外）
+4. **导出方式**：统一使用默认导出（`export default`），调用时使用 `模块名.方法名()`
 
 ### 添加新 API 步骤
 
-1. **定义路由**：在 `src/routes.ts` 中添加路由
-2. **创建 Controller**：在 `src/controller/` 中创建处理函数
-3. **创建 Service**：在 `src/service/` 中实现业务逻辑
+1. **定义路由与守卫**：在 `src/routes.ts` 中注册路由，并按接口性质挂载对应的守卫中间件（如 `authMiddleware.requireAdmin`、`authMiddleware.requireMainView` 等）
+2. **创建 Controller**：在 `src/controller/` 中创建处理函数（通过 `c.get("tenantScope")!` 获取当前租户作用域）
+3. **创建 Service / Manager**：在 `src/service/` 中实现业务逻辑，在 `src/manager/` 中封装带 `tenantId` 过滤的数据访问
 4. **定义 Model**（如需）：在 `src/model/` 中创建数据模型
 
 ---

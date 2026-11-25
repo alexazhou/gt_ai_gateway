@@ -433,7 +433,7 @@ async function sendRequest(
     }
 
     // 租户作用域：进入 sender 的两条路径都已注入 —— LLM 端点由 llmApiMiddleware 注入，
-    // 模型路由测试由 requireTenantAdmin 注入，故此处必存在（与 modelController 的取法一致）
+    // 模型路由测试由 authMiddleware.requireAdmin 注入，故此处必存在（与 modelController 的取法一致）
     const scope = c.get("tenantScope")!;
     const tenantId = scope.tenantId;
 

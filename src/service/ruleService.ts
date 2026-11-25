@@ -11,7 +11,7 @@ import pluginRegistry from "../plugin/pluginRegistry";
 // 内置插件注册（模块副作用）：保存规则时要按名校验 config.plugin 是否存在
 import "../plugin/builtinPlugins";
 import type { RequestContext } from "../util/rule/types";
-import type { TenantScope } from "../middleware/tenantScopeMiddleware";
+import type { TenantScope } from "../service/tenantService";
 
 // 规则缓存 TTL：兜底 worker 多 isolate 的跨实例缓存过期（CRUD 只失效本地 isolate 缓存，
 // 其他 isolate 需等 TTL 过期才能感知变更，60s 内全局生效）

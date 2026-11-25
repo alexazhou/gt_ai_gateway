@@ -1,6 +1,6 @@
 import type { Builder } from "sutando";
 import { SgModel } from "../model/sgModel";
-import type { TenantScope } from "../middleware/tenantScopeMiddleware";
+import type { TenantScope } from "../service/tenantService";
 
 interface ModelListOptions {
     vendorId?: number;

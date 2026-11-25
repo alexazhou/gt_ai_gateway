@@ -3,7 +3,7 @@ import { SgModel } from "../model/sgModel";
 import customError from "../customError";
 import modelManager from "../manager/modelManager";
 import recordService from "./recordService";
-import type { TenantScope } from "../middleware/tenantScopeMiddleware";
+import type { TenantScope } from "../service/tenantService";
 
 
 interface LlmRequestContext {

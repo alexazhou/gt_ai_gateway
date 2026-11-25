@@ -1,6 +1,6 @@
 import { SgVendor } from "../model/sgVendor";
 import ormService from "../service/ormService";
-import type { TenantScope } from "../middleware/tenantScopeMiddleware";
+import type { TenantScope } from "../service/tenantService";
 
 interface VendorListOptions {
     type?: string;

@@ -10,7 +10,7 @@ import customError from "../../../src/customError";
 import dbHelper from "../../helpers/dbHelper";
 import ormTestHelper from "../../helpers/ormTestHelper";
 import stateStoreService from "../../../src/service/stateStoreService";
-import type { TenantScope } from "../../../src/middleware/tenantScopeMiddleware";
+import type { TenantScope } from "../../../src/service/tenantService";
 
 describe("ruleService (node, real db)", () => {
     let tenantId = 1;

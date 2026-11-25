@@ -1,7 +1,7 @@
 import { Hono, MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { ApiFormat, UserType } from "./constants";
+import { ApiFormat } from "./constants";
 import { SgUser } from "./model/sgUser";
 import { SgModel } from "./model/sgModel";
 
@@ -27,7 +27,7 @@ import ormService from "./service/ormService";
 import objectStorageService from "./service/objectStorageService";
 import authMiddleware from "./middleware/authMiddleware";
 import llmApiMiddleware from "./middleware/llmApiMiddleware";
-import tenantScopeMiddleware, { TenantScope } from "./middleware/tenantScopeMiddleware";
+import type { TenantScope } from "./service/tenantService";
 import corsMiddleware from "./middleware/corsMiddleware";
 import customError from "./customError";
 
@@ -39,7 +39,6 @@ interface Env {
 }
 
 type Variables = {
-    user_type: UserType;
     api_format?: ApiFormat;
     user?: SgUser;
     modelConfig?: SgModel;
@@ -74,22 +73,8 @@ app.use("*", async (c, next) => {
 // 注册数据库中间件（最前面）
 app.use("*", dbMiddleware);
 
-// 租户业务路由统一走 requireTenantAdmin（鉴权 + 注入 user/tenantScope；SPA 前端路由直接放行）。
-// 全局控制面（/tenant、/config.json、/client-config/*、/status.json、/update.json）与 LLM API 不走这里。
-const TENANT_SCOPED_PREFIXES = [
-    "/user/*",
-    "/model/*",
-    "/vendor/*",
-    "/vendor-model/*",
-    "/balance/recharge/*",
-    "/record/*",
-    "/stats/*",
-    "/rule/*",
-];
-for (const prefix of TENANT_SCOPED_PREFIXES) {
-    app.use(prefix, tenantScopeMiddleware.requireTenantAdmin);
-}
-
+// 每条管理端路由显式声明所需守卫：requireAdmin 一步完成鉴权 + 注入 user/tenantScope，
+// requireMainView 在其之上要求落在 main 视角。无顶层前缀挂载，SPA 前端路由不会被拦截。
 // 注册全局错误处理
 app.onError((err, c) => {
     const error = err as unknown as Record<string, unknown>;
@@ -138,22 +123,22 @@ app.onError((err, c) => {
 // System
 // status.json 需注入 tenantScope：is_system_admin 由作用域解析结果给出
 app.get("/welcome", systemController.welcome);
-app.get("/status.json", authMiddleware.requireAdmin, tenantScopeMiddleware.tenantScope, systemController.status);
+app.get("/status.json", authMiddleware.requireAdmin, systemController.status);
 app.get("/update.json", authMiddleware.requireAdmin, systemController.checkUpdate);
 // 全局配置：写入仅 main 租户视角可用（与「设置」页入口一致）；读取对所有租户 admin 开放
 // —— 侧边栏的遥测 / 更新检查与模型表单的计费开关都会无条件读该配置，与当前视角无关。
 app.get("/config.json", authMiddleware.requireAdmin, configController.getConfig);
-app.put("/config.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, configController.updateConfig);
+app.put("/config.json", authMiddleware.requireMainView, configController.updateConfig);
 // 客户端配置：同上，仅 main 租户视角可访问
-app.get("/client-config/status.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.status);
-app.get("/client-config/local.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.readLocal);
-app.post("/client-config/create.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.create);
-app.post("/client-config/backup.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.backup);
-app.post("/client-config/backup/rename.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.renameBackup);
-app.post("/client-config/backup/delete.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.deleteBackup);
-app.post("/client-config/backup/update.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.updateBackup);
-app.post("/client-config/apply.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.apply);
-app.post("/client-config/sync-from-local.json", authMiddleware.requireAdmin, tenantScopeMiddleware.requireMainView, clientConfigController.syncFromLocal);
+app.get("/client-config/status.json", authMiddleware.requireMainView, clientConfigController.status);
+app.get("/client-config/local.json", authMiddleware.requireMainView, clientConfigController.readLocal);
+app.post("/client-config/create.json", authMiddleware.requireMainView, clientConfigController.create);
+app.post("/client-config/backup.json", authMiddleware.requireMainView, clientConfigController.backup);
+app.post("/client-config/backup/rename.json", authMiddleware.requireMainView, clientConfigController.renameBackup);
+app.post("/client-config/backup/delete.json", authMiddleware.requireMainView, clientConfigController.deleteBackup);
+app.post("/client-config/backup/update.json", authMiddleware.requireMainView, clientConfigController.updateBackup);
+app.post("/client-config/apply.json", authMiddleware.requireMainView, clientConfigController.apply);
+app.post("/client-config/sync-from-local.json", authMiddleware.requireMainView, clientConfigController.syncFromLocal);
 
 // Vendor (需要管理员权限)
 app.get("/vendor/preset-urls.json", authMiddleware.requireAdmin, vendorController.getPresetUrls);
@@ -173,14 +158,13 @@ app.put("/vendor/:id", authMiddleware.requireAdmin, vendorController.updateVendo
 app.delete("/vendor/:id", authMiddleware.requireAdmin, vendorController.deleteVendor);
 
 // Tenant (系统管理员专用：root，或归属 main 租户的 admin；租户管理写操作需多租户功能开关开启)
-// tenantScope 仅用于注入 isSystemAdmin，具体的系统管理员校验在 controller 内
 // 注：detail 路由用裸 /tenant/:id（与 /vendor/:id、/model/:id 一致）；Hono 对 :id.json 的
 // 参数解析有缺陷（param("id") 取不到值），故不加 .json 后缀
-app.get("/tenant.json", authMiddleware.requireAdmin, tenantScopeMiddleware.tenantScope, tenantController.listTenants);
-app.post("/tenant.json", authMiddleware.requireAdmin, tenantScopeMiddleware.tenantScope, tenantController.createTenant);
-app.get("/tenant/:id", authMiddleware.requireAdmin, tenantScopeMiddleware.tenantScope, tenantController.getTenant);
-app.put("/tenant/:id", authMiddleware.requireAdmin, tenantScopeMiddleware.tenantScope, tenantController.updateTenant);
-app.delete("/tenant/:id", authMiddleware.requireAdmin, tenantScopeMiddleware.tenantScope, tenantController.deleteTenant);
+app.get("/tenant.json", authMiddleware.requireSystemAdmin, tenantController.listTenants);
+app.post("/tenant.json", authMiddleware.requireSystemAdmin, tenantController.createTenant);
+app.get("/tenant/:id", authMiddleware.requireSystemAdmin, tenantController.getTenant);
+app.put("/tenant/:id", authMiddleware.requireSystemAdmin, tenantController.updateTenant);
+app.delete("/tenant/:id", authMiddleware.requireSystemAdmin, tenantController.deleteTenant);
 
 // Rule (需要管理员权限)
 app.get("/rule/list.json", authMiddleware.requireAdmin, ruleController.listRules);
@@ -221,8 +205,8 @@ app.delete("/record/clear-payload", authMiddleware.requireAdmin, recordControlle
 app.delete("/record/clear-all", authMiddleware.requireAdmin, recordController.clearAll);
 // 必须排在 /record/:id 之前，否则会被当成 id="..."
 // 孤儿清理分两段：先取分母快照，再由前端循环调 step 逐片推进（服务端不保存状态）
-app.get("/record/clear-orphans/stats.json", authMiddleware.requireAdmin, recordController.orphanStats);
-app.post("/record/clear-orphans/step", authMiddleware.requireAdmin, recordController.clearOrphansStep);
+app.get("/record/clear-orphans/stats.json", authMiddleware.requireRoot, recordController.orphanStats);
+app.post("/record/clear-orphans/step", authMiddleware.requireRoot, recordController.clearOrphansStep);
 app.delete("/record/:id", authMiddleware.requireAdmin, recordController.deleteRecord);
 
 // Record Activity (需要管理员权限，独立控制器 recordActivityController)
@@ -233,10 +217,10 @@ app.get("/stats/dashboard.json", authMiddleware.requireAdmin, statsController.da
 app.get("/stats/recent.json", authMiddleware.requireAdmin, statsController.recentRecords);
 
 // AI endpoints (no auth middleware, using custom llmApiAuth)
-app.get("/llm/v1/models", llmApiMiddleware.requireLlmModelsAuth, modelController.listLlmModels);
-app.post("/llm/v1/chat/completions", llmApiMiddleware.requireLlmRequestContext(ApiFormat.OPENAI), gatewayController.chatCompletions);
-app.post("/llm/v1/messages", llmApiMiddleware.requireLlmRequestContext(ApiFormat.ANTHROPIC), gatewayController.anthropicMessages);
-app.post("/llm/v1/responses", llmApiMiddleware.requireLlmRequestContext(ApiFormat.RESPONSES), gatewayController.responsesApi);
+app.get("/llm/v1/models", llmApiMiddleware.requireLlmAuth(ApiFormat.OPENAI), modelController.listLlmModels);
+app.post("/llm/v1/chat/completions", llmApiMiddleware.requireModelAccess(ApiFormat.OPENAI), gatewayController.chatCompletions);
+app.post("/llm/v1/messages", llmApiMiddleware.requireModelAccess(ApiFormat.ANTHROPIC), gatewayController.anthropicMessages);
+app.post("/llm/v1/responses", llmApiMiddleware.requireModelAccess(ApiFormat.RESPONSES), gatewayController.responsesApi);
 
 // Test endpoints
 app.delete("/test/cache/clear", async (c) => {

@@ -8,20 +8,19 @@ import config from "../../config";
 /**
  * P2-18：鉴权去重后的「矩阵回归」。
  *
- * 背景：`authMiddleware.requireAdmin` 与 `tenantScopeMiddleware.requireTenantAdmin` 原本各抄了一份
- * 完全相同的「Bearer 解析 → 查 user → disabled/admin 判定」，两份实现容易只改一份：
+ * 背景：管理端鉴权曾有两套实现（全局控制面与租户业务面各一份），容易只改一份，
  * 结果就是「同一类 token 在 /status.json 能过、在 /user/list.json 却过不了」这种口径漂移。
- * 现在两者共用 `authUtil.authenticateAdmin`，本用例用**同一组 token 打两条不同中间件保护的路由**，
- * 逐条比对状态码与文案，任何一处未来被单独改动都会在这里翻红。
+ * 现在两条路由共用 `authMiddleware.requireAdmin`（底层 `userService.authenticateByToken`），
+ * 本用例用**同一组 token 打两条路由**，逐条比对状态码与文案，任何一处未来被单独改动都会在这里翻红。
  *
  * 401 与 403 的区别也在这里钉死：
  * - 没带/带错凭证 → 401（身份未知）
  * - 身份有效但被停用 / 非管理员 → 403（身份已知，权限不够）
  */
 
-/** requireAdmin 保护（全局控制面） */
+/** 全局控制面路由 */
 const GLOBAL_ADMIN_ROUTE = "/status.json";
-/** requireTenantAdmin 保护（租户业务面） */
+/** 租户业务面路由 */
 const TENANT_ADMIN_ROUTE = "/user/list.json";
 
 let adminToken: string;
@@ -56,7 +55,7 @@ async function expectConsistent(token: string | undefined, status: number, error
     return { globalRes, tenantRes };
 }
 
-describe("P2-18 鉴权矩阵（requireAdmin vs requireTenantAdmin）", () => {
+describe("P2-18 鉴权矩阵（两条管理端路由口径一致）", () => {
     beforeAll(async () => {
         await dbHelper.truncate();
         adminToken = await setupAdminUser();

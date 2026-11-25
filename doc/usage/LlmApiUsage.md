@@ -1,14 +1,14 @@
 # LLM API 使用指南
 
-本文档介绍如何调用 Serverless AI Gateway 提供的 LLM API。网关支持两种主流协议：OpenAI 兼容协议和 Anthropic 兼容协议。
+本文档介绍如何调用 Serverless AI Gateway 提供的 LLM API。网关支持 OpenAI Chat Completions、OpenAI Responses API 和 Anthropic Messages 三种主流协议。
 
 ---
 
 ## 身份验证
 
-所有对 LLM API 的请求都必须包含身份验证信息。网关通过用户 Token 来识别用户身份。
+所有对 LLM API 的请求都必须包含身份验证信息。网关通过用户 Token 来识别用户身份并校验账号状态（若账号被禁用将返回 `403`）。
 
-所有 LLM 端点均支持以下两种认证方式。
+所有 LLM 端点均支持以下两种认证方式：
 
 ### 1. Bearer Token
 
@@ -24,19 +24,31 @@ x-api-key: YOUR_USER_TOKEN
 
 如果请求同时包含两种认证 Header，网关优先使用 `Authorization`。
 
+> **多租户视角切换（可选）**：当系统开启多租户隔离时，请求默认归属调用方用户所在的租户；系统管理员（Root 或 `main` 租户管理员）可通过请求头 `X-Tenant-ID: <tenant_id>` 显式指定目标租户视角。
+
 ---
 
 ## API 端点
 
-### 1. OpenAI 兼容端点
+### 1. 模型列表端点
+- **路径**: `/llm/v1/models`
+- **方法**: `GET`
+- **说明**: 返回当前租户下可用（含 `main` 租户跨租户共享）的模型列表，遵循 OpenAI Models 列表格式。
+
+### 2. OpenAI Chat Completions 兼容端点
 - **路径**: `/llm/v1/chat/completions`
 - **方法**: `POST`
 - **说明**: 遵循 OpenAI Chat Completions 规范，适用于大多数第三方客户端。
 
-### 2. Anthropic 兼容端点
+### 3. Anthropic Messages 兼容端点
 - **路径**: `/llm/v1/messages`
 - **方法**: `POST`
 - **说明**: 遵循 Anthropic Messages API 规范。
+
+### 4. OpenAI Responses API 兼容端点
+- **路径**: `/llm/v1/responses`
+- **方法**: `POST`
+- **说明**: 遵循 OpenAI Responses API 规范。
 
 ---
 
@@ -95,18 +107,38 @@ curl http://localhost:8787/llm/v1/messages \
 
 ## 错误处理
 
-当请求失败时，网关会返回标准的 HTTP 状态码和 JSON 格式的错误信息：
+当请求失败时，网关会返回标准的 HTTP 状态码，并按照当前端点对应的协议格式（OpenAI / Anthropic / Responses）返回结构化 JSON 错误信息：
 
 | 状态码 | 说明 |
 |------|------|
+| 400 | 请求参数错误（如缺少 `model` 字段、JSON 格式非法、多租户 Header 非法等） |
 | 401 | 身份验证失败（Token 缺失或无效） |
-| 404 | 模型不存在或供应商未找到 |
+| 403 | 权限不足（用户被禁用 `User disabled`、模型已停用 `model disabled`、命中访问控制规则或跨租户越权） |
+| 404 | 模型不存在（`model not found`）或无可用上游供应商 |
+| 413 | 请求体超过大小限制 |
+| 429 | 命中限流规则（同时附带 `Retry-After` 响应头） |
 | 500 | 上游服务错误或网关内部异常 |
 
-示例错误响应：
+OpenAI / Responses 协议错误响应示例：
 ```json
 {
-  "error": "model not found"
+  "error": {
+    "message": "model not found",
+    "type": "invalid_request_error",
+    "param": null,
+    "code": "model_not_found"
+  }
+}
+```
+
+Anthropic 协议错误响应示例：
+```json
+{
+  "type": "error",
+  "error": {
+    "type": "not_found_error",
+    "message": "model not found"
+  }
 }
 ```
 

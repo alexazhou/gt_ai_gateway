@@ -4,7 +4,7 @@ import billingUtil from "../util/protocolUtil/billingUtil";
 import requestActivityService from "../service/requestActivityService";
 import { bindParamBatchSize } from "../util/db/bindParamUtil";
 import ormService from "../service/ormService";
-import type { TenantScope } from "../middleware/tenantScopeMiddleware";
+import type { TenantScope } from "../service/tenantService";
 import type { SqlStatement } from "../util/dbAdapterUtil";
 
 interface RecordListOptions {

@@ -124,25 +124,24 @@ async function clearAll(c: Context) {
     });
 }
 
+// 清理悬空数据（孤儿 payload / activity）root 专用：非 root（含 main 租户 admin）一律 403。
+// 路由已挂 authMiddleware.requireRoot，这里是双保险：防止未来新增路由漏挂中间件。
+//
+// 注意用 `c.get("user")?.type` 而不是 `tenantScope.isSystemAdmin`：后者会放行 main 租户的 admin，
+// 而全局悬空清理必须严格限制为 root。
+function assertRoot(c: Context): void {
+    const user = c.get("user");
+    if (user?.type !== UserType.ROOT) {
+        throw new customError.AppError("Root access required", 403);
+    }
+}
+
 async function recoverOrphans(c: Context) {
     const scope = c.get("tenantScope")!;
     const thresholdMs = await configService.getNumber(ConfigKey.ORPHAN_RECOVER_THRESHOLD_MS);
     // getNumber() 对未配置/非法值返回 0，回退默认阈值 10 分钟
     const recovered = await recordManager.recoverOrphans(thresholdMs > 0 ? thresholdMs : 600000, scope.tenantId);
     return c.json({ success: true, recovered });
-}
-
-// 清理悬空数据（孤儿 payload / activity）root 专用：非 root（含 main 租户 admin）一律 403
-//
-// 注意用 `c.get("user")?.type` 而不是 `c.get("user_type")` 或 `tenantScope.isSystemAdmin`：
-// 1. `/record/*` 已挂 `tenantScopeMiddleware.requireTenantAdmin`，它先注入 `user`，路由上的
-//    `authMiddleware.requireAdmin` 看到 `user` 已存在就短路返回，**不会**再 set `user_type`；
-// 2. `tenantScope.isSystemAdmin` 会放行 main 租户的 admin，而全局悬空清理必须严格限制为 root。
-function assertRoot(c: Context): void {
-    const user = c.get("user");
-    if (user?.type !== UserType.ROOT) {
-        throw new customError.AppError("Root access required", 403);
-    }
 }
 
 /**

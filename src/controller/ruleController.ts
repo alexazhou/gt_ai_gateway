@@ -5,7 +5,7 @@ import pluginRegistry from "../plugin/pluginRegistry";
 import { RULE_SOURCE, type RuleSource } from "../plugin/systemRules";
 import customError from "../customError";
 import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
-import type { TenantScope } from "../middleware/tenantScopeMiddleware";
+import type { TenantScope } from "../service/tenantService";
 
 
 // 全局共享规则仅 main 租户可配置：非 main 视角置 cross_tenant = 1 时拒绝

@@ -12,7 +12,7 @@ import type { RequestPlugin } from "../../../src/plugin/types";
 import dbHelper from "../../helpers/dbHelper";
 import ormTestHelper from "../../helpers/ormTestHelper";
 import stateStoreService from "../../../src/service/stateStoreService";
-import type { TenantScope } from "../../../src/middleware/tenantScopeMiddleware";
+import type { TenantScope } from "../../../src/service/tenantService";
 
 /**
  * 插件规则（type = plugin）在规则层的语义（T3）：

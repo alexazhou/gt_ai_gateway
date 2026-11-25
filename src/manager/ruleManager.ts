@@ -1,5 +1,5 @@
 import SgRule from "../model/sgRule";
-import type { TenantScope } from "../middleware/tenantScopeMiddleware";
+import type { TenantScope } from "../service/tenantService";
 import customError from "../customError";
 import { RULE_PRIORITY_DEFAULT } from "../constants";
 import { RULE_SOURCE, type RuleSource } from "../plugin/systemRules";
