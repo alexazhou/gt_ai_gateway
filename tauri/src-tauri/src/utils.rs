@@ -1,7 +1,57 @@
 use std::io::{BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::sync::Arc;
 use std::time::Duration;
+
+/// config.json 缺省或取值非法时适用的日志级别
+pub const DEFAULT_LOG_LEVEL: &str = "info";
+
+/// 归一化日志级别：大小写不敏感，只接受 debug / info / warn / error，其余返回 None。
+pub fn normalize_log_level(raw: &str) -> Option<String> {
+    let value = raw.trim().to_ascii_lowercase();
+    match value.as_str() {
+        "debug" | "info" | "warn" | "error" => Some(value),
+        _ => None,
+    }
+}
+
+/// 解析桌面端数据目录：返回 Ok(None) 表示用系统默认目录。
+///
+/// 显式指定时**必须已存在且是目录**：自定义目录通常是挂载盘或准备好的工作区，
+/// 路径不存在往往意味着拼写错误或外置盘没挂上，静默建空库比报错更危险。
+pub fn resolve_custom_data_dir(
+    raw: Option<&str>,
+    home_dir: Option<&Path>,
+) -> Result<Option<PathBuf>, String> {
+    let raw = match raw {
+        Some(value) if !value.trim().is_empty() => value.trim(),
+        _ => return Ok(None),
+    };
+
+    let expanded: PathBuf = if raw == "~" || raw.starts_with("~/") {
+        let home = match home_dir {
+            Some(dir) => dir.to_path_buf(),
+            None => return Err(format!("无法展开 ~：取不到用户主目录（GT_AI_GATEWAY_DATA_DIR={raw}）")),
+        };
+        if raw == "~" {
+            home
+        } else {
+            home.join(&raw[2..])
+        }
+    } else {
+        PathBuf::from(raw)
+    };
+
+    if !expanded.exists() {
+        return Err(format!("GT_AI_GATEWAY_DATA_DIR 指向的目录不存在：{}", expanded.display()));
+    }
+    if !expanded.is_dir() {
+        return Err(format!("GT_AI_GATEWAY_DATA_DIR 指向的不是目录：{}", expanded.display()));
+    }
+
+    Ok(Some(expanded))
+}
 
 pub fn generate_client_url(host: &str, port: u16) -> String {
     let client_host = if host == "0.0.0.0" {
@@ -101,4 +151,76 @@ where
     }
 
     on_event(StdioEvent::ReaderFinished(stream));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("gt-gateway-test-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn normalize_log_level_accepts_known_levels_case_insensitively() {
+        assert_eq!(normalize_log_level("DEBUG").as_deref(), Some("debug"));
+        assert_eq!(normalize_log_level("Info").as_deref(), Some("info"));
+        assert_eq!(normalize_log_level(" warn ").as_deref(), Some("warn"));
+        assert_eq!(normalize_log_level("error").as_deref(), Some("error"));
+    }
+
+    #[test]
+    fn normalize_log_level_rejects_unknown_values() {
+        assert_eq!(normalize_log_level("verbose"), None);
+        assert_eq!(normalize_log_level(""), None);
+        assert_eq!(normalize_log_level("   "), None);
+    }
+
+    #[test]
+    fn resolve_custom_data_dir_returns_none_for_empty_values() {
+        assert!(resolve_custom_data_dir(None, None).unwrap().is_none());
+        assert!(resolve_custom_data_dir(Some(""), None).unwrap().is_none());
+        assert!(resolve_custom_data_dir(Some("   "), None).unwrap().is_none());
+    }
+
+    #[test]
+    fn resolve_custom_data_dir_accepts_existing_directory() {
+        let dir = temp_dir("existing");
+        let resolved = resolve_custom_data_dir(Some(dir.to_str().unwrap()), None).unwrap();
+        assert_eq!(resolved.as_deref(), Some(dir.as_path()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_custom_data_dir_expands_tilde() {
+        let home = temp_dir("home");
+        let resolved = resolve_custom_data_dir(Some("~"), Some(&home)).unwrap();
+        assert_eq!(resolved.as_deref(), Some(home.as_path()));
+
+        let nested = home.join("data");
+        std::fs::create_dir_all(&nested).unwrap();
+        let resolved = resolve_custom_data_dir(Some("~/data"), Some(&home)).unwrap();
+        assert_eq!(resolved.as_deref(), Some(nested.as_path()));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn resolve_custom_data_dir_rejects_missing_path() {
+        let dir = temp_dir("missing").join("not-created");
+        let err = resolve_custom_data_dir(Some(dir.to_str().unwrap()), None).unwrap_err();
+        assert!(err.contains("不存在"), "错误信息应说明目录不存在：{err}");
+    }
+
+    #[test]
+    fn resolve_custom_data_dir_rejects_file_path() {
+        let dir = temp_dir("file");
+        let file = dir.join("config.json");
+        std::fs::write(&file, "{}").unwrap();
+        let err = resolve_custom_data_dir(Some(file.to_str().unwrap()), None).unwrap_err();
+        assert!(err.contains("不是目录"), "错误信息应说明不是目录：{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

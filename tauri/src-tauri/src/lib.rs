@@ -176,6 +176,7 @@ struct BackendLaunchConfig {
     port: u16,
     host: String,
     root_token: String,
+    log_level: String,
 }
 
 struct BackendProcessState {
@@ -344,6 +345,7 @@ fn start_backend_process(app: &tauri::AppHandle) -> Result<(), String> {
     let port = launch_config.port;
     let host = launch_config.host.clone();
     let root_token = launch_config.root_token.clone();
+    let log_level = launch_config.log_level.clone();
 
     let exe_dir = std::env::current_exe()
         .map_err(|e| format!("failed to get exe path: {}", e))?
@@ -364,6 +366,7 @@ fn start_backend_process(app: &tauri::AppHandle) -> Result<(), String> {
         .env("HOST", &host)
         .env("LOG_DIR", log_dir.to_str().unwrap())
         .env("ROOT_TOKEN", &root_token)
+        .env("LOG_LEVEL", &log_level)
         .arg("--desktop-mode")
         .env("MIGRATION_DIR", migration_dir);
 
@@ -508,6 +511,7 @@ struct AppConfig {
     port: u16,
     host: String,
     root_token: String,
+    log_level: String,
 }
 
 
@@ -524,6 +528,7 @@ fn read_config(app_data_dir: &Path) -> AppConfig {
     let mut port = DEFAULT_PORT;
     let mut host = DEFAULT_HOST.to_string();
     let mut root_token = String::new();
+    let mut log_level = utils::DEFAULT_LOG_LEVEL.to_string();
     let mut need_write = false;
 
     if config_path.exists() {
@@ -544,6 +549,12 @@ fn read_config(app_data_dir: &Path) -> AppConfig {
                         root_token = t.to_string();
                     }
                 }
+                // 缺省或非法值都按 info 处理：老版本 config.json 没有这个字段
+                if let Some(level) = json["log_level"].as_str() {
+                    if let Some(normalized) = utils::normalize_log_level(level) {
+                        log_level = normalized;
+                    }
+                }
             }
         }
     } else {
@@ -561,7 +572,8 @@ fn read_config(app_data_dir: &Path) -> AppConfig {
         let config_json = serde_json::json!({
             "port": port,
             "host": host,
-            "root_token": root_token
+            "root_token": root_token,
+            "log_level": log_level
         });
         let _ = fs::write(
             &config_path,
@@ -569,7 +581,12 @@ fn read_config(app_data_dir: &Path) -> AppConfig {
         );
     }
 
-    AppConfig { port, host, root_token }
+    AppConfig {
+        port,
+        host,
+        root_token,
+        log_level,
+    }
 }
 
 
@@ -653,14 +670,26 @@ pub fn run() {
                 app.get_webview_window("splashscreen").is_some(),
             ));
 
-            let app_data_dir = app
-                .path()
-                .data_dir()
-                .expect("failed to get data dir")
-                .join("GtCoder")
-                .join("AiGateway");
+            // 数据目录：GT_AI_GATEWAY_DATA_DIR 优先（支持 ~），未设置则用系统默认目录。
+            // 显式指定的目录必须已存在：不自动创建、也不静默回退默认目录（否则会连到空库）。
+            let env_data_dir = std::env::var("GT_AI_GATEWAY_DATA_DIR").ok();
+            let home_dir = app.path().home_dir().ok();
+            let app_data_dir = match utils::resolve_custom_data_dir(env_data_dir.as_deref(), home_dir.as_deref()) {
+                Ok(Some(dir)) => dir,
+                Ok(None) => app
+                    .path()
+                    .data_dir()
+                    .expect("failed to get data dir")
+                    .join("GtCoder")
+                    .join("AiGateway"),
+                Err(message) => {
+                    rust_log(format!("fatal: {message}"));
+                    return Err(message.into());
+                }
+            };
 
             let log_dir = app_data_dir.join("logs");
+            // 默认目录按原行为自动创建；显式指定的目录已在上一步校验存在，这里只补 logs
             fs::create_dir_all(&app_data_dir)?;
             fs::create_dir_all(&log_dir)?;
 
@@ -673,12 +702,14 @@ pub fn run() {
             rust_log(format!("port={}", config.port));
             rust_log("backend launch deferred until splash is visible");
 
+            rust_log(format!("log_level={}", config.log_level));
             app.manage(BackendLaunchConfig {
                 db_path: db_path.clone(),
                 log_dir: log_dir.clone(),
                 port: config.port,
                 host: config.host.clone(),
                 root_token: config.root_token.clone(),
+                log_level: config.log_level.clone(),
             });
             app.manage(BackendProcessState {
                 platform_state: Mutex::new(None),
