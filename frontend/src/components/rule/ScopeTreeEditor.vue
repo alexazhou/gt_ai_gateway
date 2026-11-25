@@ -5,6 +5,7 @@
                 :value="nodeKind"
                 size="small"
                 class="node-type-select"
+                :disabled="readonly"
                 @change="changeNodeKind"
             >
                 <a-select-option value="and">AND</a-select-option>
@@ -15,12 +16,12 @@
 
             <!-- 叶子条件内容 -->
             <template v-if="isLeaf">
-                <a-select v-model:value="(node as LeafNode).type" size="small" class="leaf-field-select">
+                <a-select v-model:value="(node as LeafNode).type" size="small" class="leaf-field-select" :disabled="readonly">
                     <a-select-option value="user_id">用户 ID</a-select-option>
                     <a-select-option value="model_id">模型 ID</a-select-option>
                     <a-select-option value="vendor_id">供应商 ID</a-select-option>
                 </a-select>
-                <a-select v-model:value="(node as LeafNode).oper" size="small" class="leaf-field-select">
+                <a-select v-model:value="(node as LeafNode).oper" size="small" class="leaf-field-select" :disabled="readonly">
                     <a-select-option value="=">=</a-select-option>
                     <a-select-option value="!=">≠</a-select-option>
                     <a-select-option value="in">in</a-select-option>
@@ -31,6 +32,7 @@
                     :value-type="(node as LeafNode).type"
                     :oper="(node as LeafNode).oper"
                     :options="options"
+                    :readonly="readonly"
                 />
             </template>
 
@@ -42,7 +44,7 @@
             <!-- 固定值（const）：true / false 可选 -->
             <template v-else-if="isConst">
                 <span class="const-label">固定值</span>
-                <a-select v-model:value="(node as ConstNode).values[0]" size="small" class="const-select">
+                <a-select v-model:value="(node as ConstNode).values[0]" size="small" class="const-select" :disabled="readonly">
                     <a-select-option :value="true">true</a-select-option>
                     <a-select-option :value="false">false</a-select-option>
                 </a-select>
@@ -51,12 +53,12 @@
                 </span>
             </template>
 
-            <a-button v-if="!isRoot" type="text" size="small" danger @click="emit('remove')">
+            <a-button v-if="!isRoot && !readonly" type="text" size="small" danger @click="emit('remove')">
                 <DeleteOutlined />
             </a-button>
             <!-- + 添加条件：挂在父节点（and/or 分组）行内、靠右 -->
             <a-button
-                v-if="isGroup"
+                v-if="isGroup && !readonly"
                 size="small"
                 type="dashed"
                 class="add-button"
@@ -69,7 +71,12 @@
         <!-- and/or 子节点树 -->
         <div v-if="isGroup" class="tree-children">
             <div v-for="(child, index) in (node as LogicNode).values" :key="index" class="tree-child-row">
-                <ScopeTreeEditor :node="child" :options="options" @remove="removeChild(index)" />
+                <ScopeTreeEditor
+                    :node="child"
+                    :options="options"
+                    :readonly="readonly"
+                    @remove="removeChild(index)"
+                />
             </div>
         </div>
     </div>
@@ -85,9 +92,12 @@ const props = withDefaults(defineProps<{
     node: ExprNode;
     isRoot?: boolean;
     options?: ScopeOptions;
+    /** 只读：控件禁用，隐藏增删按钮（系统规则查看） */
+    readonly?: boolean;
 }>(), {
     isRoot: false,
     options: () => ({ models: [], users: [], vendors: [] }),
+    readonly: false,
 });
 
 const emit = defineEmits<{

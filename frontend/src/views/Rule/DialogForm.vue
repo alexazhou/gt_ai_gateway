@@ -4,36 +4,42 @@
         @cancel="handleCancel"
         :confirm-loading="loading"
         :width="720"
+        :body-style="{ paddingTop: '16px' }"
     >
         <template #title>
             <div class="modal-title">
-                <span>{{ isEdit ? '编辑规则' : '新增规则' }}</span>
+                <span>{{ modalTitle }}</span>
                 <div class="rule-status">
                     <span>启用</span>
-                    <a-switch v-model:checked="formState.enabled" size="small" />
+                    <a-switch v-model:checked="formState.enabled" size="small" :disabled="viewMode" />
                     <template v-if="tenantStore.multiTenantEnabled">
                         <a-tooltip title="跨租户共享仅 main 租户规则可开启；开启后对所有租户生效（非 main 租户规则不可勾选）">
                             <span style="margin-left: 12px;">跨租户共享</span>
                         </a-tooltip>
-                        <a-switch v-model:checked="formState.cross_tenant" size="small" :disabled="!isMainView" />
+                        <a-switch v-model:checked="formState.cross_tenant" size="small" :disabled="!isMainView || viewMode" />
                     </template>
                 </div>
             </div>
         </template>
         <template #footer>
             <div class="modal-footer">
-                <a-button @click="handleCancel">取消</a-button>
-                <a-button type="primary" :loading="loading" @click="handleOk">
-                    {{ isEdit ? '保存' : '创建' }}
-                </a-button>
+                <template v-if="viewMode">
+                    <a-button type="primary" @click="handleCancel">关闭</a-button>
+                </template>
+                <template v-else>
+                    <a-button @click="handleCancel">取消</a-button>
+                    <a-button type="primary" :loading="loading" @click="handleOk">
+                        {{ isEdit ? '保存' : '创建' }}
+                    </a-button>
+                </template>
             </div>
         </template>
-        <a-form :model="formState" layout="vertical">
+        <a-form :model="formState" layout="vertical" class="rule-form">
             <a-form-item label="规则名称" name="name">
-                <a-input v-model:value="formState.name" placeholder="例如：gpt-4o 仅内部用户可用" />
+                <a-input v-model:value="formState.name" placeholder="例如：gpt-4o 仅内部用户可用" :disabled="viewMode" />
             </a-form-item>
             <a-form-item label="规则类型" name="type">
-                <a-radio-group v-model:value="formState.type" button-style="solid">
+                <a-radio-group v-model:value="formState.type" button-style="solid" :disabled="viewMode">
                     <a-radio-button value="rate_limit">
                         限流（RPM）
                         <a-tooltip title="按 RPM 上限拒绝超限请求（429）">
@@ -61,6 +67,7 @@
                         :min="0"
                         :max="10000"
                         :precision="0"
+                        :disabled="viewMode"
                         style="width: 160px"
                     />
                     <span class="config-hint">
@@ -69,9 +76,9 @@
                 </div>
             </a-form-item>
 
-            <a-form-item label="匹配条件（scope）" required>
+            <a-form-item label="匹配条件（scope）" required class="scope-form-item">
                 <div class="scope-editor">
-                    <ScopeTreeEditor :node="formState.scope" :options="scopeOptions" is-root />
+                    <ScopeTreeEditor :node="formState.scope" :options="scopeOptions" :readonly="viewMode" is-root />
                 </div>
             </a-form-item>
 
@@ -82,6 +89,7 @@
                         v-model:value="formState.config.rpm"
                         :min="0"
                         :precision="0"
+                        :disabled="viewMode"
                         placeholder="留空 = 不限制"
                         style="width: 200px"
                     />
@@ -97,6 +105,7 @@
                             v-model:value="formState.pluginName"
                             :options="pluginOptions"
                             :loading="pluginsLoading"
+                            :disabled="viewMode"
                             placeholder="选择插件"
                             style="width: 260px"
                             @change="handlePluginChange"
@@ -108,6 +117,7 @@
                     <a-textarea
                         v-model:value="formState.pluginConfigText"
                         :rows="6"
+                        :disabled="viewMode"
                         placeholder='留空即 {}；例如 {"cchValue": "A1234"}'
                         class="plugin-config-textarea"
                     />
@@ -156,6 +166,12 @@ const visible = ref(false);
 const loading = ref(false);
 const currentId = ref(0);
 const isEdit = computed(() => currentId.value > 0);
+// 只读查看（系统规则）：回填同样的内容，禁用全部输入，footer 只留关闭
+const viewMode = ref(false);
+const modalTitle = computed(() => {
+    if (viewMode.value) return '查看规则';
+    return isEdit.value ? '编辑规则' : '新增规则';
+});
 
 function createDefaultScope(): ExprNode {
     return { type: 'and', values: [{ type: 'model_id', oper: '=', values: [] } as LeafNode] } as LogicNode;
@@ -251,12 +267,26 @@ function handlePluginChange(): void {
 function openCreate(): void {
     resetForm();
     currentId.value = 0;
+    viewMode.value = false;
     void loadScopeOptions();
     void loadPlugins();
     visible.value = true;
 }
 
 function openEdit(rule: Rule): void {
+    fillForm(rule);
+    viewMode.value = false;
+    visible.value = true;
+}
+
+function openView(rule: Rule): void {
+    fillForm(rule);
+    viewMode.value = true;
+    visible.value = true;
+}
+
+/** 编辑 / 查看共用回填：openEdit 与 openView 只差 viewMode */
+function fillForm(rule: Rule): void {
     resetForm();
     currentId.value = rule.id;
     formState.name = rule.name;
@@ -281,7 +311,6 @@ function openEdit(rule: Rule): void {
         void loadPlugins();
     }
     void loadScopeOptions();
-    visible.value = true;
 }
 
 // type 切换时重置 config / 插件参数
@@ -382,10 +411,11 @@ async function handleOk(): Promise<void> {
 function handleCancel(): void {
     visible.value = false;
     currentId.value = 0;
+    viewMode.value = false;
     resetForm();
 }
 
-defineExpose({ openCreate, openEdit });
+defineExpose({ openCreate, openEdit, openView });
 </script>
 
 <style scoped>
@@ -418,10 +448,24 @@ defineExpose({ openCreate, openEdit });
 }
 
 .scope-editor {
-    padding: 12px;
+    padding: 6px 8px;
     border: 1px solid var(--border-color);
     border-radius: 8px;
     background: var(--bg-page);
+}
+
+/* 弹窗内表单收紧行距：antd 默认 24px 在 720px 宽的弹窗里显得空 */
+.rule-form :deep(.ant-form-item) {
+    margin-bottom: 12px;
+}
+
+/* 条件树是带边框的块，外框底边已形成视觉间隔，再叠 12px 行距就空了 */
+.rule-form :deep(.ant-form-item.scope-form-item) {
+    margin-bottom: 8px;
+}
+
+.rule-form :deep(.ant-form-item-label) {
+    padding-bottom: 2px;
 }
 
 .config-row {
