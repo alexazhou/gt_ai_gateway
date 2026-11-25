@@ -103,4 +103,14 @@ describe("recordUpstreamChunk 日志分级", () => {
         expect(printed(logSpy)).toContain("#1");
         expect(debugSpy).not.toHaveBeenCalled();
     });
+
+    it("logStream 为 null（未开流日志）时不抛，且仍按级别输出", () => {
+        initLogger(logDir, true, { level: "info" });
+
+        expect(() => recordUpstreamChunk(12, 1, "only-chunk", null)).not.toThrow();
+
+        expect(logSpy).toHaveBeenCalledTimes(1);
+        expect(printed(logSpy)).toContain("record=12");
+        expect(printed(logSpy)).toContain("#1");
+    });
 });

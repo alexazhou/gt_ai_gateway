@@ -50,32 +50,8 @@ export async function writeRequestLog(record: SgRecord, body: string): Promise<v
     ws.end(body);
 }
 
-// 每个流已写入的 chunk 数（WeakMap：流对象被回收后计数自动消失，不会泄漏）
-const chunkCounters = new WeakMap<WriteStream, number>();
-
 // 采样间隔：流式响应轻松上千个 chunk，逐 chunk 打日志会把日志和事件循环都拖慢（P2-12）
 const CHUNK_LOG_SAMPLE_EVERY = 200;
-
-
-/**
- * 追加一段流日志。
- *
- * P2-12：原来每个 chunk 都 console.log 一次（还带两次 includes 扫描）——流式响应上千 chunk 时
- * 既是日志洪水又是热路径开销。改为采样（首个 + 每 200 个打一条），只保留「流有没有在动」的信号。
- */
-export function appendStreamLog(logStream: WriteStream | null, chunk: string): void {
-    if (!logStream) {
-        return;
-    }
-
-    const written = (chunkCounters.get(logStream) ?? 0) + 1;
-    chunkCounters.set(logStream, written);
-    if (written === 1 || written % CHUNK_LOG_SAMPLE_EVERY === 0) {
-        console.log(`[streamLogService] chunk #${written}, length: ${chunk.length}`);
-    }
-
-    logStream.write(chunk);
-}
 
 
 /**
@@ -86,8 +62,7 @@ export function appendStreamLog(logStream: WriteStream | null, chunk: string): v
  * - warn/error 级别：控制台一条不打（采样摘要也属于 info）；
  * - 不论哪个级别，开了 stream_log_enabled（logStream 非空）就照常原样写入文件。
  *
- * 与 appendStreamLog 的区别：级别判定走 logger，序号由调用方（runSSELoop）给定，
- * 因此不需要 WeakMap 计数，也不依赖 logStream 是否存在。
+ * 序号由调用方（runSSELoop）给定，因此不需要按流计数，也不依赖 logStream 是否存在。
  */
 export function recordUpstreamChunk(
     recordId: number | string,
@@ -134,7 +109,6 @@ export function finishStreamLog(logStream: WriteStream | null): Promise<void> {
 export default {
     prepareStreamLog,
     writeRequestLog,
-    appendStreamLog,
     recordUpstreamChunk,
     finishStreamLog,
 };
