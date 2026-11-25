@@ -65,27 +65,32 @@ async function startServer() {
     // 初始化日志系统（在重写 console 之前，使用原始 console）
     const logger: Logger = initLogger(true);
     originalConsole.log("Starting server...");
+    originalConsole.log(`[local] LOG_LEVEL=${logger.getLevel()}（debug 时逐 chunk 输出上游流式原文）`);
 
-    // 重写 console 方法以记录日志
+    // 重写 console 方法以记录日志；低于 LOG_LEVEL 的级别不进控制台也不落盘
     console.log = (...args: unknown[]) => {
+        if (!logger.shouldLog("info")) return;
         originalConsole.log(...args);
         const message = args.map(formatConsoleArg).join(" ");
         logger["write"]("info", message);
     };
 
     console.error = (...args: unknown[]) => {
+        if (!logger.shouldLog("error")) return;
         originalConsole.error(...args);
         const message = args.map(formatConsoleArg).join(" ");
         logger["write"]("error", message);
     };
 
     console.warn = (...args: unknown[]) => {
+        if (!logger.shouldLog("warn")) return;
         originalConsole.warn(...args);
         const message = args.map(formatConsoleArg).join(" ");
         logger["write"]("warn", message);
     };
 
     console.debug = (...args: unknown[]) => {
+        if (!logger.shouldLog("debug")) return;
         originalConsole.debug(...args);
         const message = args.map(formatConsoleArg).join(" ");
         logger["write"]("debug", message);
