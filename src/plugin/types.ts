@@ -43,8 +43,8 @@ export interface PluginPatchResult {
 /**
  * 插件执行上下文：全部只读。
  *
- * 不含 `user_id` / `vendor_id` 等匹配维度的原因是——规则匹配已在管线层完成，
- * 插件只该关心「当前是哪个协议阶段、面向哪个客户端」，越权信息会让插件长成第二套规则引擎。
+ * 不含 `vendor_id` 等匹配维度（规则匹配已在管线层完成），`userId` 是唯一例外：
+ * session 头要按用户区分会话身份，拿不到就只能退化成全局唯一的弱标识。
  */
 export interface PluginContext {
     readonly hook: PluginHook;
@@ -55,6 +55,8 @@ export interface PluginContext {
     readonly currentFormat: ApiFormat;
     readonly hostKey: string;
     readonly clientName: string | null | undefined;
+    /** 发起本次请求的网关用户 id（鉴权结果） */
+    readonly userId: number;
 }
 
 /**
@@ -62,13 +64,14 @@ export interface PluginContext {
  *
  * `request.body` 是只读视图，插件**不得**就地改写；要改就返回 `bodyPatch`。
  * `request.headers` 是网关已构造好的上游请求头快照，同样只读取值、用 `headerPatch` 表达改动。
- * 返回 `void` / `undefined` 表示不处理。
+ * 返回 `void` / `undefined` 表示不处理。允许返回 Promise：需要哈希的插件（如 session id）
+ * 只能用异步 WebCrypto 取摘要，管线侧统一 `await`。
  */
 export type PluginHookHandler = (
     request: { readonly body: Readonly<Record<string, unknown>>; readonly headers: Headers },
     context: PluginContext,
     pluginConfig: Record<string, unknown>,
-) => PluginPatchResult | void;
+) => PluginPatchResult | void | Promise<PluginPatchResult | void>;
 
 /**
  * 内置请求插件。

@@ -40,6 +40,7 @@ function options(overrides: Partial<ApplyPluginsOptions> = {}): ApplyPluginsOpti
             currentFormat: ApiFormat.ANTHROPIC,
             hostKey: "host-key-1",
             clientName: "claude-code",
+            userId: 1,
         },
         ...overrides,
     };

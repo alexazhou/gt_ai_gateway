@@ -1,4 +1,5 @@
 import pluginRegistry from "./pluginRegistry";
+import addSessionHeader from "./addSessionHeader";
 import { cchRewriter } from "./cchRewriter";
 import claudeCodeTrackingRewriter from "./claudeCodeTrackingRewriter";
 import responsesPromptCacheKeyRewriter from "./responsesPromptCacheKeyRewriter";
@@ -19,6 +20,7 @@ export const BUILTIN_PLUGINS: readonly RequestPlugin[] = [
     claudeCodeTrackingRewriter,
     cchRewriter,
     responsesPromptCacheKeyRewriter,
+    addSessionHeader,
 ];
 
 pluginRegistry.registerAll(BUILTIN_PLUGINS);

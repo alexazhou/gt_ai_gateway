@@ -56,6 +56,8 @@ export interface ApplyPluginsOptions {
         currentFormat: ApiFormat;
         hostKey: string;
         clientName: string | null | undefined;
+        /** 发起请求的网关用户 id（session 头等需要按用户区分的插件用） */
+        userId: number;
     };
 }
 
@@ -139,7 +141,8 @@ export async function applyRequestPlugins(options: ApplyPluginsOptions): Promise
         try {
             // 传只读视图：插件只该读、用补丁表达改动。对象/Headers 本身防不住越权写，
             // 真正的边界在 applyBodyPatch / applyHeaderPatch 上（受保护字段/头一律拒绝）
-            patchResult = handler(
+            // await：需要哈希的插件（session id）只能用异步 WebCrypto，同步插件返回值照旧
+            patchResult = await handler(
                 { body: bodyObject as Readonly<Record<string, unknown>>, headers: currentHeaders },
                 context,
                 matched.pluginConfig ?? {},

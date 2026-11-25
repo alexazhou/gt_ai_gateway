@@ -3,6 +3,7 @@ import { setupAdminUser } from "../../globalSetup";
 import dbHelper from "../../helpers/dbHelper";
 import requestHelper from "../../helpers/requestHelper";
 import userFixtures from "../../fixtures/userFixtures";
+import { SYSTEM_PLUGIN_RULES } from "../../../src/plugin/systemRules";
 
 /**
  * 高级设置开关 ↔ 系统规则联动（T4，design/2026-11-24-generic-plugin step2_technical.md §3.2）。
@@ -40,8 +41,11 @@ describe("高级设置开关与系统规则联动", () => {
 
     it("关闭「强制改写 CCH」：配置落库，对应系统规则 enabled 同步为 false，其它规则不受影响", async () => {
         const before = await systemRules();
-        expect(before).toHaveLength(3);
-        expect(before.every((rule) => rule.enabled === true)).toBe(true);
+        expect(before).toHaveLength(SYSTEM_PLUGIN_RULES.length);
+        // 默认值：三条历史开关默认开；session header 默认关（开启会给上游多注一个头）
+        expect(before.find((rule) => rule.biz_id === "SYS:setting:session_header").enabled).toBe(false);
+        expect(before.filter((rule) => rule.biz_id !== "SYS:setting:session_header")
+            .every((rule) => rule.enabled === true)).toBe(true);
 
         const response = await putConfig({ cch_rewrite_enabled: "false" });
         expect(response.status).toBe(200);

@@ -225,6 +225,7 @@ async function sendRequestToUpstream(
         upstreamFormat,
         hostKey,
         clientName: user.name,
+        userId: Number(user.id),
     };
     const pluginExecuted: PluginExecutionEntry[] = [];
     const pluginIssues: PluginIssue[] = [];

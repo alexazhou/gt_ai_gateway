@@ -61,10 +61,11 @@ describe("Rule API: 来源、优先级与只读保护", () => {
             systemRuleName("SYS:setting:claudecode_tracking_rewrite"),
             systemRuleName("SYS:setting:cch_rewrite"),
             systemRuleName("SYS:setting:responses_prompt_cache_key"),
+            systemRuleName("SYS:setting:session_header"),
             "p50",
             "p200",
         ]);
-        expect(list.body.list.map((rule: any) => rule.priority)).toEqual([10, 20, 30, 50, 200]);
+        expect(list.body.list.map((rule: any) => rule.priority)).toEqual([10, 20, 30, 40, 50, 200]);
     });
 
     it("同优先级按 id 升序（后建的同优先级规则排在后面）", async () => {
@@ -83,7 +84,7 @@ describe("Rule API: 来源、优先级与只读保护", () => {
 
         const systemList = await requestHelper.get("/rule/list.json?source=system", adminToken);
         expect(systemList.status).toBe(200);
-        expect(systemList.body.total).toBe(3);
+        expect(systemList.body.total).toBe(SYSTEM_PLUGIN_RULES.length);
         expect(systemList.body.list.every((rule: any) => rule.source === "system")).toBe(true);
 
         const userList = await requestHelper.get("/rule/list.json?source=user", adminToken);
@@ -91,7 +92,7 @@ describe("Rule API: 来源、优先级与只读保护", () => {
         expect(userList.body.list.map((rule: any) => rule.name)).toEqual(["mine"]);
 
         const all = await requestHelper.get("/rule/list.json", adminToken);
-        expect(all.body.total).toBe(4);
+        expect(all.body.total).toBe(SYSTEM_PLUGIN_RULES.length + 1);
 
         const bad = await requestHelper.get("/rule/list.json?source=weird", adminToken);
         expect(bad.status).toBe(400);

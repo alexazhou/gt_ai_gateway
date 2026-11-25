@@ -4,7 +4,7 @@ import { cchRewriter, planCchRewrite, rewriteCchInSystemPrompt } from "../../../
 import { claudeCodeTrackingRewriter, planTrackingMarkerRemoval } from "../../../src/plugin/claudeCodeTrackingRewriter";
 import { planPromptCacheKeyInjection, responsesPromptCacheKeyRewriter } from "../../../src/plugin/responsesPromptCacheKeyRewriter";
 import { applyBodyPatch } from "../../../src/plugin/patch/applyPatch";
-import type { PluginContext, PluginHookHandler, RequestPlugin } from "../../../src/plugin/types";
+import type { PluginContext, PluginHookHandler, PluginPatchResult, RequestPlugin } from "../../../src/plugin/types";
 
 /**
  * 内置插件改造后的契约（T2）：注册形状、`validateConfig` 参数校验、钩子产出的补丁。
@@ -21,24 +21,35 @@ function context(overrides: Partial<PluginContext> = {}): PluginContext {
         currentFormat: ApiFormat.ANTHROPIC,
         hostKey: "host-key-1",
         clientName: "claude-code",
+        userId: 1,
         ...overrides,
     };
 }
 
-function runHook(handler: PluginHookHandler | undefined, body: Record<string, unknown>, ctx: PluginContext, pluginConfig: Record<string, unknown> = {}) {
+/** 钩子可能是异步的（session 头插件要算哈希），统一 await 后再断言 */
+async function runHook(
+    handler: PluginHookHandler | undefined,
+    body: Record<string, unknown>,
+    ctx: PluginContext,
+    pluginConfig: Record<string, unknown> = {},
+): Promise<PluginPatchResult | void> {
     expect(handler).toBeTypeOf("function");
-    return handler!({ body, headers: new Headers() }, ctx, pluginConfig);
+    return await handler!({ body, headers: new Headers() }, ctx, pluginConfig);
 }
 
-function applyHookResult(body: Record<string, unknown>, result: ReturnType<PluginHookHandler>) {
-    if (!result || !result.bodyPatch) {
+async function applyHookResult(
+    body: Record<string, unknown>,
+    result: Promise<PluginPatchResult | void> | PluginPatchResult | void,
+) {
+    const resolved = await result;
+    if (!resolved || !resolved.bodyPatch) {
         return body;
     }
-    return applyBodyPatch(body, result.bodyPatch).value;
+    return applyBodyPatch(body, resolved.bodyPatch).value;
 }
 
 describe("内置插件注册", () => {
-    it("三个内置插件都注册在 registry 里，且都声明了转换前后两个钩子", async () => {
+    it("四个内置插件都注册在 registry 里，且都声明了转换前后两个钩子", async () => {
         // worker 门里所有测试文件共用同一份注册表，别的文件可能已经把它清空了。
         // 重建模块图后重新导入：新注册表应当是空的，导入 builtinPlugins 时由副作用填满。
         vi.resetModules();
@@ -47,12 +58,12 @@ describe("内置插件注册", () => {
         const freshBuiltins = await import("../../../src/plugin/builtinPlugins");
 
         expect(freshBuiltins.BUILTIN_PLUGINS.map((plugin) => plugin.name).sort())
-            .toEqual(["cchRewriter", "claudeCodeTrackingRewriter", "responsesPromptCacheKeyRewriter"]);
+            .toEqual(["addSessionHeader", "cchRewriter", "claudeCodeTrackingRewriter", "responsesPromptCacheKeyRewriter"]);
         for (const plugin of freshBuiltins.BUILTIN_PLUGINS) {
             expect(freshRegistry.has(plugin.name)).toBe(true);
         }
         const described = freshRegistry.describe();
-        for (const name of ["cchRewriter", "claudeCodeTrackingRewriter", "responsesPromptCacheKeyRewriter"]) {
+        for (const name of ["addSessionHeader", "cchRewriter", "claudeCodeTrackingRewriter", "responsesPromptCacheKeyRewriter"]) {
             const entry = described.find((item) => item.name === name);
             expect(entry, `${name} 应出现在插件列表`).toBeTruthy();
             expect(entry!.hooks).toEqual(["before_conversion", "after_conversion"]);
@@ -98,11 +109,11 @@ describe("cchRewriter 钩子", () => {
         system: "x-anthropic-billing-header: cc_version=2.1.153.9bb; cch=5a235;\nInstructions",
     };
 
-    it("anthropic 阶段按规则参数改写（默认 A1234 / 自定义 B5678）", () => {
-        const byDefault = applyHookResult(billingBody, runHook(cchRewriter.beforeConversion, billingBody, context()));
+    it("anthropic 阶段按规则参数改写（默认 A1234 / 自定义 B5678）", async () => {
+        const byDefault = await applyHookResult(billingBody, runHook(cchRewriter.beforeConversion, billingBody, context()));
         expect(byDefault.system).toContain("cch=A1234;");
 
-        const custom = applyHookResult(
+        const custom = await applyHookResult(
             billingBody,
             runHook(cchRewriter.beforeConversion, billingBody, context(), { cchValue: "B5678" }),
         );
@@ -110,25 +121,25 @@ describe("cchRewriter 钩子", () => {
         expect(custom.system).not.toContain("5a235");
     });
 
-    it("非 anthropic 阶段直接返回 undefined（本插件不处理该协议）", () => {
-        expect(runHook(cchRewriter.afterConversion, billingBody, context({ currentFormat: ApiFormat.OPENAI }))).toBeUndefined();
+    it("非 anthropic 阶段直接返回 undefined（本插件不处理该协议）", async () => {
+        expect(await runHook(cchRewriter.afterConversion, billingBody, context({ currentFormat: ApiFormat.OPENAI }))).toBeUndefined();
     });
 
-    it("没有 billing header 时不产生补丁（未改写不留痕）", () => {
+    it("没有 billing header 时不产生补丁（未改写不留痕）", async () => {
         const body = { system: "just a normal system prompt" };
-        expect(runHook(cchRewriter.beforeConversion, body, context())).toBeUndefined();
+        expect(await runHook(cchRewriter.beforeConversion, body, context())).toBeUndefined();
         expect(planCchRewrite(body, "A1234")).toEqual([]);
     });
 
-    it("字符串接口与钩子产出同一结果（老入口没被改坏）", () => {
+    it("字符串接口与钩子产出同一结果（老入口没被改坏）", async () => {
         const viaString = JSON.parse(rewriteCchInSystemPrompt(JSON.stringify(billingBody), "B5678"));
-        const viaHook = applyHookResult(billingBody, runHook(cchRewriter.beforeConversion, billingBody, context(), { cchValue: "B5678" }));
+        const viaHook = await applyHookResult(billingBody, runHook(cchRewriter.beforeConversion, billingBody, context(), { cchValue: "B5678" }));
         expect(viaHook).toEqual(viaString);
     });
 });
 
 describe("claudeCodeTrackingRewriter 钩子", () => {
-    it("system 数组时只改命中的那段，路径精确到下标", () => {
+    it("system 数组时只改命中的那段，路径精确到下标", async () => {
         const body = {
             system: [
                 { type: "text", text: "Instruction 1" },
@@ -139,15 +150,15 @@ describe("claudeCodeTrackingRewriter 钩子", () => {
         expect(patch).toEqual([
             { op: "replace", path: "/system/1/text", value: "# currentDate\nToday's date is 2026-06-30.\n" },
         ]);
-        const applied = applyHookResult(body, runHook(claudeCodeTrackingRewriter.beforeConversion, body, context()));
+        const applied = await applyHookResult(body, runHook(claudeCodeTrackingRewriter.beforeConversion, body, context()));
         expect((applied.system as any)[1].text).toContain("2026-06-30");
         // 未命中的那段一个字节都没动
         expect((applied.system as any)[0].text).toBe("Instruction 1");
     });
 
-    it("非 anthropic 阶段不处理", () => {
+    it("非 anthropic 阶段不处理", async () => {
         const body = { system: "# currentDate\nToday's date is 2026/06/30.\n" };
-        expect(runHook(claudeCodeTrackingRewriter.afterConversion, body, context({ currentFormat: ApiFormat.RESPONSES })))
+        expect(await runHook(claudeCodeTrackingRewriter.afterConversion, body, context({ currentFormat: ApiFormat.RESPONSES })))
             .toBeUndefined();
     });
 });
@@ -160,21 +171,21 @@ describe("responsesPromptCacheKeyRewriter 钩子", () => {
         clientName: "codex",
     });
 
-    it("缺失时注入 ${hostKey}:${clientName}，已有值时不覆盖", () => {
+    it("缺失时注入 ${hostKey}:${clientName}，已有值时不覆盖", async () => {
         const body = { input: "hello" };
         const patch = planPromptCacheKeyInjection(body, "host-key-1", "codex");
         expect(patch).toEqual([{ op: "add", path: "/prompt_cache_key", value: "host-key-1:codex" }]);
 
-        const applied = applyHookResult(body, runHook(responsesPromptCacheKeyRewriter.beforeConversion, body, responsesContext));
+        const applied = await applyHookResult(body, runHook(responsesPromptCacheKeyRewriter.beforeConversion, body, responsesContext));
         expect(applied.prompt_cache_key).toBe("host-key-1:codex");
 
         const withKey = { input: "hello", prompt_cache_key: "client-key" };
-        expect(runHook(responsesPromptCacheKeyRewriter.beforeConversion, withKey, responsesContext)).toBeUndefined();
+        expect(await runHook(responsesPromptCacheKeyRewriter.beforeConversion, withKey, responsesContext)).toBeUndefined();
         expect(planPromptCacheKeyInjection(withKey, "host-key-1", "codex")).toEqual([]);
     });
 
-    it("非 responses 阶段不处理", () => {
+    it("非 responses 阶段不处理", async () => {
         const body = { input: "hello" };
-        expect(runHook(responsesPromptCacheKeyRewriter.beforeConversion, body, context())).toBeUndefined();
+        expect(await runHook(responsesPromptCacheKeyRewriter.beforeConversion, body, context())).toBeUndefined();
     });
 });

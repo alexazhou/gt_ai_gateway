@@ -97,6 +97,19 @@
                                 />
                             </div>
                         </div>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-title">自动生成 session header</div>
+                                <div class="setting-desc">启用后，会给上游请求注入 <code>X-Session-Id</code> 头：按「用户 + system prompt + 第一条消息」生成会话 id，同一会话内保持不变，便于上游按会话聚合缓存</div>
+                            </div>
+                            <div class="setting-action">
+                                <a-switch
+                                    :checked="form.session_header_enabled"
+                                    @change="form.session_header_enabled = $event as boolean"
+                                    :disabled="saving"
+                                />
+                            </div>
+                        </div>
                     </div>
                 </a-tab-pane>
 
@@ -423,6 +436,7 @@ const originalConfig = reactive({
     cch_rewrite_enabled: false,
     responses_prompt_cache_key_enabled: false,
     claudecode_tracking_rewrite_enabled: true,
+    session_header_enabled: false,
     stream_log_enabled: false,
     record_payload_enabled: true,
     record_payload_storage: 'auto' as RecordPayloadStorage,
@@ -437,6 +451,7 @@ const form = reactive({
     cch_rewrite_enabled: false,
     responses_prompt_cache_key_enabled: false,
     claudecode_tracking_rewrite_enabled: true,
+    session_header_enabled: false,
     stream_log_enabled: false,
     record_payload_enabled: true,
     record_payload_storage: 'auto' as RecordPayloadStorage,
@@ -451,6 +466,7 @@ const isDirty = computed(() => {
     return form.cch_rewrite_enabled !== originalConfig.cch_rewrite_enabled ||
            form.responses_prompt_cache_key_enabled !== originalConfig.responses_prompt_cache_key_enabled ||
            form.claudecode_tracking_rewrite_enabled !== originalConfig.claudecode_tracking_rewrite_enabled ||
+           form.session_header_enabled !== originalConfig.session_header_enabled ||
            form.stream_log_enabled !== originalConfig.stream_log_enabled ||
            form.record_payload_enabled !== originalConfig.record_payload_enabled ||
            form.record_payload_storage !== originalConfig.record_payload_storage ||
@@ -488,6 +504,9 @@ async function loadConfig(): Promise<void> {
         form.claudecode_tracking_rewrite_enabled = config.claudecode_tracking_rewrite_enabled !== "false";
         originalConfig.claudecode_tracking_rewrite_enabled = config.claudecode_tracking_rewrite_enabled !== "false";
 
+        form.session_header_enabled = config.session_header_enabled === "true";
+        originalConfig.session_header_enabled = config.session_header_enabled === "true";
+
         form.stream_log_enabled = config.stream_log_enabled === "true";
         originalConfig.stream_log_enabled = config.stream_log_enabled === "true";
 
@@ -520,6 +539,7 @@ function cancelChanges() {
     form.cch_rewrite_enabled = originalConfig.cch_rewrite_enabled;
     form.responses_prompt_cache_key_enabled = originalConfig.responses_prompt_cache_key_enabled;
     form.claudecode_tracking_rewrite_enabled = originalConfig.claudecode_tracking_rewrite_enabled;
+    form.session_header_enabled = originalConfig.session_header_enabled;
     form.stream_log_enabled = originalConfig.stream_log_enabled;
     form.record_payload_enabled = originalConfig.record_payload_enabled;
     form.record_payload_storage = originalConfig.record_payload_storage;
@@ -671,6 +691,7 @@ async function saveConfig() {
             cch_rewrite_enabled: form.cch_rewrite_enabled ? "true" : "false",
             responses_prompt_cache_key_enabled: form.responses_prompt_cache_key_enabled ? "true" : "false",
             claudecode_tracking_rewrite_enabled: form.claudecode_tracking_rewrite_enabled ? "true" : "false",
+            session_header_enabled: form.session_header_enabled ? "true" : "false",
             stream_log_enabled: form.stream_log_enabled ? "true" : "false",
             record_payload_enabled: form.record_payload_enabled ? "true" : "false",
             record_payload_storage: form.record_payload_storage,

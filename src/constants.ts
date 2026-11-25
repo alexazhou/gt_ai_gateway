@@ -139,6 +139,8 @@ export enum ConfigKey {
     CCH_REWRITE_ENABLED = "cch_rewrite_enabled",
     RESPONSES_PROMPT_CACHE_KEY_ENABLED = "responses_prompt_cache_key_enabled",
     CLAUDE_CODE_TRACKING_REWRITE_ENABLED = "claudecode_tracking_rewrite_enabled",
+    // 自动生成 session header：开启后启用同名系统规则（addSessionHeader 插件）
+    SESSION_HEADER_ENABLED = "session_header_enabled",
     HOST_KEY = "host_key",
     STREAM_LOG_ENABLED = "stream_log_enabled",
     AUTO_UPDATE_ENABLED = "auto_update_enabled",

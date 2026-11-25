@@ -336,4 +336,50 @@ describe("T5 插件管线（sender 集成）", () => {
         expect(events[0].details.executed.every((item: any) => item.hook === "after_conversion")).toBe(true);
         expect(events[0].details.executed.map((item: any) => item.priority)).toEqual([10, 20]);
     });
+    it("自动生成 session header：开启后上游收到 x-session-id，同会话多轮不变、换首条消息即换 id", async () => {
+        const opened = await requestHelper.put("/config.json", { session_header_enabled: "true" }, adminToken);
+        expect(opened.status).toBe(200);
+        await clearServerCaches();
+
+        const marker = `session-${randomUUID()}`;
+        const firstUser = `首条消息-${randomUUID()}`;
+
+        const send = async (messages: any[]) => {
+            const response = await requestHelper.post("/llm/v1/messages", {
+                ...mockHelper.generateAnthropicMessageRequest({ model: anthropicModelName, stream: false, messages }),
+                system: systemPromptWith(marker),
+            }, userToken);
+            expect(response.status).toBe(200);
+            return await waitForUpstream(marker);
+        };
+
+        const first = await send([{ role: "user", content: firstUser }]);
+        const firstSessionId = first.headers["x-session-id"];
+        expect(firstSessionId, "上游必须收到 x-session-id").toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+
+        // 会话往下长：客户端每轮都重发完整历史，首条消息与 system prompt 不变 ⇒ id 必须不变
+        const second = await send([
+            { role: "user", content: firstUser },
+            { role: "assistant", content: "好的" },
+            { role: "user", content: "第二轮" },
+        ]);
+        expect(second.headers["x-session-id"]).toBe(firstSessionId);
+
+        // 换了会话（首条消息不同）⇒ 必须是另一个 id
+        const other = await send([{ role: "user", content: `另一段会话-${randomUUID()}` }]);
+        expect(other.headers["x-session-id"]).toBeTruthy();
+        expect(other.headers["x-session-id"]).not.toBe(firstSessionId);
+    });
+
+    it("自动生成 session header：开关关闭时上游收不到该头（默认关闭）", async () => {
+        const marker = `no-session-${randomUUID()}`;
+        const response = await requestHelper.post("/llm/v1/messages", {
+            ...mockHelper.generateAnthropicMessageRequest({ model: anthropicModelName, stream: false }),
+            system: systemPromptWith(marker),
+        }, userToken);
+        expect(response.status).toBe(200);
+
+        const upstream = await waitForUpstream(marker);
+        expect(upstream.headers["x-session-id"]).toBeUndefined();
+    });
 });

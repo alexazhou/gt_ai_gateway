@@ -3,7 +3,7 @@
 -- 三件事，顺序有依赖：
 --   1) rule 表加 priority / source / biz_id / note 四列（存量规则的 priority 由 DEFAULT 回填 100）；
 --   2) 合并旧前端遗留的 tracking 配置键名（以旧键保存值为准）；
---   3) 按当前配置预置三条系统规则（priority 10 / 20 / 30，cross_tenant = 1，scope = const true）。
+--   3) 按当前配置预置四条系统规则（priority 10 / 20 / 30 / 40，cross_tenant = 1，scope = const true）。
 --
 -- 与 mysql.sql 同一语义，只有方言差异（INSERT OR IGNORE / 自子查询 UPDATE）。
 -- 本迁移只加列、加索引、搬数据，不改历史迁移、不动 _migrations。
@@ -39,34 +39,43 @@ WHERE name = 'claudecode_tracking_rewrite_enabled'
 
 DELETE FROM config WHERE name = 'claude_code_tracking_rewrite_enabled';
 
--- 3) 预置三条系统规则 -------------------------------------------------------
+-- 3) 预置四条系统规则 -------------------------------------------------------
 -- enabled 跟随**迁移后的运行期口径**：配置有行 → 用行值；配置无行 → 用后端默认值 'true'。
 -- 不能只看行是否存在：migrate_0017 预置过 cch_rewrite_enabled = 'false'，
 -- 而 configService 的默认值是 true —— 两处口径不一致，这里按「运行期实际会读到的值」算。
 -- 主租户由 migrate_0032 建好；查不到就不插（宁缺不错，缺了由启动自检/测试 seed 兜）。
-INSERT OR IGNORE INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id)
+INSERT OR IGNORE INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id, note)
 SELECT 'plugin',
        '屏蔽 Claude Code 跟踪',
        '{"type":"const","values":[true]}',
        '{"plugin":"claudeCodeTrackingRewriter","pluginConfig":{}}',
        CASE WHEN LOWER(COALESCE((SELECT value FROM config WHERE name = 'claudecode_tracking_rewrite_enabled'), 'true')) = 'false' THEN 0 ELSE 1 END,
-       t.id, 1, 10, 'system', 'SYS:setting:claudecode_tracking_rewrite'
+       t.id, 1, 10, 'system', 'SYS:setting:claudecode_tracking_rewrite', '系统预置：由 migrate_0035 创建，定义在 src/plugin/systemRules.ts。规则本身只读（改名 / 优先级 / 参数都不要直接改表），启用状态请在「高级设置 → 请求处理」切换对应开关。'
 FROM tenant t WHERE t.name = 'main';
 
-INSERT OR IGNORE INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id)
+INSERT OR IGNORE INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id, note)
 SELECT 'plugin',
        '强制改写 CCH',
        '{"type":"const","values":[true]}',
        '{"plugin":"cchRewriter","pluginConfig":{}}',
        CASE WHEN LOWER(COALESCE((SELECT value FROM config WHERE name = 'cch_rewrite_enabled'), 'true')) = 'false' THEN 0 ELSE 1 END,
-       t.id, 1, 20, 'system', 'SYS:setting:cch_rewrite'
+       t.id, 1, 20, 'system', 'SYS:setting:cch_rewrite', '系统预置：由 migrate_0035 创建，定义在 src/plugin/systemRules.ts。规则本身只读（改名 / 优先级 / 参数都不要直接改表），启用状态请在「高级设置 → 请求处理」切换对应开关。'
 FROM tenant t WHERE t.name = 'main';
 
-INSERT OR IGNORE INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id)
+INSERT OR IGNORE INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id, note)
 SELECT 'plugin',
        'Responses API 粘性路由',
        '{"type":"const","values":[true]}',
        '{"plugin":"responsesPromptCacheKeyRewriter","pluginConfig":{}}',
        CASE WHEN LOWER(COALESCE((SELECT value FROM config WHERE name = 'responses_prompt_cache_key_enabled'), 'true')) = 'false' THEN 0 ELSE 1 END,
-       t.id, 1, 30, 'system', 'SYS:setting:responses_prompt_cache_key'
+       t.id, 1, 30, 'system', 'SYS:setting:responses_prompt_cache_key', '系统预置：由 migrate_0035 创建，定义在 src/plugin/systemRules.ts。规则本身只读（改名 / 优先级 / 参数都不要直接改表），启用状态请在「高级设置 → 请求处理」切换对应开关。'
+FROM tenant t WHERE t.name = 'main';
+
+INSERT OR IGNORE INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id, note)
+SELECT 'plugin',
+       '自动生成 session header',
+       '{"type":"const","values":[true]}',
+       '{"plugin":"addSessionHeader","pluginConfig":{}}',
+       CASE WHEN LOWER(COALESCE((SELECT value FROM config WHERE name = 'session_header_enabled'), 'false')) = 'true' THEN 1 ELSE 0 END,
+       t.id, 1, 40, 'system', 'SYS:setting:session_header', '系统预置：由 migrate_0035 创建，定义在 src/plugin/systemRules.ts。规则本身只读（改名 / 优先级 / 参数都不要直接改表），启用状态请在「高级设置 → 请求处理」切换对应开关。'
 FROM tenant t WHERE t.name = 'main';

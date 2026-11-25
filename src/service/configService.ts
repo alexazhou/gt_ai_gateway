@@ -11,6 +11,8 @@ const CONFIG_DEFAULTS: Record<string, string> = {
     [ConfigKey.CCH_REWRITE_ENABLED]: "true",
     [ConfigKey.RESPONSES_PROMPT_CACHE_KEY_ENABLED]: "true",
     [ConfigKey.CLAUDE_CODE_TRACKING_REWRITE_ENABLED]: "true",
+    // 默认关闭：开启后每个请求的上游头都会多一个会话标识，属于改变上游可见行为的开关
+    [ConfigKey.SESSION_HEADER_ENABLED]: "false",
     [ConfigKey.HOST_KEY]: "",
     [ConfigKey.STREAM_LOG_ENABLED]: "false",
     [ConfigKey.AUTO_UPDATE_ENABLED]: "true",

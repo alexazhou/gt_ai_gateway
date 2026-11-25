@@ -19,13 +19,24 @@ export interface SystemPluginRuleDefinition {
     name: string;
     /** 内置插件名（pluginRegistry 里注册的名字，T2 落地） */
     plugin: string;
-    /** 执行优先级：数值越小越先执行，三条固定 10 / 20 / 30 */
+    /** 执行优先级：数值越小越先执行，四条固定 10 / 20 / 30 / 40 */
     priority: number;
     /** 对应的高级设置配置项 */
     configKey: ConfigKey;
     /** 插件参数（系统规则一律空对象，参数只在用户规则里可配） */
     pluginConfig: Record<string, unknown>;
+    /** 备注：说明来源与修改方式（rule.note，见 SYSTEM_RULE_NOTE） */
+    note: string;
 }
+
+/**
+ * 系统规则的备注：说明「这条规则哪来的、要改怎么改」。
+ *
+ * 迁移 SQL 里逐条写同样文本（SQL 不能 import TS），漂移由
+ * `tests/lifecycle/genericPluginMigration.node.test.ts` 比对 note 字段钉住。
+ */
+export const SYSTEM_RULE_NOTE = "系统预置：由 migrate_0035 创建，定义在 src/plugin/systemRules.ts。"
+    + "规则本身只读（改名 / 优先级 / 参数都不要直接改表），启用状态请在「高级设置 → 请求处理」切换对应开关。";
 
 export const SYSTEM_PLUGIN_RULES: readonly SystemPluginRuleDefinition[] = [
     {
@@ -35,6 +46,7 @@ export const SYSTEM_PLUGIN_RULES: readonly SystemPluginRuleDefinition[] = [
         priority: 10,
         configKey: ConfigKey.CLAUDE_CODE_TRACKING_REWRITE_ENABLED,
         pluginConfig: {},
+        note: SYSTEM_RULE_NOTE,
     },
     {
         bizId: "SYS:setting:cch_rewrite",
@@ -43,6 +55,7 @@ export const SYSTEM_PLUGIN_RULES: readonly SystemPluginRuleDefinition[] = [
         priority: 20,
         configKey: ConfigKey.CCH_REWRITE_ENABLED,
         pluginConfig: {},
+        note: SYSTEM_RULE_NOTE,
     },
     {
         bizId: "SYS:setting:responses_prompt_cache_key",
@@ -51,6 +64,16 @@ export const SYSTEM_PLUGIN_RULES: readonly SystemPluginRuleDefinition[] = [
         priority: 30,
         configKey: ConfigKey.RESPONSES_PROMPT_CACHE_KEY_ENABLED,
         pluginConfig: {},
+        note: SYSTEM_RULE_NOTE,
+    },
+    {
+        bizId: "SYS:setting:session_header",
+        name: "自动生成 session header",
+        plugin: "addSessionHeader",
+        priority: 40,
+        configKey: ConfigKey.SESSION_HEADER_ENABLED,
+        pluginConfig: {},
+        note: SYSTEM_RULE_NOTE,
     },
 ];
 

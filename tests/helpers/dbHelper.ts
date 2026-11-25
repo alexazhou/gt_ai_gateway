@@ -476,13 +476,13 @@ async function seedSystemRules(): Promise<void> {
         values.push(
             `('plugin', '${definition.name}', '${scope}', '${config}', ${enabled}, `
             + `(SELECT id FROM tenant WHERE name = 'main'), 1, ${definition.priority}, `
-            + `'${RULE_SOURCE.SYSTEM}', '${definition.bizId}')`,
+            + `'${RULE_SOURCE.SYSTEM}', '${definition.bizId}', '${definition.note}')`,
         );
     }
     // 先删再插：clearD1Tables() 失败只打日志不抛，表里可能还有旧行，重复插入会撞 UNIQUE。
     await execute("DELETE FROM rule WHERE source = 'system'");
     await execute(
-        "INSERT INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id) "
+        "INSERT INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id, note) "
         + `VALUES ${values.join(", ")}`,
     );
 }

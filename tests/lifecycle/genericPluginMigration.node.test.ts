@@ -67,11 +67,12 @@ interface RuleRow {
     priority: number;
     source: string;
     biz_id: string | null;
+    note: string | null;
 }
 
 function allRules(database: Database.Database): RuleRow[] {
     return database.prepare(
-        "SELECT id, type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id FROM rule ORDER BY priority ASC, id ASC",
+        "SELECT id, type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id, note FROM rule ORDER BY priority ASC, id ASC",
     ).all() as RuleRow[];
 }
 
@@ -129,7 +130,7 @@ describe("migrate_0035（通用请求插件规则化）", () => {
         expect(configValue(db, "claudecode_tracking_rewrite_enabled")).toBe("false");
     });
 
-    it("预置的三条系统规则与 SYSTEM_PLUGIN_RULES 逐字段一致（防迁移 SQL 与 TS 常量漂移）", () => {
+    it("预置的四条系统规则与 SYSTEM_PLUGIN_RULES 逐字段一致（防迁移 SQL 与 TS 常量漂移）", () => {
         db = createLegacySchema();
         db.exec(sqliteMigrationSql);
 
@@ -148,9 +149,11 @@ describe("migrate_0035（通用请求插件规则化）", () => {
             expect(row.cross_tenant).toBe(1);
             expect(JSON.parse(row.scope)).toEqual({ type: "const", values: [true] });
             expect(JSON.parse(row.config)).toEqual({ plugin: definition.plugin, pluginConfig: definition.pluginConfig });
+            // 备注说明「来源 + 怎么改」，迁移 SQL 与 TS 常量必须一字不差
+            expect(row.note).toBe(definition.note);
         });
         // 优先级顺序就是执行顺序
-        expect(systemRules.map((rule) => rule.priority)).toEqual([10, 20, 30]);
+        expect(systemRules.map((rule) => rule.priority)).toEqual(SYSTEM_PLUGIN_RULES.map((rule) => rule.priority));
     });
 
     it("系统规则 enabled 跟随迁移后可读到的配置值（有行用行值，无行用默认 true）", () => {

@@ -34,7 +34,7 @@ describe("清表后的系统规则重建（测试基座不变量）", () => {
         await setupAdminUser();
     });
 
-    it("三条系统规则都在，且 enabled / priority / source 与定义及配置现值一致", async () => {
+    it("四条系统规则都在，且 enabled / priority / source / note 与定义及配置现值一致", async () => {
         const config = await requestHelper.get("/config.json", adminToken);
         expect(config.status).toBe(200);
 
@@ -48,6 +48,7 @@ describe("清表后的系统规则重建（测试基座不变量）", () => {
             expect(rule.source).toBe("system");
             expect(rule.priority).toBe(definition.priority);
             expect(rule.config.plugin).toBe(definition.plugin);
+            expect(rule.note).toBe(definition.note);
 
             // enabled 必须等于「配置里当前能读到的值」（缺省按 CONFIG_DEFAULTS）
             const raw = config.body[definition.configKey];
@@ -64,7 +65,7 @@ describe("清表后的系统规则重建（测试基座不变量）", () => {
         const response = await putConfig({ cch_rewrite_enabled: "false" });
         expect(response.status).toBe(200);
 
-        // 模拟「规则表丢了、配置还在」：删掉三条系统规则后重新播种
+        // 模拟「规则表丢了、配置还在」：删掉全部系统规则后重新播种
         await dbHelper.execute("DELETE FROM rule WHERE source = 'system'");
         expect(await systemRules()).toHaveLength(0);
 
