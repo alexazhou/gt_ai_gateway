@@ -3,7 +3,6 @@ import { CastsAttributes } from "sutando";
 import { inspect, InspectOptions } from "util";
 
 import { SgRecordStatus } from "../constants";
-import { MicroAmountCast } from "../util/protocolUtil/billingUtil";
 
 
 /**
@@ -118,8 +117,7 @@ class SgRecord extends Model {
     casts = {
         start_at: "datetime",
         end_at: "datetime",
-        // MySQL 下以整数微元存储（应用层仍以"元"读写），避免 DECIMAL 返回字符串
-        cost: MicroAmountCast,
+        // cost 不做 cast：ORM 层与库内一律整数微元（与 user.balance 同口径），避免元/微元两套换算
         usage: SgRecordUsage,
     };
 
@@ -148,6 +146,7 @@ class SgRecord extends Model {
      * 否则与既有文本行混存储类，SQLite TEXT/NUMERIC 亲和性会让比较失真 */
     start_at!: Date | null;
     end_at!: Date | null;
+    /** 整数微元（1 元 = 1_000_000 微元），与 user.balance 同口径 */
     cost!: number;
 
     created_at!: Date;

@@ -78,8 +78,8 @@ describe("P0-4 结算原子性（integration，真库 + ORM）", () => {
 
         const record = await recordOf();
         expect(record.status).toBe("success");
-        // ORM 的 cost 经 MicroAmountCast 转换，读回来是「元」口径；微元精确落库由下面那条 SQL 参数断言看守
-        expect(record.cost).toBeCloseTo(cost, 9);
+        // cost 在 ORM 与库内都是整数微元，与 user.balance 同口径
+        expect(record.cost).toBe(billingUtil.toUnits(cost));
         expect(Number(record.first_token_latency)).toBe(123);
         expect(record.end_at).toBeTruthy();
 

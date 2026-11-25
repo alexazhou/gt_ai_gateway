@@ -24,6 +24,7 @@ export interface Record extends BaseEntity {
     first_token_latency: number | null;
     start_at: string | number | null;
     end_at: string | number | null;
+    /** 整数微元（1 元 = 1_000_000 微元），接口不再换算成元 */
     cost: number;
 
     // 关联数据
