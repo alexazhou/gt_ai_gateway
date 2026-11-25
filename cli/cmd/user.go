@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +17,52 @@ var userColumns = []string{"id", "name", "type", "status", "balance", "tenant_id
 
 // balanceColumns 对应 rechargeRecordManager 返回的充值记录字段。
 var balanceColumns = []string{"id", "user_id", "amount", "type", "remark", "created_at"}
+
+// microUnitsPerYuan 与后端 BALANCE_SCALE 一致：充值记录 amount 以整数微元返回（1 元 = 1000000 微元）。
+const microUnitsPerYuan = 1_000_000
+
+// yuanFromMicro 把整数微元转成"元"的最短十进制表示：1000000 → "1"、1230000 → "1.23"、-500000 → "-0.5"。
+func yuanFromMicro(units float64) string {
+	return strconv.FormatFloat(units/microUnitsPerYuan, 'f', -1, 64)
+}
+
+// rewriteAmountToYuan 把响应体里的 amount（整数微元）就地改写成"元"字符串，供人类可读输出用。
+// 兼容三种形态：{list:[...],total:n}、裸数组、单对象；--json 原样透传，不经过这里。
+func rewriteAmountToYuan(raw []byte) []byte {
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return raw
+	}
+	var rewriteItem func(item any)
+	rewriteItem = func(item any) {
+		if obj, ok := item.(map[string]any); ok {
+			if v, ok := obj["amount"].(float64); ok {
+				obj["amount"] = yuanFromMicro(v)
+			}
+		}
+	}
+	switch body := decoded.(type) {
+	case []any:
+		for _, item := range body {
+			rewriteItem(item)
+		}
+	case map[string]any:
+		if list, ok := body["list"].([]any); ok {
+			for _, item := range list {
+				rewriteItem(item)
+			}
+		} else {
+			rewriteItem(body)
+		}
+	default:
+		return raw
+	}
+	out, err := json.Marshal(decoded)
+	if err != nil {
+		return raw
+	}
+	return out
+}
 
 func (a *App) newUserCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -269,6 +316,9 @@ func (a *App) newBalanceListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if !a.flagJSON {
+				resp.Body = rewriteAmountToYuan(resp.Body)
+			}
 			return a.outList(resp, balanceColumns)
 		},
 	}
@@ -291,6 +341,9 @@ func (a *App) newBalanceGetCmd() *cobra.Command {
 			resp, err := a.apiCall(cmd, http.MethodGet, "/balance/recharge/"+id, nil)
 			if err != nil {
 				return err
+			}
+			if !a.flagJSON {
+				resp.Body = rewriteAmountToYuan(resp.Body)
 			}
 			return a.outObject(resp)
 		},
