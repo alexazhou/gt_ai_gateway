@@ -4,11 +4,12 @@ import requestActivityService, { type RequestActivityInput } from "./requestActi
 import billingUtil from "../util/protocolUtil/billingUtil";
 import { formatDbDatetime } from "../manager/recordManager";
 import type { SqlStatement } from "../util/dbAdapterUtil";
+import { adapterDialectOf } from "../util/dbAdapterUtil";
 import { SgRecordStatus } from "../constants";
 
-/** 当前是否 MySQL 方言（UPSERT 语法不同）；worker/D1 与 node/sqlite 同走 SQLite 语法 */
+/** 当前 SQL 方言：跟着实际执行它的适配器走（不看环境变量，见 adapterDialectOf 注释） */
 function isMysqlDialect(): boolean {
-    return process.env.DB_DRIVER === "mysql";
+    return adapterDialectOf(ormService.dbAdapter) === "mysql";
 }
 
 /**
