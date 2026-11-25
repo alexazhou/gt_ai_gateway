@@ -85,6 +85,9 @@ export const RULE_PRIORITY_MIN = 0;
 export const RULE_PRIORITY_MAX = 10000;
 export const RULE_PRIORITY_DEFAULT = 100;
 
+// 规则备注（note，migrate_0036 引入）长度上限，前后端共用同一个数
+export const RULE_NOTE_MAX_LENGTH = 500;
+
 export enum ClientName {
     CLAUDE_CODE = "claude-code",
     CODEX = "codex",

@@ -38,6 +38,16 @@
             <a-form-item label="规则名称" name="name">
                 <a-input v-model:value="formState.name" placeholder="例如：gpt-4o 仅内部用户可用" :disabled="viewMode" />
             </a-form-item>
+            <a-form-item label="备注" name="note">
+                <a-textarea
+                    v-model:value="formState.note"
+                    :rows="2"
+                    :maxlength="NOTE_MAX_LENGTH"
+                    show-count
+                    :disabled="viewMode"
+                    placeholder="选填：这条规则要解决什么问题、谁提的需求"
+                />
+            </a-form-item>
             <a-form-item label="规则类型" name="type">
                 <a-radio-group v-model:value="formState.type" button-style="solid" :disabled="viewMode">
                     <a-radio-button value="rate_limit">
@@ -161,6 +171,8 @@ const emit = defineEmits<{
 }>();
 
 const DEFAULT_PRIORITY = 100;
+// 与后端 src/constants.ts 的 RULE_NOTE_MAX_LENGTH 一致，超长后端返回 400
+const NOTE_MAX_LENGTH = 500;
 
 const visible = ref(false);
 const loading = ref(false);
@@ -179,6 +191,7 @@ function createDefaultScope(): ExprNode {
 
 const formState = reactive({
     name: '',
+    note: '',
     type: 'rate_limit' as RuleType,
     priority: DEFAULT_PRIORITY,
     scope: createDefaultScope() as ExprNode,
@@ -290,6 +303,7 @@ function fillForm(rule: Rule): void {
     resetForm();
     currentId.value = rule.id;
     formState.name = rule.name;
+    formState.note = rule.note ?? '';
     formState.type = rule.type;
     formState.priority = typeof rule.priority === 'number' ? rule.priority : DEFAULT_PRIORITY;
     // 列表数据的 scope 是 Vue 响应式 Proxy，structuredClone 无法克隆；JSON 深拷贝即可
@@ -331,6 +345,7 @@ watch(() => formState.type, () => {
 
 function resetForm(): void {
     formState.name = '';
+    formState.note = '';
     formState.type = 'rate_limit';
     formState.priority = DEFAULT_PRIORITY;
     formState.scope = createDefaultScope();
@@ -386,6 +401,7 @@ async function handleOk(): Promise<void> {
     const requestData = {
         type: formState.type,
         name: formState.name.trim(),
+        note: formState.note.trim() || null,
         priority: formState.priority ?? DEFAULT_PRIORITY,
         scope: formState.scope,
         config,

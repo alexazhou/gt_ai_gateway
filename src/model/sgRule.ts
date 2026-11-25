@@ -9,6 +9,8 @@ class SgRule extends Model {
     id!: number;
     type!: RuleType;
     name!: string;
+    /** 备注：自由文本注释（最长 RULE_NOTE_MAX_LENGTH），未填为 null */
+    note!: string | null;
     scope!: ExprNode;
     config!: Record<string, any>;
     enabled!: boolean;

@@ -87,6 +87,9 @@ async function createRule(c: Context) {
     if (body.priority !== undefined) {
         createData.priority = body.priority;
     }
+    if (body.note !== undefined) {
+        createData.note = body.note;
+    }
 
     const rule = await ruleManager.create(createData, scope.tenantId);
     return c.json(rule);
@@ -116,7 +119,7 @@ async function updateRule(c: Context) {
 
     // 仅更新请求体出现的字段，避免未传字段被置空；source / biz_id 不在白名单里（不可改）
     const updateData: Record<string, any> = {};
-    for (const key of ["type", "name", "scope", "config", "enabled", "cross_tenant", "priority"] as const) {
+    for (const key of ["type", "name", "note", "scope", "config", "enabled", "cross_tenant", "priority"] as const) {
         if (body[key] !== undefined) {
             updateData[key] = key === "cross_tenant"
                 ? (body[key] === true || body[key] === 1 ? 1 : 0)

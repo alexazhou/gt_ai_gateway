@@ -58,6 +58,8 @@ export interface PluginDescriptor {
 export interface Rule extends BaseEntity {
     type: RuleType;
     name: string;
+    /** 备注：自由文本注释（≤ 500 字符），未填为 null */
+    note?: string | null;
     scope: ExprNode;
     config: RuleConfig;
     enabled: boolean;

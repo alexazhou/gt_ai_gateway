@@ -1,7 +1,7 @@
 -- 通用请求插件规则化 v3（design/2026-11-24-generic-plugin/step2_technical.md §3.1 / §3.2）
 --
 -- 三件事，顺序有依赖：
---   1) rule 表加 priority / source / biz_id 三列（存量规则的 priority 由 DEFAULT 回填 100）；
+--   1) rule 表加 priority / source / biz_id / note 四列（存量规则的 priority 由 DEFAULT 回填 100）；
 --   2) 合并旧前端遗留的 tracking 配置键名（以旧键保存值为准）；
 --   3) 按当前配置预置三条系统规则（priority 10 / 20 / 30，cross_tenant = 1，scope = const true）。
 --
@@ -16,6 +16,8 @@ ALTER TABLE rule ADD COLUMN priority INTEGER NOT NULL DEFAULT 100;
 ALTER TABLE rule ADD COLUMN source   TEXT    NOT NULL DEFAULT 'user';
 -- biz_id：系统规则业务标识，用户规则为 NULL
 ALTER TABLE rule ADD COLUMN biz_id   TEXT    NULL;
+-- note：规则备注（自由文本注释），未填为 NULL
+ALTER TABLE rule ADD COLUMN note     TEXT    NULL;
 
 -- 系统规则的 biz_id 全局唯一；sqlite 的唯一索引允许多个 NULL，用户规则不受影响
 CREATE UNIQUE INDEX rule_biz_id_index ON rule (biz_id);

@@ -30,6 +30,10 @@
                     :row-key="(record: Rule) => record.id"
                 >
                     <template #bodyCell="{ column, record }">
+                        <template v-if="column.key === 'name'">
+                            <div>{{ record.name }}</div>
+                            <div v-if="record.note" class="rule-note">{{ record.note }}</div>
+                        </template>
                         <template v-if="column.key === 'type'">
                             <a-tag :color="typeTagColor(record.type)">{{ typeLabel(record.type) }}</a-tag>
                         </template>
@@ -107,6 +111,10 @@
                     :row-key="(record: Rule) => record.id"
                 >
                     <template #bodyCell="{ column, record }">
+                        <template v-if="column.key === 'name'">
+                            <div>{{ record.name }}</div>
+                            <div v-if="record.note" class="rule-note">{{ record.note }}</div>
+                        </template>
                         <template v-if="column.key === 'type'">
                             <a-tag :color="typeTagColor(record.type)">{{ typeLabel(record.type) }}</a-tag>
                         </template>
@@ -351,5 +359,13 @@ function handleDelete(record: Rule): void {
 .config-hint {
     color: var(--text-secondary);
     font-size: 12px;
+}
+
+/* 备注跟在规则名称下方，小字弱化，不额外占一列 */
+.rule-note {
+    margin-top: 2px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    white-space: pre-wrap;
 }
 </style>

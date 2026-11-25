@@ -1,4 +1,4 @@
-import { RULE_PRIORITY_MAX, RULE_PRIORITY_MIN, RuleType } from "../constants";
+import { RULE_NOTE_MAX_LENGTH, RULE_PRIORITY_MAX, RULE_PRIORITY_MIN, RuleType } from "../constants";
 import { SgUser } from "../model/sgUser";
 import { SgModel } from "../model/sgModel";
 import { SgVendor } from "../model/sgVendor";
@@ -86,6 +86,7 @@ function validateRule(data: Record<string, any>): void {
     scopeExpr.validateScope(data.scope);
 
     validatePriority(data.priority);
+    validateNote(data.note);
 
     if (ruleType === RuleType.RATE_LIMIT) {
         // rpm：非负整数或 null（null / 缺省 = 不限制；0 = 不可用；N > 0 = 滑动窗口上限）
@@ -105,6 +106,20 @@ function validateRule(data: Record<string, any>): void {
         }
     } else {
         validatePluginRuleConfig(data.config);
+    }
+}
+
+
+/** 备注：可选字符串，最长 RULE_NOTE_MAX_LENGTH；null / 未提供都表示没有备注（局部更新未传则跳过） */
+function validateNote(note: unknown): void {
+    if (note === undefined || note === null) {
+        return;
+    }
+    if (typeof note !== "string") {
+        throw new customError.AppError("note must be a string");
+    }
+    if (note.length > RULE_NOTE_MAX_LENGTH) {
+        throw new customError.AppError(`note must be at most ${RULE_NOTE_MAX_LENGTH} characters`);
     }
 }
 

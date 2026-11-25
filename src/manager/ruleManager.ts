@@ -155,6 +155,7 @@ async function create(data: Record<string, any>, tenantId: number): Promise<SgRu
         priority: sanitized.priority ?? RULE_PRIORITY_DEFAULT,
         source: sanitized.source ?? RULE_SOURCE.USER,
         biz_id: sanitized.biz_id ?? null,
+        note: sanitized.note ?? null,
     });
     notifyInvalidate();
     return rule;
