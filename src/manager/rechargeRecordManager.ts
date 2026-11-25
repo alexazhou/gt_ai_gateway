@@ -9,6 +9,7 @@ interface RechargeRecordsQuery {
 
 interface RechargeRecordCreateData {
     user_id: number;
+    /** 整数微元（1 元 = 1_000_000 微元），负数表示扣减 */
     amount: number;
     type: string;
     remark?: string | null;
