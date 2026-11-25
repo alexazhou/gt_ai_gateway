@@ -23,13 +23,11 @@ describe("recordService (node, real db)", () => {
     }
 
     async function getRecordRow(recordId: number) {
-        const rows = await dbHelper.query<any>(
-            "SELECT id FROM record WHERE id = ?",
-            [recordId],
-        );
-        return rows[0] ?? null;
+        return await SgRecord.query().find(recordId);
     }
 
+    // 查列清单是 schema 层的断言（要证明某列「不存在」），ORM 只暴露模型声明过的字段，
+    // 读不到「表里还多出哪些列」，所以这里保留按方言走的原始查询。
     async function getRecordColumns(): Promise<string[]> {
         if (process.env.DB_DRIVER === "mysql") {
             // MySQL：information_schema.columns 列出列名

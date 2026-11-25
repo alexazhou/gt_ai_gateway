@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, beforeAll } from "vitest";
 import requestActivityService from "../../../src/service/requestActivityService";
+import { SgRequestActivity } from "../../../src/model/sgRequestActivity";
 import { RequestActivityStage, ActivityLevel } from "../../../src/constants";
 import dbHelper from "../../helpers/dbHelper";
 import ormTestHelper from "../../helpers/ormTestHelper";
@@ -43,10 +44,7 @@ describe("requestActivityService (node, real db)", () => {
         await requestActivityService.append(42, RequestActivityStage.ROUTING, "路由选择");
         await requestActivityService.append(42, RequestActivityStage.FAILOVER, "切换", undefined, ActivityLevel.WARN);
 
-        const rows = await dbHelper.query<any>(
-            "SELECT record_id, activities, created_at, updated_at FROM request_activity WHERE record_id = ?",
-            [42],
-        );
+        const rows = (await SgRequestActivity.query().where("record_id", 42).get()).all();
         expect(rows).toHaveLength(1);
         const parsed = JSON.parse(rows[0].activities);
         expect(parsed).toHaveLength(2);

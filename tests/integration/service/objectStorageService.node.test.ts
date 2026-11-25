@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import objectStorageService from "../../../src/service/objectStorageService";
 import ormService from "../../../src/service/ormService";
+import { SgStorageRecord } from "../../../src/model/sgStorageRecord";
 import configService from "../../../src/service/configService";
 import { ConfigKey, RunMode } from "../../../src/constants";
 import dbHelper from "../../helpers/dbHelper";
@@ -76,12 +77,8 @@ function createMockR2Bucket(preloadKeys: string[] = []): R2Bucket {
     } as unknown as R2Bucket;
 }
 
-async function getStoredDatabaseObject(key: string): Promise<{ object_key: string; data: Buffer } | null> {
-    const rows = await dbHelper.query<{ object_key: string; data: Buffer }>(
-        "SELECT object_key, data FROM storage_record WHERE object_key = ?",
-        [key],
-    );
-    return rows[0] ?? null;
+async function getStoredDatabaseObject(key: string) {
+    return await SgStorageRecord.query().where("object_key", key).first();
 }
 
 describe("objectStorageService", () => {
@@ -215,7 +212,7 @@ describe("objectStorageService", () => {
         const row = await getStoredDatabaseObject(key);
         expect(row).not.toBeNull();
         expect(row!.object_key).toBe(key);
-        expect(row!.data.toString()).toBe("database-value");
+        expect(Buffer.from(row!.data).toString()).toBe("database-value");
         expect(await objectStorageService.getText(key)).toBe("database-value");
     });
 
