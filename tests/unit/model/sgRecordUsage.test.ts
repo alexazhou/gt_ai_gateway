@@ -8,19 +8,20 @@ function castGet(value: string | null): SgRecordUsage | null {
 
 
 describe("SgRecordUsage cast", () => {
-    it("parses v1 legacy storage (no version marker) as non-cached display口径", () => {
+    it("parses v1 legacy storage: 非缓存基数补上缓存，输出 OpenAI 总量口径", () => {
         const u = castGet(JSON.stringify({ prompt_tokens: 100, completion_tokens: 20, cache_read_tokens: 50 }));
 
         expect(u).not.toBeNull();
         expect(u!.version).toBe(1);
+        // v1 存的是非缓存输入（100），总量 = 100 + 50
         expect(u!.toJSON()).toEqual({
-            prompt_tokens: 100,
+            prompt_tokens: 150,
             completion_tokens: 20,
             cache_read_tokens: 50,
         });
     });
 
-    it("parses v2 storage and normalizes total prompt_tokens to non-cached display口径", () => {
+    it("parses v2 storage: prompt_tokens 已是总量，原样输出（含缓存）", () => {
         const u = castGet(JSON.stringify({
             usage_version: 2,
             prompt_tokens: 150,
@@ -31,7 +32,7 @@ describe("SgRecordUsage cast", () => {
         expect(u).not.toBeNull();
         expect(u!.version).toBe(2);
         expect(u!.toJSON()).toEqual({
-            prompt_tokens: 100,
+            prompt_tokens: 150,
             completion_tokens: 20,
             cache_read_tokens: 50,
         });
@@ -86,7 +87,7 @@ describe("SgRecordUsage cast", () => {
         }));
 
         expect(u!.toJSON()).toEqual({
-            prompt_tokens: 100,
+            prompt_tokens: 150,
             completion_tokens: 20,
             cache_read_tokens: 50,
             cache_creation_tokens: 15,
@@ -125,7 +126,7 @@ describe("SgRecordUsage cast", () => {
             cache_creation_tokens: 15,
         }));
 
-        // 构造后 prompt 为展示口径（150 - 50 = 100），存储还原为总量 150
+        // 内部字段已是总量 150，存储原样写回
         expect(u!.toStorageJSON()).toEqual({
             usage_version: 2,
             prompt_tokens: 150,

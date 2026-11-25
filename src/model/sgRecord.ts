@@ -11,8 +11,8 @@ import { SgRecordStatus } from "../constants";
  *
  * 口径约定（prompt_tokens 按 OpenAI 原生语义 = 输入总量含缓存命中）：
  * - 存储层带版本号 usage_version：v1（存量）prompt_tokens 为非缓存数；v2（新写入）prompt_tokens 为总量。
- * - 构造时按版本完成「存储 → 展示」转换，实例内部恒为展示口径（prompt_tokens = 非缓存输入）；
- *   toJSON() 直接输出内部字段，不再做版本判断。
+ * - 构造时按版本把 v1 补成总量，实例内部与对外输出统一为 OpenAI 口径（prompt_tokens 含缓存，
+ *   cache_read_tokens 是其子集）；Anthropic 的 input_tokens 不含缓存，故不能直接当 prompt_tokens 展示。
  * - 各 token 字段区分「缺失」与「0」：上游未返回 → null；明确返回 0 → 0。
  */
 // @ts-expect-error Sutando .d.ts 声明 static get/set() 无参，运行时传 4 个实参
@@ -20,7 +20,7 @@ class SgRecordUsage extends CastsAttributes {
     /** usage 存储版本：1 = 旧口径（prompt_tokens 非缓存）；2 = OpenAI 口径（prompt_tokens 含缓存总量） */
     version: number = 1;
 
-    /** 输入 token（展示口径 = 非缓存输入）；上游未返回为 null，明确为 0 则为 0 */
+    /** 输入 token（OpenAI 口径 = 含缓存命中的总量）；上游未返回为 null，明确为 0 则为 0 */
     prompt_tokens?: number | null;
 
     /** 输出 token；上游未返回为 null */
@@ -33,21 +33,21 @@ class SgRecordUsage extends CastsAttributes {
     cache_creation_tokens?: number | null;
 
     /**
-     * 构造时按存储版本完成「存储 → 展示」口径转换：
-     * - v2：存储的 prompt_tokens 为总量（含缓存），转成内部统一展示口径（非缓存输入）；
-     * - v1：存储的 prompt_tokens 本就是非缓存，原样保留。
-     * 转换后字段恒为展示口径，toJSON() 直接输出。
+     * 构造时按存储版本归一成 OpenAI 口径：
+     * - v2：存储的 prompt_tokens 已是总量（含缓存），原样保留；
+     * - v1：存储的 prompt_tokens 是非缓存数，补上 cache_read_tokens 才是总量。
+     * 归一后 toJSON() 直接输出，不再做版本判断。
      */
     constructor(data?: Partial<SgRecordUsage>) {
         super();
         if (data) {
             this.version = data.version ?? 1;
-            if (this.version >= 2 && data.prompt_tokens != null) {
-                this.prompt_tokens = data.cache_read_tokens != null
-                    ? Math.max(0, data.prompt_tokens - data.cache_read_tokens)
-                    : data.prompt_tokens;
+            if (data.prompt_tokens != null) {
+                this.prompt_tokens = this.version >= 2
+                    ? data.prompt_tokens
+                    : data.prompt_tokens + (data.cache_read_tokens ?? 0);
             } else {
-                this.prompt_tokens = data.prompt_tokens ?? null;
+                this.prompt_tokens = null;
             }
             this.completion_tokens = data.completion_tokens ?? null;
             this.cache_read_tokens = data.cache_read_tokens ?? null;
@@ -70,12 +70,12 @@ class SgRecordUsage extends CastsAttributes {
 
     /**
      * 存储口径（v2：prompt_tokens 为总量 + usage_version 标记），供 static set() 与写侧序列化复用。
-     * 从展示口径反向还原：prompt_total = 非缓存输入 + 缓存读取；cache_creation 仅在存在时输出。
+     * 内部字段已是总量，直接写回；cache_creation 仅在存在时输出。
      */
     toStorageJSON(): Record<string, number | null | undefined> {
         const result: Record<string, number | null | undefined> = {
             usage_version: 2,
-            prompt_tokens: this.prompt_tokens != null ? this.prompt_tokens + (this.cache_read_tokens ?? 0) : null,
+            prompt_tokens: this.prompt_tokens ?? null,
             completion_tokens: this.completion_tokens,
             cache_read_tokens: this.cache_read_tokens,
         };

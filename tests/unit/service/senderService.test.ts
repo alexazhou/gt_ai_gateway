@@ -107,8 +107,8 @@ describe("normalizeUsage", () => {
         expect(normalized!.promptTokens).toBe(100);
         expect(normalized!.outputTokens).toBe(12);
         expect(normalized!.cacheReadTokens).toBe(40);
-        // recordUsage 为展示口径（构造时由总量 - 缓存归一）：prompt_tokens = 非缓存输入
-        expect(normalized!.recordUsage.prompt_tokens).toBe(60);
+        // recordUsage 与对外输出统一 OpenAI 口径：prompt_tokens = 含缓存的总量
+        expect(normalized!.recordUsage.prompt_tokens).toBe(100);
         expect(normalized!.recordUsage.completion_tokens).toBe(12);
         expect(normalized!.recordUsage.cache_read_tokens).toBe(40);
     });
@@ -125,8 +125,8 @@ describe("normalizeUsage", () => {
         expect(normalized!.promptTokens).toBe(140);
         expect(normalized!.outputTokens).toBe(20);
         expect(normalized!.cacheReadTokens).toBe(40);
-        // recordUsage 展示口径：prompt = 总量 140 - 缓存 40 = 非缓存输入 100
-        expect(normalized!.recordUsage.prompt_tokens).toBe(100);
+        // recordUsage 统一 OpenAI 口径：prompt = input_tokens 100 + cache_read 40 = 总量 140
+        expect(normalized!.recordUsage.prompt_tokens).toBe(140);
         expect(normalized!.recordUsage.completion_tokens).toBe(20);
         expect(normalized!.recordUsage.cache_read_tokens).toBe(40);
         expect(normalized!.recordUsage.cache_creation_tokens).toBe(15);
@@ -143,7 +143,7 @@ describe("normalizeUsage", () => {
         expect(normalized).not.toBeNull();
         expect(normalized!.promptTokens).toBe(7);
         expect(normalized!.cacheReadTokens).toBe(2);
-        expect(normalized!.recordUsage.prompt_tokens).toBe(5);
+        expect(normalized!.recordUsage.prompt_tokens).toBe(7);
         expect(normalized!.recordUsage.cache_read_tokens).toBe(2);
         expect(normalized!.recordUsage.cache_creation_tokens).toBe(1);
     });

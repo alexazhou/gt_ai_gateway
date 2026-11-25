@@ -77,7 +77,7 @@ export function normalizeUsage(format: ApiFormat, usage: Dict | null | undefined
     const outputTokens = completionRaw ?? 0;
     const cacheReadTokens = cacheReadRaw ?? 0;
 
-    // 构造即归一：SgRecordUsage 实例内部为展示口径（prompt_tokens = 非缓存输入）
+    // 构造即归一：SgRecordUsage 实例内部为 OpenAI 口径（prompt_tokens = 含缓存的总量）
     const recordUsage = new SgRecordUsage({
         version: 2,
         prompt_tokens: promptTotal,

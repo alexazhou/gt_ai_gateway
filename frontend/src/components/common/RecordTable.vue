@@ -20,7 +20,7 @@
                     <div v-if="getTokens(record) !== null">
                         <span class="token-item" title="输入 Token">
                             <ArrowUpOutlined class="token-icon input" />
-                            {{ getTokens(record)!.prompt }}<template v-if="getTokens(record)!.cacheRead !== null"> (+ {{ getTokens(record)!.cacheRead!.toLocaleString() }})</template>
+                            {{ getTokens(record)!.prompt }}<template v-if="getTokens(record)!.cacheRead !== null">（缓存 {{ getTokens(record)!.cacheRead!.toLocaleString() }}）</template>
                         </span>
                         <span class="token-divider">/</span>
                         <span class="token-item" title="输出 Token">
@@ -148,8 +148,8 @@ function getCacheHitRate(record: Record): { rate: number; tokens: number } | nul
     const u = record.usage;
     if (u.cache_read_tokens == null) return null;
     const cacheRead = u.cache_read_tokens;
-    const promptTokens = u.prompt_tokens ?? 0;
-    const total = promptTokens + cacheRead;
+    // prompt_tokens 按 OpenAI 口径已含缓存命中，缓存是其子集，不再相加
+    const total = u.prompt_tokens ?? 0;
     const rate = total <= 0 ? 0 : Math.floor(cacheRead / total * 1000) / 10;
     return { rate, tokens: cacheRead };
 }
