@@ -2,12 +2,23 @@ import app, { type Env } from "./routes";
 
 export type App = typeof app;
 
+/** 组装是否已经做过（`app` 是 `./routes` 的模块级单例，重复组装会把 `GET /*` 与扩展路由注册两遍） */
+let built = false;
+
 /**
  * 组装 Worker 应用：路由注册 + SPA fallback。
  *
  * 测试入口传 `extend` 在 catch-all 之前挂测试路由；生产入口不传，因此生产产物里没有 `/test/*`。
+ *
+ * **幂等**：`app` 是模块级单例，重复调用会把 `GET /*`（SPA fallback）与 `extend` 注册的路由
+ * 再注册一遍；因此只有第一次调用生效，后续调用直接返回同一个已组装好的 app（#378 验收 ⑨）。
  */
 export function buildApp(extend?: (target: App) => void): App {
+    if (built) {
+        return app;
+    }
+    built = true;
+
     if (extend) {
         extend(app);
     }

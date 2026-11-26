@@ -509,23 +509,41 @@ async function seedMainTenant(): Promise<void> {
 }
 
 /**
- * 清除测试服务端进程的缓存（带重试处理 worker 本地重载的连接瞬断）
+ * 清除测试服务端进程的缓存（带重试处理 worker 本地重载的连接瞬断）。
+ *
+ * **非 2xx 必须抛错**（#378 验收 ⑩）：以前只 `fetch` 不看状态码，端点不存在（404）时会被静默吞掉，
+ * 表现为「用例之间缓存不清、个别用例莫名红/绿」，排查成本极高。现在把状态码当错误抛出，
+ * 只对**连接类**失败重试（404/500 这类立刻抛，重试没有意义）。
  */
 async function clearServerCache(): Promise<void> {
+    const url = `http://127.0.0.1:${config.SERVER_CONFIG.port}/test/cache/clear`;
+    let lastError: unknown;
+
     for (let i = 0; i < 3; i++) {
         try {
-            await fetch(`http://127.0.0.1:${config.SERVER_CONFIG.port}/test/cache/clear`, {
-                method: "DELETE",
-            });
-            break;
+            const response = await fetch(url, { method: "DELETE" });
+            if (!response.ok) {
+                throw Object.assign(
+                    new Error(
+                        `DELETE /test/cache/clear 返回 ${response.status}：服务端缓存未清理`
+                        + `（测试入口没挂上测试路由？检查 TEST_MODE 与 LOCAL_EXTEND_MODULE）`,
+                    ),
+                    { fatal: true },
+                );
+            }
+            return;
         } catch (e) {
-            if (i === 2) {
-                console.error("Failed to clear server cache:", e);
-            } else {
+            lastError = e;
+            if ((e as { fatal?: boolean })?.fatal) {
+                throw e;
+            }
+            if (i < 2) {
                 await new Promise((r) => setTimeout(r, 100));
             }
         }
     }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 /** POST /test/reset 的 HTTP 重试次数与退避基数（只重试连接类/5xx，4xx 是语句本身的错不重试） */

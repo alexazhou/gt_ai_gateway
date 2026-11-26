@@ -174,12 +174,15 @@ async function startServer() {
     }
 
     // 测试基座扩展点：node 模式跑测试时，tests/globalSetup.ts 通过 LOCAL_EXTEND_MODULE 注入一个模块，
-    // 由它把测试专用路由（DELETE /test/cache/clear、POST /test/sql）挂到这个 app 上——否则
-    // 测试进程发来的清缓存请求会 404，用例之间的 config/rule/StateStore 缓存会互相污染。
-    // 生产与桌面版不设该变量 ⇒ 不加载任何额外模块，产物里也没有测试路由。
+    // 由它把测试专用路由（DELETE /test/cache/clear、POST /test/sql、POST /test/reset）挂到这个 app 上——
+    // 否则测试进程发来的清缓存请求会 404，用例之间的 config/rule/StateStore 缓存会互相污染。
+    //
+    // **双重门禁**（#378 验收 ⑪）：`TEST_MODE` 与 `LOCAL_EXTEND_MODULE` **同时**存在才加载；
+    // 生产 / 桌面版两者都不设 ⇒ 连 import 都不会发生，产物里也没有测试路由。
     const extendModule = process.env.LOCAL_EXTEND_MODULE;
-    if (extendModule) {
+    if (process.env.TEST_MODE && extendModule) {
         const mod: { registerTestRoutes?: (target: typeof app) => void } = await import(extendModule);
+        console.log(`[TEST_EXTEND] loaded ${extendModule}`);
         mod.registerTestRoutes?.(app);
     }
 
