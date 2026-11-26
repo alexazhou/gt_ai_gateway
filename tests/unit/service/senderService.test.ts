@@ -113,7 +113,7 @@ describe("normalizeUsage", () => {
         expect(normalized!.recordUsage.cache_read_tokens).toBe(40);
     });
 
-    it("normalizes ANTHROPIC raw usage to total prompt (input_tokens + cache_read), recording cache write", () => {
+    it("normalizes ANTHROPIC raw usage to total prompt (input_tokens + cache_read + cache_creation), recording cache write", () => {
         const normalized = usageUtils.normalizeUsage(ApiFormat.ANTHROPIC, {
             input_tokens: 100,
             output_tokens: 20,
@@ -122,11 +122,11 @@ describe("normalizeUsage", () => {
         });
 
         expect(normalized).not.toBeNull();
-        expect(normalized!.promptTokens).toBe(140);
+        expect(normalized!.promptTokens).toBe(155);
         expect(normalized!.outputTokens).toBe(20);
         expect(normalized!.cacheReadTokens).toBe(40);
-        // recordUsage 统一 OpenAI 口径：prompt = input_tokens 100 + cache_read 40 = 总量 140
-        expect(normalized!.recordUsage.prompt_tokens).toBe(140);
+        // recordUsage 统一 OpenAI 口径：prompt = input_tokens 100 + cache_read 40 + cache_creation 15 = 155
+        expect(normalized!.recordUsage.prompt_tokens).toBe(155);
         expect(normalized!.recordUsage.completion_tokens).toBe(20);
         expect(normalized!.recordUsage.cache_read_tokens).toBe(40);
         expect(normalized!.recordUsage.cache_creation_tokens).toBe(15);
@@ -141,9 +141,9 @@ describe("normalizeUsage", () => {
         });
 
         expect(normalized).not.toBeNull();
-        expect(normalized!.promptTokens).toBe(7);
+        expect(normalized!.promptTokens).toBe(8);
         expect(normalized!.cacheReadTokens).toBe(2);
-        expect(normalized!.recordUsage.prompt_tokens).toBe(7);
+        expect(normalized!.recordUsage.prompt_tokens).toBe(8);
         expect(normalized!.recordUsage.cache_read_tokens).toBe(2);
         expect(normalized!.recordUsage.cache_creation_tokens).toBe(1);
     });
@@ -159,6 +159,20 @@ describe("normalizeUsage", () => {
         expect(normalized!.cacheReadTokens).toBe(0);
         expect(normalized!.recordUsage.prompt_tokens).toBeNull();
         expect(normalized!.recordUsage.completion_tokens).toBe(6);
+        expect(normalized!.recordUsage.cache_read_tokens).toBeNull();
+    });
+
+    it("ANTHROPIC usage with only cache fields (no input_tokens) sums present fields instead of null", () => {
+        const normalized = usageUtils.normalizeUsage(ApiFormat.ANTHROPIC, {
+            output_tokens: 6,
+            cache_creation_input_tokens: 15,
+        });
+
+        expect(normalized).not.toBeNull();
+        // 三者全缺才 null：这里 cache_creation 有值 ⇒ 缺失字段按 0 相加
+        expect(normalized!.promptTokens).toBe(15);
+        expect(normalized!.recordUsage.prompt_tokens).toBe(15);
+        expect(normalized!.recordUsage.cache_creation_tokens).toBe(15);
         expect(normalized!.recordUsage.cache_read_tokens).toBeNull();
     });
 
@@ -185,7 +199,7 @@ describe("serializeStoredUsage", () => {
         const usageJson = usageUtils.serializeStoredUsage(normalized!.recordUsage);
         expect(usageJson).not.toBeNull();
         expect(JSON.parse(usageJson!)).toMatchObject({
-            usage_version: 2,
+            usage_version: 3,
             prompt_tokens: 53067,
             completion_tokens: 262,
             cache_read_tokens: 52864,

@@ -10,14 +10,18 @@ import { SgRecordStatus } from "../constants";
  * 存储/读写在类内外一致：DB 列为 TEXT JSON 串，模型层按类读写。
  *
  * 口径约定（prompt_tokens 按 OpenAI 原生语义 = 输入总量含缓存命中）：
- * - 存储层带版本号 usage_version：v1（存量）prompt_tokens 为非缓存数；v2（新写入）prompt_tokens 为总量。
+ * - 存储层带版本号 usage_version：
+ *   v1（更早的存量）prompt_tokens 为非缓存数；
+ *   v2 prompt_tokens 为「非缓存 + cache_read」；
+ *   v3 prompt_tokens 为「非缓存 + cache_read + cache_creation」（Anthropic 三字段互不包含）。
+ *   v2/v3 读取侧一律原样返回，只有 v1 需要补 cache_read —— 两个口径混存时靠该版本号区分。
  * - 构造时按版本把 v1 补成总量，实例内部与对外输出统一为 OpenAI 口径（prompt_tokens 含缓存，
  *   cache_read_tokens 是其子集）；Anthropic 的 input_tokens 不含缓存，故不能直接当 prompt_tokens 展示。
  * - 各 token 字段区分「缺失」与「0」：上游未返回 → null；明确返回 0 → 0。
  */
 // @ts-expect-error Sutando .d.ts 声明 static get/set() 无参，运行时传 4 个实参
 class SgRecordUsage extends CastsAttributes {
-    /** usage 存储版本：1 = 旧口径（prompt_tokens 非缓存）；2 = OpenAI 口径（prompt_tokens 含缓存总量） */
+    /** usage 存储版本：1 = 旧口径（prompt_tokens 非缓存）；2 = 含 cache_read 的总量；3 = 再计入 cache_creation 的总量 */
     version: number = 1;
 
     /** 输入 token（OpenAI 口径 = 含缓存命中的总量）；上游未返回为 null，明确为 0 则为 0 */
@@ -29,7 +33,11 @@ class SgRecordUsage extends CastsAttributes {
     /** 命中缓存的输入（prompt_tokens 的子集）；上游未返回为 null */
     cache_read_tokens?: number | null;
 
-    /** 写入缓存 token（仅记录，不参与计费）；上游未返回为 null */
+    /**
+     * 写入缓存的输入 token（cache_creation_input_tokens）；上游未返回为 null。
+     * v3 起它已计入 `prompt_tokens` 这个输入总量（Anthropic 三字段互不包含），因此会按 input 单价计费——
+     * `calculateCost` 的 `normalPromptTokens = promptTokens - cacheReadTokens` 自动包含了它（不补 cache_write 价格档）。
+     */
     cache_creation_tokens?: number | null;
 
     /**
@@ -69,12 +77,12 @@ class SgRecordUsage extends CastsAttributes {
     }
 
     /**
-     * 存储口径（v2：prompt_tokens 为总量 + usage_version 标记），供 static set() 与写侧序列化复用。
+     * 存储口径（v3：prompt_tokens 为总量 + usage_version 标记），供 static set() 与写侧序列化复用。
      * 内部字段已是总量，直接写回；cache_creation 仅在存在时输出。
      */
     toStorageJSON(): Record<string, number | null | undefined> {
         const result: Record<string, number | null | undefined> = {
-            usage_version: 2,
+            usage_version: 3,
             prompt_tokens: this.prompt_tokens ?? null,
             completion_tokens: this.completion_tokens,
             cache_read_tokens: this.cache_read_tokens,
@@ -98,7 +106,12 @@ class SgRecordUsage extends CastsAttributes {
         } catch {
             return null;
         }
-        return new SgRecordUsage({ ...parsed, version: parsed.usage_version === 2 ? 2 : 1 });
+        // v2 与 v3 的 prompt_tokens 都已是总量，读取侧行为一致（只有 v1 需要补 cache_read）
+        const storedVersion = Number(parsed.usage_version);
+        return new SgRecordUsage({
+            ...parsed,
+            version: storedVersion === 3 ? 3 : (storedVersion === 2 ? 2 : 1),
+        });
     }
 
     // 创建时收到纯对象，读改保存时收到 SgRecordUsage 实例，两者都需支持
