@@ -1,5 +1,6 @@
 import { join } from "path";
 import net from "node:net";
+import { pathToFileURL } from "node:url";
 import { spawn, execSync, ChildProcess } from "child_process";
 import { existsSync, unlinkSync, mkdirSync, createWriteStream } from "fs";
 import config from "./config";
@@ -421,6 +422,11 @@ function startTestServer(): Promise<void> {
             env.DB_PATH = config.DB_CONFIG.path;
             env.ROOT_TOKEN = "root-token-123";
             env.TEST_MODE = "node";
+            // #377：测试专用路由（DELETE /test/cache/clear、POST /test/sql）已从 src/routes.ts
+            // 迁到 tests/worker/testRoutes.ts，由 src/local.ts 的扩展点按需加载——生产不设该变量。
+            env.LOCAL_EXTEND_MODULE = pathToFileURL(
+                join(process.cwd(), "tests", "worker", "testRoutes.ts"),
+            ).href;
         }
 
         console.log(
