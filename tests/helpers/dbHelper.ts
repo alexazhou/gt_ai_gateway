@@ -184,6 +184,23 @@ function createAdapter(): DBAdapter {
 const D1_LOCK_RETRY_ATTEMPTS = 6;
 const D1_LOCK_RETRY_BASE_DELAY_MS = 250;
 
+/**
+ * worker 门子进程计数（#378）：`runD1Command` 每真正拉起一次 `npx wrangler d1 execute` 就 +1。
+ * 用来给「truncate() 期间 0 次子进程」提供**可复跑**的证据（任何 runner 都能读前后差值），
+ * 不改变任何行为。
+ */
+let d1SpawnCount = 0;
+
+/** 读当前累计的 D1 子进程次数（#378 证据用） */
+function getD1SpawnCount(): number {
+    return d1SpawnCount;
+}
+
+/** 重置 D1 子进程计数（#378 证据用） */
+function resetD1SpawnCount(): void {
+    d1SpawnCount = 0;
+}
+
 /** 同步睡一小会儿（worker 门的 helper 是同步 API，不能用 await） */
 function sleepSync(ms: number): void {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -208,6 +225,7 @@ function isD1LockError(error: unknown): boolean {
 function runD1Command(args: string[]): string {
     for (let attempt = 1; ; attempt += 1) {
         try {
+            d1SpawnCount += 1;
             return execFileSync(
                 "npx",
                 ["wrangler", "d1", "execute", TEST_DB_NAME, "--local", "--config", TEST_WRANGLER_CONFIG, ...args],
@@ -243,28 +261,6 @@ async function clearD1LocalDatabase(): Promise<void> {
         console.log(`[WORKER_SETUP] Dropped ${tables.length} tables: ${tables.map((t) => t.name).join(", ")}`);
     } catch (e) {
         console.error("[WORKER_SETUP] Failed to clear D1 test database:", e);
-    }
-}
-
-/**
- * 清空 D1 本地表数据（保留表结构与 `_migrations`）——worker 模式专用
- */
-async function clearD1Tables(): Promise<void> {
-    console.log("[WORKER_SETUP] Clearing D1 database tables...");
-
-    try {
-        const tables = await listBusinessTables(true);
-
-        if (tables.length === 0) {
-            console.log("[WORKER_SETUP] No tables to clear");
-            return;
-        }
-
-        // Combine all DELETE statements into a single command for better performance
-        runD1Command(["--command", tables.map((t) => `DELETE FROM ${t.name};`).join(" ")]);
-        console.log(`[WORKER_SETUP] Cleared ${tables.length} tables`);
-    } catch (e) {
-        console.error("[WORKER_SETUP] Failed to clear D1 tables:", e);
     }
 }
 
@@ -311,7 +307,7 @@ async function listAllMysqlTables(): Promise<{ name: string }[]> {
  * 返回 { name }[]，供 cleanup / truncate / clearD1* 使用。
  *
  * `excludeMigrations`：是否排除 `_migrations`
- * - 批量清数据（truncate / clearD1Tables）→ true，保留迁移记录
+ * - 批量清数据（truncate）→ true，保留迁移记录
  * - 重置 schema（cleanup / clearD1LocalDatabase）→ false，连迁移记录一起删，下一轮重跑迁移
  *
  * 注意：mysql 分支下划线开头的表（含 `_migrations`）统一不算业务表，故该参数在 mysql 下无额外作用；
@@ -479,7 +475,7 @@ async function seedSystemRules(): Promise<void> {
             + `'${RULE_SOURCE.SYSTEM}', '${definition.bizId}', '${definition.note}')`,
         );
     }
-    // 先删再插：clearD1Tables() 失败只打日志不抛，表里可能还有旧行，重复插入会撞 UNIQUE。
+    // 先删再插：清表失败时表里可能还有旧行，重复插入会撞 UNIQUE。
     await execute("DELETE FROM rule WHERE source = 'system'");
     await execute(
         "INSERT INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id, note) "
@@ -532,6 +528,65 @@ async function clearServerCache(): Promise<void> {
     }
 }
 
+/** POST /test/reset 的 HTTP 重试次数与退避基数（只重试连接类/5xx，4xx 是语句本身的错不重试） */
+const TEST_RESET_HTTP_ATTEMPTS = 3;
+const TEST_RESET_HTTP_RETRY_BASE_DELAY_MS = 100;
+
+/**
+ * worker 模式下调用测试端点的 `POST /test/reset`：一次调用完成
+ * 「清业务表 + 重建 main 租户 + 重建系统规则 + 清服务端缓存」，全程 0 次子进程（#378）。
+ *
+ * 语句构造放在端点里而非这里，是因为「开关现值必须在清表之后读」——放测试侧拼语句就得多一轮
+ * HTTP（先清表 → 再读 → 再写），端点内做可以一次调用内按序完成，且失败时能直接报出
+ * 「阶段 + 第几条 + 原文」。
+ */
+async function resetViaTestEndpoint(): Promise<void> {
+    const url = `http://127.0.0.1:${config.SERVER_CONFIG.port}/test/reset`;
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= TEST_RESET_HTTP_ATTEMPTS; attempt += 1) {
+        try {
+            const response = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: "{}",
+            });
+            const text = await response.text();
+            const parsed = (text ? JSON.parse(text) : {}) as {
+                error?: string;
+                phase?: string;
+                failedIndex?: number | null;
+                failedStatement?: string | null;
+            };
+
+            if (!response.ok) {
+                const located = parsed.failedIndex === null || parsed.failedIndex === undefined
+                    ? ""
+                    : `；失败语句[${parsed.failedIndex}]: ${parsed.failedStatement}`;
+                const failure = new Error(
+                    `POST /test/reset 失败 (${response.status}, 阶段 ${parsed.phase ?? "?"}): `
+                    + `${parsed.error ?? response.statusText}${located}`,
+                );
+                // 4xx = 语句本身的问题，重试无意义
+                if (response.status >= 400 && response.status < 500) {
+                    throw Object.assign(failure, { fatal: true });
+                }
+                throw failure;
+            }
+
+            return;
+        } catch (error) {
+            lastError = error;
+            if ((error as { fatal?: boolean })?.fatal) break;
+            if (attempt < TEST_RESET_HTTP_ATTEMPTS) {
+                await new Promise((r) => setTimeout(r, TEST_RESET_HTTP_RETRY_BASE_DELAY_MS * attempt));
+            }
+        }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 /**
  * Truncate tables - remove all data but keep structure
  */
@@ -547,17 +602,12 @@ async function truncate(): Promise<void> {
     stateStoreService.reset();
 
     if (isWorkerMode) {
-        // In worker mode, clear D1 tables only (admin user created via API)
-        await clearD1Tables();
-        await seedMainTenant();
+        // worker 模式：一次 POST /test/reset 完成清表+播种（0 次子进程，见 #378）
+        await resetViaTestEndpoint();
 
         // Clear in-memory config cache so tests don't leak state across runs
+        // （测试进程自己那份；服务端那份由端点里的 clearServerCaches() 清）
         configService.clearCache();
-
-        // 系统规则是运行期真源，清表后必须重建（见 seedSystemRules 注释）
-        await seedSystemRules();
-
-        await clearServerCache();
         return;
     }
 
@@ -687,6 +737,11 @@ async function close(): Promise<void> {
     }
 }
 
+export {
+    getD1SpawnCount,
+    resetD1SpawnCount,
+};
+
 export default {
     initDatabase,   // Unified database initialization
     clearDatabase,  // Unified database cleanup
@@ -696,6 +751,8 @@ export default {
     query,
     execute,
     seedSystemRules,
+    getD1SpawnCount,
+    resetD1SpawnCount,
     getAdapter,
     close,
 };
