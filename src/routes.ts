@@ -19,10 +19,6 @@ import configController from "./controller/configController";
 import clientConfigController from "./controller/clientConfigController";
 import ruleController from "./controller/ruleController";
 import tenantController from "./controller/tenantController";
-import configService from "./service/configService";
-import ruleService from "./service/ruleService";
-import tenantService from "./service/tenantService";
-import stateStoreService from "./service/stateStoreService";
 import ormService from "./service/ormService";
 import objectStorageService from "./service/objectStorageService";
 import authMiddleware from "./middleware/authMiddleware";
@@ -221,25 +217,6 @@ app.get("/llm/v1/models", llmApiMiddleware.requireLlmAuth(ApiFormat.OPENAI), mod
 app.post("/llm/v1/chat/completions", llmApiMiddleware.requireModelAccess(ApiFormat.OPENAI), gatewayController.chatCompletions);
 app.post("/llm/v1/messages", llmApiMiddleware.requireModelAccess(ApiFormat.ANTHROPIC), gatewayController.anthropicMessages);
 app.post("/llm/v1/responses", llmApiMiddleware.requireModelAccess(ApiFormat.RESPONSES), gatewayController.responsesApi);
-
-// Test endpoints
-app.delete("/test/cache/clear", async (c) => {
-    // Only allow in test mode
-    const env = c.env as { TEST_MODE?: string } | undefined;
-    const isTestMode = process.env.TEST_MODE || env?.TEST_MODE;
-    if (!isTestMode) {
-        return c.notFound();
-    }
-    configService.clearCache();
-    ruleService.invalidateCache();
-    // 测试清表后 main 租户 id 可能变化（SQLite AUTOINCREMENT 不重置），须清 tenantService 缓存
-    tenantService.clearMainTenantCache();
-    // 限流桶 / 上游冷却 / 版本检查缓存都在 StateStore 里，清表时必须一起重置，
-    // 否则同一个测试进程里前一个用例的额度或冷却会漏到下一个用例。
-    stateStoreService.reset();
-    return c.json({ success: true });
-});
-
 
 // Custom 404 handler for API routes
 app.notFound((c) => {

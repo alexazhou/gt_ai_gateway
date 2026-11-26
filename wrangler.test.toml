@@ -1,5 +1,5 @@
 name = "gt_ai_gateway_test"
-main = "src/index.ts"
+main = "tests/worker/testEntry.ts"
 compatibility_date = "2025-01-19"
 
 compatibility_flags = [ "nodejs_compat", "no_handle_cross_request_promise_resolution", "enhanced_error_serialization" ]
