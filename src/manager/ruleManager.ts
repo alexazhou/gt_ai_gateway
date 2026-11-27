@@ -215,4 +215,6 @@ export default {
     deleteRule,
     assertRuleWritable,
     onInvalidate,
+    // 供「不经 CRUD 的写入」使用（如 systemRulesSync 的直接 upsert），避免绕开缓存失效
+    notifyInvalidate,
 };
