@@ -453,36 +453,46 @@ async function cleanup(): Promise<void> {
 }
 
 /**
- * 删除 rule 表里全部记录后，重新创建这三条系统规则（`migrate_0035` 在真库上预置的那三条）。
- * 启用状态要读后台当前的配置开关，不能写死。
- * 不重建的话，三个插件就不会再运行；把 truncate() 里的本函数删掉，全量用例会红 23 例（8 个文件）。
- * 详见 shared/gateway-plugin-t7/report.md §五
+ * 重建系统规则：**直接调用服务进程里的生产实现** `ensureSystemRules()`
+ * （`src/plugin/systemRulesSync.ts`，经测试专用路由 `POST /test/ensure-system-rules`）。
+ *
+ * 为什么走 HTTP 而不是在测试进程里再写一份 SQL（2026-11-28，#382）：
+ * `ensureSystemRules()` 依赖 ORM（SgRule），而 API 测试进程里 ORM 没连、只有服务进程里连着，
+ * 所以测试必须把「执行」交回服务进程，才能测到真正的生产路径（与 #378 把 truncate 挪到
+ * `/test/reset` 同一个理由）。清表后不重建，插件规则就整体不执行（实测删掉本调用会有 23 例红）。
  */
-async function seedSystemRules(): Promise<void> {
-    const values: string[] = [];
-    for (const definition of SYSTEM_PLUGIN_RULES) {
-        // 不走 configService.getConfig()：它底层是 ORM，而 API 测试进程里 ORM 没连；
-        // 这里用裸 SQL 读当前值 + configService 导出的同一份默认值。
-        const rows = await query<{ value: string }>(
-            `SELECT value FROM config WHERE name = '${definition.configKey}'`,
-        );
-        const enabled = new ConfigItem(rows[0]?.value, configService.getConfigDefault(definition.configKey)).getBoolean() ? 1 : 0;
-        const scope = JSON.stringify({ type: "const", values: [true] });
-        const config = JSON.stringify({ plugin: definition.plugin, pluginConfig: definition.pluginConfig });
-        values.push(
-            `('plugin', '${definition.name}', '${scope}', '${config}', ${enabled}, `
-            + `(SELECT id FROM tenant WHERE name = 'main'), 1, ${definition.priority}, `
-            + `'${RULE_SOURCE.SYSTEM}', '${definition.bizId}', '${definition.note}')`,
-        );
-    }
-    // 先删再插：清表失败时表里可能还有旧行，重复插入会撞 UNIQUE。
-    await execute("DELETE FROM rule WHERE source = 'system'");
-    await execute(
-        "INSERT INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id, note) "
-        + `VALUES ${values.join(", ")}`,
-    );
-}
+async function seedSystemRules(): Promise<{ created: number; updated: number; unchanged: number }> {
+    const url = `http://127.0.0.1:${config.SERVER_CONFIG.port}/test/ensure-system-rules`;
+    let lastError: unknown;
 
+    for (let i = 0; i < 3; i++) {
+        try {
+            const response = await fetch(url, { method: "POST" });
+            if (!response.ok) {
+                throw Object.assign(
+                    new Error(
+                        `POST /test/ensure-system-rules 返回 ${response.status}：系统规则未重建`
+                        + `（测试入口没挂上测试路由？检查 TEST_MODE 与 LOCAL_EXTEND_MODULE）`,
+                    ),
+                    { fatal: true },
+                );
+            }
+            return (await response.json()) as { created: number; updated: number; unchanged: number };
+        } catch (e) {
+            lastError = e;
+            if ((e as { fatal?: boolean })?.fatal) {
+                throw e;
+            }
+            if (i < 2) {
+                await new Promise((r) => setTimeout(r, 100));
+            }
+        }
+    }
+
+    throw lastError instanceof Error
+        ? lastError
+        : new Error(`POST /test/ensure-system-rules 失败：${String(lastError)}`);
+}
 
 /**
  * 清表后重建 main 主租户（多租户隔离）：truncate 会清掉 tenant 表，不重建则
@@ -660,11 +670,12 @@ async function truncate(): Promise<void> {
     // Clear config cache to ensure test isolation
     configService.clearCache();
 
+    // 先清服务端缓存，再重建系统规则：ensure 在服务进程里读 config 取 enabled 初值，
+    // 若服务端还留着上一个用例的 config 缓存，会把旧开关值带进新库（#382）
+    await clearServerCache();
+
     // 系统规则是运行期真源，清表后必须重建（见 seedSystemRules 注释）
     await seedSystemRules();
-
-    // Also clear the server process's config cache
-    await clearServerCache();
 
     console.log("Tables truncated");
 }

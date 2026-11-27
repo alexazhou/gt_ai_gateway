@@ -1,9 +1,9 @@
 import type { Context } from "hono";
-import configService, { ConfigItem } from "../../src/service/configService";
+import configService from "../../src/service/configService";
 import ruleService from "../../src/service/ruleService";
 import tenantService from "../../src/service/tenantService";
 import stateStoreService from "../../src/service/stateStoreService";
-import { RULE_SOURCE, SYSTEM_PLUGIN_RULES } from "../../src/plugin/systemRules";
+import { ensureSystemRules } from "../../src/plugin/systemRulesSync";
 import type { App } from "../../src/app";
 
 /** 哨兵表名：不存在 ⇒ 用作「这批语句是否成功」的探针（失败即整批回滚，不留痕） */
@@ -127,37 +127,6 @@ async function readBusinessTableNames(db: D1Database, refresh = false): Promise<
 }
 
 /**
- * 读 4 个系统规则开关的**当前值**：与改造前一致，在清表**之后**读（此时 config 已被清空，
- * 于是回落到配置默认值），不能写死、也不能提前读——提前读会拿到上一个用例改过的开关。
- */
-async function readSystemRuleEnabled(db: D1Database): Promise<number[]> {
-    const enabled: number[] = [];
-    for (const definition of SYSTEM_PLUGIN_RULES) {
-        const row = await db
-            .prepare("SELECT value FROM config WHERE name = ?")
-            .bind(definition.configKey)
-            .first<{ value: string }>();
-        enabled.push(
-            new ConfigItem(row?.value, configService.getConfigDefault(definition.configKey)).getBoolean() ? 1 : 0,
-        );
-    }
-    return enabled;
-}
-
-/** 4 条系统规则的 INSERT（语句与改造前逐字一致，见 dbHelper.seedSystemRules） */
-function buildSystemRulesInsert(enabledList: number[]): string {
-    const values = SYSTEM_PLUGIN_RULES.map((definition, index) => {
-        const scope = JSON.stringify({ type: "const", values: [true] });
-        const ruleConfig = JSON.stringify({ plugin: definition.plugin, pluginConfig: definition.pluginConfig });
-        return `('plugin', '${definition.name}', '${scope}', '${ruleConfig}', ${enabledList[index]}, `
-            + `(SELECT id FROM tenant WHERE name = 'main'), 1, ${definition.priority}, `
-            + `'${RULE_SOURCE.SYSTEM}', '${definition.bizId}', '${definition.note}')`;
-    });
-    return "INSERT INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id, note) "
-        + `VALUES ${values.join(", ")}`;
-}
-
-/**
  * 测试专用路由：只由 `tests/worker/testEntry.ts` 挂载，生产入口（`src/index.ts`）不含本文件。
  */
 export function registerTestRoutes(app: App): void {
@@ -175,6 +144,19 @@ export function registerTestRoutes(app: App): void {
      *
      * `clearCache: true` 额外把服务端缓存清掉；`results[].rows` 带回 SELECT 的行。
      */
+    /**
+     * 生成/纠偏系统规则（#382）：直接调用生产 `ensureSystemRules()`。
+     * 目的是让「清表后重建」「漂移纠正」「幂等」这些用例走与生产同一条实现，
+     * 而不是在测试里再写一份 SQL。生产入口不含本文件，所以不是产品后门。
+     */
+    app.post("/test/ensure-system-rules", async (c) => {
+        if (!isTestMode(c)) {
+            return c.notFound();
+        }
+        const ensured = await ensureSystemRules();
+        return c.json(ensured);
+    });
+
     app.post("/test/sql", async (c) => {
         if (!isTestMode(c)) {
             return c.notFound();
@@ -262,16 +244,15 @@ export function registerTestRoutes(app: App): void {
                 await runBatch(db, clearStatements());
             }
 
-            phase = "read-config";
-            const enabled = await readSystemRuleEnabled(db);
-
-            phase = "seed-rules";
-            await runBatch(db, [buildSystemRulesInsert(enabled)]);
+            // 系统规则改由生产 ensureSystemRules() 生成（#382）：测试与生产走同一条路径，
+            // 不再在这里复制一份 INSERT。它会读 config 当前值（刚清空 ⇒ 回落默认值）作 enabled 初值。
+            phase = "ensure-system-rules";
+            const ensured = await ensureSystemRules();
 
             phase = "clear-cache";
             clearServerCaches();
 
-            return c.json({ success: true, tables: tables.length, enabled });
+            return c.json({ success: true, tables: tables.length, ensured });
         } catch (error) {
             const failure = error as BatchFailure;
             return c.json({
