@@ -41,7 +41,7 @@
             <a-form-item label="备注" name="note">
                 <a-textarea
                     v-model:value="formState.note"
-                    :rows="2"
+                    :auto-size="{ minRows: 2, maxRows: 6 }"
                     :maxlength="NOTE_MAX_LENGTH"
                     show-count
                     :disabled="viewMode"
