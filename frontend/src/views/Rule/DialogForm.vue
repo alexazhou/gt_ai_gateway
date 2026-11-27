@@ -135,7 +135,7 @@
                 <a-form-item label="插件参数（JSON）">
                     <a-textarea
                         v-model:value="formState.pluginConfigText"
-                        :rows="6"
+                        :auto-size="{ minRows: 2, maxRows: 5 }"
                         :disabled="viewMode"
                         placeholder='留空即 {}；例如 {"cchValue": "A1234"}'
                         class="plugin-config-textarea"
