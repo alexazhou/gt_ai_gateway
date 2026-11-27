@@ -3,6 +3,7 @@ import configService from "../../src/service/configService";
 import ruleService from "../../src/service/ruleService";
 import tenantService from "../../src/service/tenantService";
 import stateStoreService from "../../src/service/stateStoreService";
+import ormService from "../../src/service/ormService";
 import { ensureSystemRules } from "../../src/plugin/systemRulesSync";
 import type { App } from "../../src/app";
 
@@ -139,12 +140,6 @@ export function registerTestRoutes(app: App): void {
     });
 
     /**
-     * 一次调用执行多条 SQL（清库 + 播种要跑十几条，逐个 HTTP 往返比子进程还慢）。
-     * 失败时 400 并给出失败语句下标与原文，便于定位。
-     *
-     * `clearCache: true` 额外把服务端缓存清掉；`results[].rows` 带回 SELECT 的行。
-     */
-    /**
      * 生成/纠偏系统规则（#382）：直接调用生产 `ensureSystemRules()`。
      * 目的是让「清表后重建」「漂移纠正」「幂等」这些用例走与生产同一条实现，
      * 而不是在测试里再写一份 SQL。生产入口不含本文件，所以不是产品后门。
@@ -157,6 +152,28 @@ export function registerTestRoutes(app: App): void {
         return c.json(ensured);
     });
 
+    /**
+     * 复位 worker 侧「每 isolate 只 ensure 一次」的标记（#382）。
+     *
+     * 存在的理由：worker 的 ensure 挂在 `connectWorker` 上，正常用例里第一个请求就把它跑完了，
+     * 于是「把 ensure 从请求链路摘掉」没有任何判据（实测全套门仍全绿）。复位后下一个请求会重新
+     * 走那条接线，`tests/api/rule/systemRulesEnsure.test.ts` 里据此断言「删掉的行由新请求补齐」。
+     * 生产入口不含本文件，所以不是产品后门。
+     */
+    app.post("/test/system-rules-ensure-reset", async (c) => {
+        if (!isTestMode(c)) {
+            return c.notFound();
+        }
+        ormService.resetSystemRulesEnsureStateForTest();
+        return c.json({ success: true });
+    });
+
+    /**
+     * 一次调用执行多条 SQL（清库 + 播种要跑十几条，逐个 HTTP 往返比子进程还慢）。
+     * 失败时 400 并给出失败语句下标与原文，便于定位。
+     *
+     * `clearCache: true` 额外把服务端缓存清掉；`results[].rows` 带回 SELECT 的行。
+     */
     app.post("/test/sql", async (c) => {
         if (!isTestMode(c)) {
             return c.notFound();

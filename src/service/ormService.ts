@@ -143,6 +143,20 @@ class ORMService {
     }
 
     /**
+     * **仅测试入口使用**（`tests/worker/testRoutes.ts` 的 `POST /test/system-rules-ensure-reset`）。
+     *
+     * worker 侧 ensure 是「每 isolate 一次」，正常测试里永远是第一个请求就把它跑完了，
+     * 于是「删掉系统规则后由下一个请求自动补齐」这条接线没有判据——把 connectWorker 里的
+     * `_ensureSystemRulesOnce()` 整行删掉，全套门仍然全绿（#382 验收实测）。
+     * 复位标记后下一个请求会重新走那条接线，判据见 `tests/api/rule/systemRulesEnsure.test.ts`。
+     * 生产代码不调用本方法（测试路由只由 tests/worker/testEntry.ts 挂载）。
+     */
+    resetSystemRulesEnsureStateForTest(): void {
+        this._systemRulesEnsured = false;
+        this._systemRulesEnsurePromise = null;
+    }
+
+    /**
      * 把当前请求的 env.DB 挂到 knex 的 D1 client 上（见上面对跨请求 I/O 的说明）。
      *
      * P2-14：原实现整段 try/catch 静默吞异常 —— 一旦 sutando 内部结构变化（升级后 manager/connector

@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setupAdminUser } from "../../globalSetup";
 import dbHelper from "../../helpers/dbHelper";
+import requestHelper from "../../helpers/requestHelper";
+import userFixtures from "../../fixtures/userFixtures";
 import configService from "../../../src/service/configService";
 import { SYSTEM_PLUGIN_RULES } from "../../../src/plugin/systemRules";
 
@@ -31,6 +33,13 @@ interface SystemRuleRow {
 }
 
 const RULE_COLUMNS = "id, type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id, note";
+
+/**
+ * 「请求链路补齐」只在 worker 形态成立：worker 没有启动钩子，ensure 挂在
+ * `ormService.connectWorker()` 上（每 isolate 一次）；node 侧是进程启动期跑一次，
+ * 没有「下一个请求会重跑」这回事，故该用例只在 worker 门有意义。
+ */
+const isWorkerMode = process.env.TEST_MODE === "worker";
 
 async function systemRows(): Promise<SystemRuleRow[]> {
     return await dbHelper.query<SystemRuleRow>(
@@ -212,4 +221,44 @@ describe("系统规则运行期生成（ensureSystemRules）", () => {
         await dbHelper.seedSystemRules();
         expect(await systemRows()).toHaveLength(SYSTEM_PLUGIN_RULES.length);
     });
+
+    /**
+     * **请求链路接线判据**（#382 验收打回点 1，worker 侧）。
+     *
+     * 背景：worker 没有启动钩子，ensure 挂在 `connectWorker()` 上（每 isolate 一次）。正常用例里
+     * 第一个请求就把它跑完了，于是「把 `_ensureSystemRulesOnce()` 从 connectWorker 摘掉」没有任何
+     * 判据——验收实测 worker 门全绿。这里先删行、再复位「已 ensure」标记，用**下一个请求**验接线：
+     * 摘掉那行调用，第 4 步就会拿到 0 条。
+     */
+    it.skipIf(!isWorkerMode)(
+        "worker：ensure 挂在请求链路上——删行 + 复位 once 标记后，首个请求自动补齐四条",
+        async () => {
+            const adminToken = userFixtures.ADMIN_TOKEN;
+
+            // 1) 在服务进程里删掉四条（走 /test/sql，写的就是服务端那份 D1），再清掉服务端规则缓存
+            const deleted = await requestHelper.post("/test/sql", {
+                statements: ["DELETE FROM rule WHERE source = 'system'"],
+            });
+            expect(deleted.status).toBe(200);
+            const cleared = await requestHelper.del("/test/cache/clear");
+            expect(cleared.status).toBe(200);
+
+            // 2) 删除生效的正面证据；同时说明此刻请求链路没重建（若每个请求都 ensure，这里会是 4 条）
+            const empty = await requestHelper.get("/rule/list.json?source=system", adminToken);
+            expect(empty.status).toBe(200);
+            expect(empty.body.list).toHaveLength(0);
+
+            // 3) 复位「本 isolate 已经 ensure 过」的标记
+            const reset = await requestHelper.post("/test/system-rules-ensure-reset", {});
+            expect(reset.status).toBe(200);
+
+            // 4) 首个请求必须补齐四条：把 connectWorker 里的 _ensureSystemRulesOnce() 删掉，本步会红
+            const ensured = await requestHelper.get("/rule/list.json?source=system", adminToken);
+            expect(ensured.status).toBe(200);
+            expect(ensured.body.list).toHaveLength(SYSTEM_PLUGIN_RULES.length);
+            for (const rule of ensured.body.list as Array<Record<string, unknown>>) {
+                expect(rule.note, `规则 ${String(rule.biz_id)} 的 note 为空`).toBeTruthy();
+            }
+        },
+    );
 });
