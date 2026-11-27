@@ -1,11 +1,13 @@
 <template>
-    <a-modal
-        v-model:open="visible"
-        @cancel="handleCancel"
-        :confirm-loading="loading"
-        :width="720"
-        :body-style="{ paddingTop: '16px' }"
-    >
+    <!-- 弹窗内控件统一 small：由 ConfigProvider 下发，含 ScopeTreeEditor 内的输入/下拉/按钮 -->
+    <a-config-provider component-size="small">
+        <a-modal
+            v-model:open="visible"
+            @cancel="handleCancel"
+            :confirm-loading="loading"
+            :width="720"
+            :body-style="{ paddingTop: '16px' }"
+        >
         <template #title>
             <div class="modal-title">
                 <span>{{ modalTitle }}</span>
@@ -38,12 +40,18 @@
             <a-form-item label="规则名称" name="name">
                 <a-input v-model:value="formState.name" placeholder="例如：gpt-4o 仅内部用户可用" :disabled="viewMode" />
             </a-form-item>
-            <a-form-item label="备注" name="note">
+            <a-form-item name="note">
+                <!-- 字数放在标题行，省掉 textarea 下方那一行（原 show-count 占一行） -->
+                <template #label>
+                    <span class="note-label">
+                        <span>备注</span>
+                        <span class="note-count">{{ noteLength }} / {{ NOTE_MAX_LENGTH }}</span>
+                    </span>
+                </template>
                 <a-textarea
                     v-model:value="formState.note"
                     :auto-size="{ minRows: 2, maxRows: 6 }"
                     :maxlength="NOTE_MAX_LENGTH"
-                    show-count
                     :disabled="viewMode"
                     placeholder="选填：这条规则要解决什么问题、谁提的需求"
                 />
@@ -81,7 +89,7 @@
                         style="width: 160px"
                     />
                     <span class="config-hint">
-                        数值越小越先执行（0 ~ 10000，默认 100）；插件按此顺序依次改写，同一字段后执行的生效
+                        数值越小越先执行（0 ~ 10000，默认 100）
                     </span>
                 </div>
             </a-form-item>
@@ -110,17 +118,18 @@
             </a-form-item>
             <template v-else-if="formState.type === 'plugin'">
                 <a-form-item label="请求插件" required>
-                    <div class="config-row">
-                        <a-select
-                            v-model:value="formState.pluginName"
-                            :options="pluginOptions"
-                            :loading="pluginsLoading"
-                            :disabled="viewMode"
-                            placeholder="选择插件"
-                            style="width: 260px"
-                            @change="handlePluginChange"
-                        />
-                        <span class="config-hint">{{ currentPluginHint }}</span>
+                    <a-select
+                        v-model:value="formState.pluginName"
+                        :options="pluginOptions"
+                        :loading="pluginsLoading"
+                        :disabled="viewMode"
+                        placeholder="选择插件"
+                        style="width: 260px"
+                        @change="handlePluginChange"
+                    />
+                    <!-- 介绍单独成行：选择框里只留插件名，选中项的说明放在下面，避免选择框被长文案撑成一行 -->
+                    <div v-if="currentPluginDescription" class="config-hint plugin-description">
+                        {{ currentPluginDescription }}
                     </div>
                 </a-form-item>
                 <a-form-item label="插件参数（JSON）">
@@ -140,7 +149,8 @@
                 <span class="config-hint">无需参数：条件命中即拒绝（403），可表达白名单（not in）等场景</span>
             </a-form-item>
         </a-form>
-    </a-modal>
+        </a-modal>
+    </a-config-provider>
 </template>
 
 <script setup lang="ts">
@@ -202,6 +212,9 @@ const formState = reactive({
     cross_tenant: false,
 });
 
+/** 备注字数：跟在「备注」标题同一行（替代 textarea 下方的 show-count，省一行空间） */
+const noteLength = computed(() => (formState.note || "").length);
+
 const tenantStore = useTenantStore();
 const isMainView = computed(() => tenantStore.isMainView);
 
@@ -231,20 +244,16 @@ const plugins = ref<PluginDescriptor[]>([]);
 const pluginsLoading = ref(false);
 const pluginOptions = computed(() => plugins.value.map(plugin => ({
     value: plugin.name,
-    label: plugin.description ? `${plugin.name}（${plugin.description}）` : plugin.name,
+    // 选择框里只显示插件名；介绍放到选项的 title（悬停可见）与选中项下方的说明行
+    label: plugin.name,
+    title: plugin.description || plugin.name,
 })));
 
 const currentPlugin = computed<PluginDescriptor | undefined>(
     () => plugins.value.find(plugin => plugin.name === formState.pluginName),
 );
-const currentPluginHint = computed(() => {
-    const plugin = currentPlugin.value;
-    if (!plugin) {
-        return '插件清单来自网关插件注册表';
-    }
-    const hooks = plugin.hooks.length > 0 ? plugin.hooks.join(' / ') : '—';
-    return `执行钩子：${hooks}`;
-});
+/** 选中插件的介绍：显示在选择框下方独立一行（不塞进选择框） */
+const currentPluginDescription = computed(() => currentPlugin.value?.description || '');
 
 async function loadPlugins(): Promise<void> {
     if (plugins.value.length > 0 || pluginsLoading.value) {
@@ -498,6 +507,35 @@ defineExpose({ openCreate, openEdit, openView });
 .config-hint {
     color: var(--text-secondary);
     font-size: 12px;
+}
+
+/* 插件介绍：选择框下方独立一行，长文案换行而不是把选择框撑宽 */
+.plugin-description {
+    display: block;
+    margin-top: 4px;
+    line-height: 18px;
+}
+
+/* 备注字数与「备注」标题同一行：灰色、贴右（与原 show-count 一致的视觉） */
+.rule-form :deep(.ant-form-item-label) {
+    width: 100%;
+}
+
+.rule-form :deep(.ant-form-item-label > label) {
+    width: 100%;
+}
+
+.note-label {
+    display: flex;
+    width: 100%;
+    align-items: baseline;
+    justify-content: space-between;
+}
+
+.note-count {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: normal;
 }
 
 .plugin-config-textarea {
