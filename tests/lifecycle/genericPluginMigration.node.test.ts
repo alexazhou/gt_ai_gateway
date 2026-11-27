@@ -5,10 +5,15 @@ import { afterEach, describe, expect, it } from "vitest";
 import { RULE_SOURCE, SYSTEM_PLUGIN_RULES } from "../../src/plugin/systemRules";
 
 /**
- * migrate_0035（通用请求插件规则化 v3）的数据迁移行为。
+ * migrate_0035（通用请求插件规则化 v3）的**结构变更与存量数据搬迁**行为。
  *
  * 直接在**迁移前的库结构**上跑迁移 SQL（不走 runner），这样能构造 runner 不会遇到、
  * 但线上一定存在的历史数据形态：存量限流规则、两个 tracking 键并存、config 行缺失。
+ *
+ * **2026-11-28（#382）起本迁移不再预置四条系统规则**：它们由运行期
+ * `ensureSystemRules()`（`src/plugin/systemRulesSync.ts`）按 `SYSTEM_PLUGIN_RULES` 生成与纠偏。
+ * 因此本文件只断言「迁移做了结构 + 存量搬迁、且不再造系统规则」；系统规则的字段/幂等/漂移纠正
+ * 由 `tests/api/rule/systemRulesEnsure.test.ts` 在服务进程内测（那里 ORM 连着）。
  */
 const migrationDirectory = join(process.cwd(), "resource", "migrate");
 const sqliteMigrationSql = readFileSync(join(migrationDirectory, "migrate_0035", "sqlite.sql"), "utf8");
@@ -130,59 +135,39 @@ describe("migrate_0035（通用请求插件规则化）", () => {
         expect(configValue(db, "claudecode_tracking_rewrite_enabled")).toBe("false");
     });
 
-    it("预置的四条系统规则与 SYSTEM_PLUGIN_RULES 逐字段一致（防迁移 SQL 与 TS 常量漂移）", () => {
+    it("迁移不再预置系统规则（改由运行期 ensureSystemRules 生成）", () => {
         db = createLegacySchema();
         db.exec(sqliteMigrationSql);
 
-        const systemRules = allRules(db);
-        expect(systemRules).toHaveLength(SYSTEM_PLUGIN_RULES.length);
-
-        SYSTEM_PLUGIN_RULES.forEach((definition, index) => {
-            const row = systemRules[index];
-            expect(row.biz_id).toBe(definition.bizId);
-            expect(row.name).toBe(definition.name);
-            expect(row.priority).toBe(definition.priority);
-            expect(row.type).toBe("plugin");
-            expect(row.source).toBe(RULE_SOURCE.SYSTEM);
-            // 系统规则是 main 租户下的全局共享规则
-            expect(row.tenant_id).toBe(1);
-            expect(row.cross_tenant).toBe(1);
-            expect(JSON.parse(row.scope)).toEqual({ type: "const", values: [true] });
-            expect(JSON.parse(row.config)).toEqual({ plugin: definition.plugin, pluginConfig: definition.pluginConfig });
-            // 备注说明「来源 + 怎么改」，迁移 SQL 与 TS 常量必须一字不差
-            expect(row.note).toBe(definition.note);
-        });
-        // 优先级顺序就是执行顺序
-        expect(systemRules.map((rule) => rule.priority)).toEqual(SYSTEM_PLUGIN_RULES.map((rule) => rule.priority));
+        // 迁移前库里没有任何规则；如果本迁移还在 INSERT，这里就会是 4 条
+        expect(allRules(db)).toHaveLength(0);
+        // 但结构必须齐：没有这些列/索引，ensure 与规则列表都跑不起来
+        const columns = (db.prepare("PRAGMA table_info(rule)").all() as { name: string }[]).map((c) => c.name);
+        expect(columns).toEqual(expect.arrayContaining(["priority", "source", "biz_id", "note"]));
+        const indexes = (db.prepare("PRAGMA index_list(rule)").all() as { name: string }[]).map((i) => i.name);
+        expect(indexes).toEqual(expect.arrayContaining(["rule_biz_id_index", "rule_priority_index"]));
     });
 
-    it("系统规则 enabled 跟随迁移后可读到的配置值（有行用行值，无行用默认 true）", () => {
+    it("存量规则不受影响：迁移只加列/索引，不动用户规则字段", () => {
         db = createLegacySchema();
         db.exec(`
-            INSERT INTO config (name, value) VALUES ('cch_rewrite_enabled', 'false');
-            INSERT INTO config (name, value) VALUES ('responses_prompt_cache_key_enabled', 'true');
-            -- claudecode_tracking_rewrite_enabled 无行 → 按后端默认 true
+            INSERT INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant)
+            VALUES ('plugin', 'legacy-plugin-rule', '{"type":"const","values":[true]}', '{"plugin":"cchRewriter","pluginConfig":{}}', 1, 1, 0);
         `);
 
         db.exec(sqliteMigrationSql);
 
-        const byBizId = new Map(allRules(db).map((rule) => [rule.biz_id, rule]));
-        expect(byBizId.get("SYS:setting:claudecode_tracking_rewrite")?.enabled).toBe(1);
-        expect(byBizId.get("SYS:setting:cch_rewrite")?.enabled).toBe(0);
-        expect(byBizId.get("SYS:setting:responses_prompt_cache_key")?.enabled).toBe(1);
+        const rows = allRules(db);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].name).toBe("legacy-plugin-rule");
+        // 加列后回填的默认值：priority=100 / source=user / biz_id=NULL / note=NULL
+        expect(rows[0].priority).toBe(100);
+        expect(rows[0].source).toBe(RULE_SOURCE.USER);
+        expect(rows[0].biz_id).toBeNull();
+        expect(rows[0].note).toBeNull();
     });
 
-    it("旧键存在且为 false 时，对应的系统规则就是关闭的（不是「行存在就当 true」）", () => {
-        db = createLegacySchema();
-        db.exec("INSERT INTO config (name, value) VALUES ('claude_code_tracking_rewrite_enabled', 'false');");
-
-        db.exec(sqliteMigrationSql);
-
-        const tracking = allRules(db).find((rule) => rule.biz_id === "SYS:setting:claudecode_tracking_rewrite");
-        expect(tracking?.enabled).toBe(0);
-    });
-
-    it("主租户缺失时不预置系统规则，但加列与索引照常完成", () => {
+    it("主租户缺失时迁移照常完成（系统规则本来就不由迁移生成）", () => {
         db = createLegacySchema();
         db.exec("DELETE FROM tenant WHERE name = 'main'");
 
@@ -204,12 +189,20 @@ describe("migrate_0035（通用请求插件规则化）", () => {
             VALUES ('rate_limit', 'b', '{"type":"const","values":[true]}', '{"rpm":2}', 1, 1, 0);
         `);
 
+        // 迁移不再预置系统规则（#382），所以这里自己先建一条带 biz_id 的行，
+        // 再验证第二个同 biz_id 的插入会被唯一索引挡住 —— 判据从「迁移已插好的那条」改成自建行。
+        db.exec(`
+            INSERT INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id)
+            VALUES ('plugin', 'first', '{"type":"const","values":[true]}', '{"plugin":"cchRewriter","pluginConfig":{}}', 1, 1, 1, 20, 'system', 'SYS:setting:cch_rewrite');
+        `);
+
         expect(() => db!.exec(`
             INSERT INTO rule (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id)
             VALUES ('plugin', 'dup', '{"type":"const","values":[true]}', '{"plugin":"cchRewriter","pluginConfig":{}}', 1, 1, 0, 100, 'system', 'SYS:setting:cch_rewrite');
         `)).toThrow(/UNIQUE/i);
 
-        // 用户规则的 biz_id 为 NULL，可以共存任意多条
+        // 用户规则的 biz_id 为 NULL，可以共存任意多条（唯一索引允许多个 NULL）
         expect(allRules(db).filter((rule) => rule.biz_id === null)).toHaveLength(2);
+        expect(allRules(db).filter((rule) => rule.biz_id === "SYS:setting:cch_rewrite")).toHaveLength(1);
     });
 });

@@ -3,7 +3,7 @@
 -- 与 sqlite.sql 同一语义与同一执行顺序：
 --   1) rule 表加 priority / source / biz_id / note 四列（存量规则 priority 由 DEFAULT 回填 100）；
 --   2) 合并旧前端遗留的 tracking 配置键名（以旧键保存值为准）；
---   3) 按当前配置预置四条系统规则（priority 10 / 20 / 30 / 40，cross_tenant = 1，scope = const true）。
+--   3) 四条系统规则**不再**由本迁移预置，改由运行期 ensureSystemRules() 生成（见文末说明）。
 --
 -- 方言差异：`INSERT IGNORE`（sqlite 为 `INSERT OR IGNORE`）；
 -- 「两个键都存在时以旧键为准」用自连接 UPDATE（MySQL 不允许在 UPDATE 的子查询里引用目标表）。
@@ -32,42 +32,14 @@ WHERE n.name = 'claudecode_tracking_rewrite_enabled';
 
 DELETE FROM config WHERE name = 'claude_code_tracking_rewrite_enabled';
 
--- 3) 预置四条系统规则 -------------------------------------------------------
--- enabled 跟随**迁移后的运行期口径**：配置有行 → 用行值；配置无行 → 用后端默认值 'true'
--- （migrate_0017 预置过 cch_rewrite_enabled = 'false'，与 configService 默认 true 不一致，
---   这里取运行期实际会读到的值，而不是"行不存在就当默认值"）。
-INSERT IGNORE INTO `rule` (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id, note)
-SELECT 'plugin',
-       '屏蔽 Claude Code 跟踪',
-       '{"type":"const","values":[true]}',
-       '{"plugin":"claudeCodeTrackingRewriter","pluginConfig":{}}',
-       CASE WHEN LOWER(COALESCE((SELECT value FROM config WHERE name = 'claudecode_tracking_rewrite_enabled'), 'true')) = 'false' THEN 0 ELSE 1 END,
-       t.id, 1, 10, 'system', 'SYS:setting:claudecode_tracking_rewrite', '系统预置：由 migrate_0035 创建，定义在 src/plugin/systemRules.ts。规则本身只读（改名 / 优先级 / 参数都不要直接改表），启用状态请在「高级设置 → 请求处理」切换对应开关。'
-FROM tenant t WHERE t.name = 'main';
-
-INSERT IGNORE INTO `rule` (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id, note)
-SELECT 'plugin',
-       '强制改写 CCH',
-       '{"type":"const","values":[true]}',
-       '{"plugin":"cchRewriter","pluginConfig":{}}',
-       CASE WHEN LOWER(COALESCE((SELECT value FROM config WHERE name = 'cch_rewrite_enabled'), 'true')) = 'false' THEN 0 ELSE 1 END,
-       t.id, 1, 20, 'system', 'SYS:setting:cch_rewrite', '系统预置：由 migrate_0035 创建，定义在 src/plugin/systemRules.ts。规则本身只读（改名 / 优先级 / 参数都不要直接改表），启用状态请在「高级设置 → 请求处理」切换对应开关。'
-FROM tenant t WHERE t.name = 'main';
-
-INSERT IGNORE INTO `rule` (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id, note)
-SELECT 'plugin',
-       'Responses API 粘性路由',
-       '{"type":"const","values":[true]}',
-       '{"plugin":"responsesPromptCacheKeyRewriter","pluginConfig":{}}',
-       CASE WHEN LOWER(COALESCE((SELECT value FROM config WHERE name = 'responses_prompt_cache_key_enabled'), 'true')) = 'false' THEN 0 ELSE 1 END,
-       t.id, 1, 30, 'system', 'SYS:setting:responses_prompt_cache_key', '系统预置：由 migrate_0035 创建，定义在 src/plugin/systemRules.ts。规则本身只读（改名 / 优先级 / 参数都不要直接改表），启用状态请在「高级设置 → 请求处理」切换对应开关。'
-FROM tenant t WHERE t.name = 'main';
-
-INSERT IGNORE INTO `rule` (type, name, scope, config, enabled, tenant_id, cross_tenant, priority, source, biz_id, note)
-SELECT 'plugin',
-       '自动生成 session header',
-       '{"type":"const","values":[true]}',
-       '{"plugin":"addSessionHeader","pluginConfig":{}}',
-       CASE WHEN LOWER(COALESCE((SELECT value FROM config WHERE name = 'session_header_enabled'), 'false')) = 'true' THEN 1 ELSE 0 END,
-       t.id, 1, 40, 'system', 'SYS:setting:session_header', '系统预置：由 migrate_0035 创建，定义在 src/plugin/systemRules.ts。规则本身只读（改名 / 优先级 / 参数都不要直接改表），启用状态请在「高级设置 → 请求处理」切换对应开关。'
-FROM tenant t WHERE t.name = 'main';
+-- 3) 系统规则不再由迁移预置（2026-11-28 改）---------------------------------
+-- 四条系统规则（屏蔽 Claude Code 跟踪 / 强制改写 CCH / Responses API 粘性路由 / 自动生成 session header）
+-- 改由运行期 `ensureSystemRules()`（src/plugin/systemRulesSync.ts）按 src/plugin/systemRules.ts 的常量
+-- 生成与纠偏；本迁移只负责结构变更与上面的旧配置键合并。
+--
+-- 为什么不在这里 INSERT：name / priority / note / plugin / pluginConfig 全是代码资产，写进 SQL 会与
+-- TS 常量漂移（此前靠 tests/lifecycle/genericPluginMigration.node.test.ts 用红灯钉住），改一句文案还得
+-- 再加一条迁移。已应用过本迁移的老库不会重跑，规则同样由启动 ensure 维护。
+--
+-- enabled 初值语义不变：新建行时 ensure 读该规则对应配置项的当前值（有配置行用行值，无行用后端默认值），
+-- 与原 COALESCE 口径一致；**已存在的行 ensure 永不改写 enabled**（它是用户运行期开关）。
