@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"net/http"
+	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -11,8 +13,14 @@ import (
 // tenantColumns 对应 tenantController.listTenants 的返回字段。
 var tenantColumns = []string{"id", "name", "description", "created_at"}
 
-// ruleColumns 对应 ruleController.listRules 的返回字段。
-var ruleColumns = []string{"id", "name", "type", "scope", "enabled", "cross_tenant", "created_at"}
+// ruleColumns 对应 ruleController.listRules 的返回字段（generic-plugin v3 起含 priority / source / biz_id）。
+var ruleColumns = []string{"id", "name", "type", "priority", "source", "scope", "enabled", "cross_tenant", "created_at"}
+
+// pluginColumns 对应 ruleController.listPlugins（= 后端插件注册表 describe()）的返回字段。
+var pluginColumns = []string{"name", "description", "hooks"}
+
+// ruleSourceValues 是 rule list 的 --source 合法取值：user = 用户规则，system = 系统预置规则。
+var ruleSourceValues = []string{"user", "system"}
 
 func (a *App) newTenantCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -182,6 +190,7 @@ func (a *App) newRuleCmd() *cobra.Command {
 	}
 	cmd.AddCommand(
 		a.newRuleListCmd(),
+		a.newRulePluginsCmd(),
 		a.newRuleGetCmd(),
 		a.newRuleCreateCmd(),
 		a.newRuleUpdateCmd(),
@@ -192,13 +201,22 @@ func (a *App) newRuleCmd() *cobra.Command {
 
 func (a *App) newRuleListCmd() *cobra.Command {
 	q := &listQuery{}
-	var keyword string
+	var keyword, source string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "列出规则（GET /rule/list.json）",
-		Args:  noArgs,
+		Long: `按来源列出规则：--source user 只列用户规则（服务端默认口径），
+--source system 只列系统预置规则（名称 / 条件 / 参数不可改，仅开关可由高级设置调整）。`,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if strings.TrimSpace(source) != "" {
+				if !slices.Contains(ruleSourceValues, source) {
+					return client.Usagef("--source 只支持 %s，实际为 %q",
+						strings.Join(ruleSourceValues, " / "), source)
+				}
+			}
 			q.set("keyword", keyword)
+			q.set("source", source)
 			resp, err := a.apiCall(cmd, http.MethodGet, "/rule/list.json"+q.String(), nil)
 			if err != nil {
 				return err
@@ -208,7 +226,25 @@ func (a *App) newRuleListCmd() *cobra.Command {
 	}
 	q.addCommonFlags(cmd)
 	cmd.Flags().StringVar(&keyword, "keyword", "", "按名称关键字筛选（后端 keyword 参数）")
+	cmd.Flags().StringVar(&source, "source", "", "按来源筛选（user / system；不传 = 服务端默认只返回用户规则）")
 	return cmd
+}
+
+// newRulePluginsCmd 列可用请求插件：数据来自后端插件注册表 describe()，按插件名升序。
+// 建 plugin 规则时用它确认插件名与参数样例（config_example 只在 --json 里可见）。
+func (a *App) newRulePluginsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "plugins",
+		Short: "列出可用请求插件（GET /rule/plugins.json）",
+		Args:  noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			resp, err := a.apiCall(cmd, http.MethodGet, "/rule/plugins.json", nil)
+			if err != nil {
+				return err
+			}
+			return a.outList(resp, pluginColumns)
+		},
+	}
 }
 
 func (a *App) newRuleGetCmd() *cobra.Command {

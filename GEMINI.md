@@ -24,6 +24,7 @@
 | **doc/design/设计文档规范.md** | 设计文档规范：目录组织、文档命名规范、新增功能流程 |
 | **doc/design/ROADMAP.md** | 实施路线图，按发布版本（前两位）概述各版本里程碑能力 |
 | **doc/design/2026-{date}-{feature}/** | 各里程碑/功能的设计文档（product 产品 / technical 技术 / tasks 任务）与专项设计，按 `{date}-{feature}` 组织 |
+| **doc/tech/auth_architecture.md** | 网关认证与权限架构说明（三步认证/作用域/准入守卫模型） |
 | **doc/tech/concurrent_request_fix.md** | 并发请求问题修复记录 |
 | **doc/tech/record_timestamp_serialization_fix.md** | 请求记录时间字段序列化修复说明 |
 | **doc/tech/release_process.md** | 新版本发布流程，包含版本号修改、提交流程、tag 和 push 步骤 |

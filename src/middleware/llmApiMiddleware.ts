@@ -1,5 +1,5 @@
 import { Context, MiddlewareHandler } from "hono";
-import { ApiFormat, ConfigKey, FailedCode, UserStatus } from "../constants";
+import { ApiFormat, ConfigKey, FailedCode } from "../constants";
 import userService from "../service/userService";
 import llmRequestService from "../service/llmRequestService";
 import recordService from "../service/recordService";
@@ -7,7 +7,7 @@ import ruleService from "../service/ruleService";
 import { SgUser } from "../model/sgUser";
 import customError from "../customError";
 import configService from "../service/configService";
-import { resolveScopeForUser } from "./tenantScopeMiddleware";
+import tenantService, { TenantScope } from "../service/tenantService";
 
 
 /**
@@ -17,7 +17,7 @@ import { resolveScopeForUser } from "./tenantScopeMiddleware";
  * 或在 node 侧把内存拖崩。这里先看 Content-Length 快速拒绝（不读 body 就回 413），
  * 读进来后再按实读长度兜底一次（分块传输不带头，或头与实际不一致）。
  */
-export function resolveBodyLimitViolation(
+function resolveBodyLimitViolation(
     declaredContentLength: string | undefined,
     actualBodyLength: number,
     limitBytes: number,
@@ -82,28 +82,38 @@ function parseLlmRequestBody(body: string): string {
 }
 
 
-async function authenticateLlmUser(c: Context): Promise<SgUser> {
-    const token = extractLlmToken(c);
-    const user = await userService.getUserByToken(token, c.env.ROOT_TOKEN);
-    if (user == null) {
-        throw new customError.AppError("Invalid token (user not found)", 401, "authentication_error");
-    }
-    if (user.status === UserStatus.DISABLED) {
-        throw new customError.AppError("User disabled", 403, "authentication_error");
-    }
+/**
+ * LLM 端公共前置：设置协议格式，完成身份认证（Step 1）与租户作用域解析（Step 2）。
+ * 两个守卫只在此基础上叠加各自的 Step 3。
+ */
+async function authenticateAndResolveScope(
+    c: Context,
+    format: ApiFormat,
+): Promise<{ user: SgUser; scope: TenantScope }> {
+    c.set("api_format", format);
 
-    return user;
+    // Step 1：Bearer / x-api-key 认证，含禁用状态校验
+    const token = extractLlmToken(c);
+    const user = await userService.authenticateByToken(
+        token,
+        c.env.ROOT_TOKEN,
+        "Invalid token (user not found)",
+        "authentication_error",
+    );
+    c.set("user", user);
+
+    // Step 2：租户作用域（root 取 X-Tenant-ID，缺失默认 main；非 root 固定自身租户）
+    const scope = await tenantService.resolveScopeForUser(user, c.req.header("X-Tenant-ID"));
+    c.set("tenantScope", scope);
+
+    return { user, scope };
 }
 
 
-const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
+/** 推理接口守卫：身份 + 作用域 + 请求体上限 / 模型解析 / 准入规则（Step 3）。 */
+const requireModelAccess = (format: ApiFormat): MiddlewareHandler => {
     return async (c: Context, next) => {
-        c.set("api_format", format);
-        const user = await authenticateLlmUser(c);
-
-        // 租户作用域：root 取 X-Tenant-ID（缺失默认 main），非 root 固定自身租户
-        const scope = await resolveScopeForUser(user, c.req.header("X-Tenant-ID"));
-        c.set("tenantScope", scope);
+        const { user, scope } = await authenticateAndResolveScope(c, format);
 
         const bodyLimit = await configService.getNumber(ConfigKey.LLM_MAX_BODY_BYTES);
 
@@ -127,7 +137,6 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
             scope,
         );
 
-        c.set("user", user);
         c.set("requestBody", body);
         c.set("modelConfig", modelConfig);
 
@@ -169,13 +178,15 @@ const requireLlmRequestContext = (format: ApiFormat): MiddlewareHandler => {
 };
 
 
-const requireLlmModelsAuth: MiddlewareHandler = async (c: Context, next) => {
-    c.set("api_format", ApiFormat.OPENAI);
-    const user = await authenticateLlmUser(c);
-    c.set("user", user);
-    const scope = await resolveScopeForUser(user, c.req.header("X-Tenant-ID"));
-    c.set("tenantScope", scope);
-    await next();
+/**
+ * 模型列表守卫：只需身份（Step 1）+ 作用域（Step 2），无需解析 Body 与模型规则。
+ * 供 `GET /llm/v1/models` 使用。
+ */
+const requireLlmAuth = (format: ApiFormat = ApiFormat.OPENAI): MiddlewareHandler => {
+    return async (c: Context, next) => {
+        await authenticateAndResolveScope(c, format);
+        await next();
+    };
 };
 
-export default { requireLlmRequestContext, requireLlmModelsAuth };
+export default { requireLlmAuth, requireModelAccess, resolveBodyLimitViolation };

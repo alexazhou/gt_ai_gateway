@@ -1,7 +1,57 @@
 use std::io::{BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::sync::Arc;
 use std::time::Duration;
+
+/// config.json 缺省或取值非法时适用的日志级别
+pub const DEFAULT_LOG_LEVEL: &str = "info";
+
+/// 归一化日志级别：大小写不敏感，只接受 debug / info / warn / error，其余返回 None。
+pub fn normalize_log_level(raw: &str) -> Option<String> {
+    let value = raw.trim().to_ascii_lowercase();
+    match value.as_str() {
+        "debug" | "info" | "warn" | "error" => Some(value),
+        _ => None,
+    }
+}
+
+/// 解析桌面端数据目录：返回 Ok(None) 表示用系统默认目录。
+///
+/// 显式指定时**必须已存在且是目录**：自定义目录通常是挂载盘或准备好的工作区，
+/// 路径不存在往往意味着拼写错误或外置盘没挂上，静默建空库比报错更危险。
+pub fn resolve_custom_data_dir(
+    raw: Option<&str>,
+    home_dir: Option<&Path>,
+) -> Result<Option<PathBuf>, String> {
+    let raw = match raw {
+        Some(value) if !value.trim().is_empty() => value.trim(),
+        _ => return Ok(None),
+    };
+
+    let expanded: PathBuf = if raw == "~" || raw.starts_with("~/") {
+        let home = match home_dir {
+            Some(dir) => dir.to_path_buf(),
+            None => return Err(format!("无法展开 ~：取不到用户主目录（GT_AI_GATEWAY_DATA_DIR={raw}）")),
+        };
+        if raw == "~" {
+            home
+        } else {
+            home.join(&raw[2..])
+        }
+    } else {
+        PathBuf::from(raw)
+    };
+
+    if !expanded.exists() {
+        return Err(format!("GT_AI_GATEWAY_DATA_DIR 指向的目录不存在：{}", expanded.display()));
+    }
+    if !expanded.is_dir() {
+        return Err(format!("GT_AI_GATEWAY_DATA_DIR 指向的不是目录：{}", expanded.display()));
+    }
+
+    Ok(Some(expanded))
+}
 
 pub fn generate_client_url(host: &str, port: u16) -> String {
     let client_host = if host == "0.0.0.0" {

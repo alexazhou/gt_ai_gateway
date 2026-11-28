@@ -255,7 +255,7 @@ async function selectUpstream(
     const candidates = await resolveAvailableCandidates(model, clientFormat);
     // 负载均衡"按用户随机"模式的种子：从请求 context 读取用户 id，调用方无需主动传入
     const seed = (c?.get("user") as { id?: number } | undefined)?.id;
-    const selected = strategy.selectUpstream(model, candidates, routingContext, seed);
+    const selected = await strategy.selectUpstream(model, candidates, routingContext, seed);
     // 记录本次已选后端，后续重试不再选中（成功则循环立即结束，该记录无害）
     if (selected.hasUpstream()) {
         routingContext.markTried(selected.vendor.id, selected.vendorModelName);

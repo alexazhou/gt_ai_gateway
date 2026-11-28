@@ -6,7 +6,8 @@ import customError from "../customError";
 import { createListResponse, parsePaginationQuery } from "../util/paginationUtil";
 
 
-// 租户管理系统管理员专用（root，或归属 main 租户的 admin）：非系统管理员一律 403
+// 租户管理系统管理员专用（root，或归属 main 租户的 admin）：非系统管理员一律 403。
+// 路由已挂 authMiddleware.requireSystemAdmin，这里是双保险：防止未来新增路由漏挂中间件。
 function assertSystemAdmin(c: Context): void {
     if (!c.get("tenantScope")?.isSystemAdmin) {
         throw new customError.AppError("System administrator access required", 403);

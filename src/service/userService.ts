@@ -1,5 +1,5 @@
 import { SgUser } from "../model/sgUser";
-import { ROOT_USER_ID, UserType, BALANCE_SCALE, PLACEHOLDER_ROOT_TOKEN } from "../constants";
+import { ROOT_USER_ID, UserType, UserStatus, BALANCE_SCALE, PLACEHOLDER_ROOT_TOKEN } from "../constants";
 import userManager from "../manager/userManager";
 import rechargeRecordManager from "../manager/rechargeRecordManager";
 import configService from "./configService";
@@ -64,6 +64,29 @@ async function getUserByToken(token: string, rootToken?: string): Promise<SgUser
     return await userManager.findByToken(token);
 }
 
+/**
+ * 根据 token 查找用户并校验禁用状态（管理端与 LLM 端共用同一份口径）。
+ * - 用户不存在 → AppError(notFoundMessage, 401, errorCode)
+ * - 用户已禁用 → AppError("User disabled", 403, errorCode)
+ *
+ * errorCode 只供 LLM 端写入协议错误体的 type；管理端不传，响应仍是 `{ error }`。
+ */
+async function authenticateByToken(
+    token: string,
+    rootToken?: string,
+    notFoundMessage: string = "Invalid token",
+    errorCode?: string,
+): Promise<SgUser> {
+    const user = await getUserByToken(token, rootToken);
+    if (!user) {
+        throw new customError.AppError(notFoundMessage, 401, errorCode);
+    }
+    if (user.status === UserStatus.DISABLED) {
+        throw new customError.AppError("User disabled", 403, errorCode);
+    }
+    return user;
+}
+
 async function adjustBalance(
     userId: number,
     amount: number,
@@ -87,10 +110,10 @@ async function adjustBalance(
     // Worker 模式下 D1 不支持多语句事务（ormService 已绕过连接池），故维持原行为、
     // 不做事务包裹，仅把查询部分（findById）下沉到 manager。充值记录写入失败时
     // 余额已更新但不留记录，与拆分前行为一致。
-    // Create recharge record（amount 仍以"元"记录）；租户取被充值用户归属
+    // Create recharge record（amount 以整数微元记录，与余额同口径）；租户取被充值用户归属
     await rechargeRecordManager.create({
         user_id: userId,
-        amount: amount,
+        amount: amountUnits,
         type: type,
         remark: remark,
         operator: operator,
@@ -126,6 +149,7 @@ export default {
     isRootToken,
     isRootTokenConfigured,
     getUserByToken,
+    authenticateByToken,
     adjustBalance,
     deductBalance,
     checkBalance,

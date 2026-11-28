@@ -65,27 +65,32 @@ async function startServer() {
     // 初始化日志系统（在重写 console 之前，使用原始 console）
     const logger: Logger = initLogger(true);
     originalConsole.log("Starting server...");
+    originalConsole.log(`[local] LOG_LEVEL=${logger.getLevel()}（debug 时逐 chunk 输出上游流式原文）`);
 
-    // 重写 console 方法以记录日志
+    // 重写 console 方法以记录日志；低于 LOG_LEVEL 的级别不进控制台也不落盘
     console.log = (...args: unknown[]) => {
+        if (!logger.shouldLog("info")) return;
         originalConsole.log(...args);
         const message = args.map(formatConsoleArg).join(" ");
         logger["write"]("info", message);
     };
 
     console.error = (...args: unknown[]) => {
+        if (!logger.shouldLog("error")) return;
         originalConsole.error(...args);
         const message = args.map(formatConsoleArg).join(" ");
         logger["write"]("error", message);
     };
 
     console.warn = (...args: unknown[]) => {
+        if (!logger.shouldLog("warn")) return;
         originalConsole.warn(...args);
         const message = args.map(formatConsoleArg).join(" ");
         logger["write"]("warn", message);
     };
 
     console.debug = (...args: unknown[]) => {
+        if (!logger.shouldLog("debug")) return;
         originalConsole.debug(...args);
         const message = args.map(formatConsoleArg).join(" ");
         logger["write"]("debug", message);
@@ -166,6 +171,19 @@ async function startServer() {
         // Static file serving for built frontend assets
         app.use("/assets/*", serveStatic({ root: distPath }));
         app.use("/data_viewer/*", serveStatic({ root: distPath }));
+    }
+
+    // 测试基座扩展点：node 模式跑测试时，tests/globalSetup.ts 通过 LOCAL_EXTEND_MODULE 注入一个模块，
+    // 由它把测试专用路由（DELETE /test/cache/clear、POST /test/sql、POST /test/reset）挂到这个 app 上——
+    // 否则测试进程发来的清缓存请求会 404，用例之间的 config/rule/StateStore 缓存会互相污染。
+    //
+    // **双重门禁**（#378 验收 ⑪）：`TEST_MODE` 与 `LOCAL_EXTEND_MODULE` **同时**存在才加载；
+    // 生产 / 桌面版两者都不设 ⇒ 连 import 都不会发生，产物里也没有测试路由。
+    const extendModule = process.env.LOCAL_EXTEND_MODULE;
+    if (process.env.TEST_MODE && extendModule) {
+        const mod: { registerTestRoutes?: (target: typeof app) => void } = await import(extendModule);
+        console.log(`[TEST_EXTEND] loaded ${extendModule}`);
+        mod.registerTestRoutes?.(app);
     }
 
     const hostname = hostService.getLocalHost();

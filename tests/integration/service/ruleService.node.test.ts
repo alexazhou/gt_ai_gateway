@@ -9,8 +9,8 @@ import { SgVendor } from "../../../src/model/sgVendor";
 import customError from "../../../src/customError";
 import dbHelper from "../../helpers/dbHelper";
 import ormTestHelper from "../../helpers/ormTestHelper";
-import memoryRateLimitStore from "../../../src/util/rule/memoryRateLimitStore";
-import type { TenantScope } from "../../../src/middleware/tenantScopeMiddleware";
+import stateStoreService from "../../../src/service/stateStoreService";
+import type { TenantScope } from "../../../src/service/tenantService";
 
 describe("ruleService (node, real db)", () => {
     let tenantId = 1;
@@ -24,7 +24,8 @@ describe("ruleService (node, real db)", () => {
         await dbHelper.truncate();
         tenantId = await tenantService.getMainTenantId();
         mainTenantId = tenantId;
-        memoryRateLimitStore.clear();
+        // 限流桶已收口到全局 StateStore（dbHelper.truncate() 里也会 reset，这里显式再来一次防顺序依赖）
+        stateStoreService.reset();
         ruleService.invalidateCache();
     });
 

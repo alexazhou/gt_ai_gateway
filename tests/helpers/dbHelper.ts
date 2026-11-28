@@ -5,8 +5,10 @@ import { existsSync, unlinkSync } from "fs";
 import config from "../config";
 import { DBAdapter } from "../../src/util/db/dbAdapter";
 import { migrate as runMigrations } from "../../src/service/dbMigrationService";
-import configService from "../../src/service/configService";
+import configService, { ConfigItem } from "../../src/service/configService";
 import tenantService from "../../src/service/tenantService";
+import { RULE_SOURCE, SYSTEM_PLUGIN_RULES } from "../../src/plugin/systemRules";
+import stateStoreService from "../../src/service/stateStoreService";
 
 // Worker mode configuration - use test database
 const TEST_DB_NAME = "gt_ai_gateway_test";
@@ -178,15 +180,66 @@ function createAdapter(): DBAdapter {
     }
 }
 
+/** D1 锁冲突的重试次数与退避基数（worker 门专用，见 runD1Command 注释） */
+const D1_LOCK_RETRY_ATTEMPTS = 6;
+const D1_LOCK_RETRY_BASE_DELAY_MS = 250;
+
 /**
- * Helper to run wrangler D1 commands (worker mode only)
+ * worker 门子进程计数（#378）：`runD1Command` 每真正拉起一次 `npx wrangler d1 execute` 就 +1。
+ * 用来给「truncate() 期间 0 次子进程」提供**可复跑**的证据（任何 runner 都能读前后差值），
+ * 不改变任何行为。
+ */
+let d1SpawnCount = 0;
+
+/** 读当前累计的 D1 子进程次数（#378 证据用） */
+function getD1SpawnCount(): number {
+    return d1SpawnCount;
+}
+
+/** 重置 D1 子进程计数（#378 证据用） */
+function resetD1SpawnCount(): void {
+    d1SpawnCount = 0;
+}
+
+/** 同步睡一小会儿（worker 门的 helper 是同步 API，不能用 await） */
+function sleepSync(ms: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** 是否是「本地 D1 被别的进程短暂锁住」这类瞬时错误 */
+function isD1LockError(error: unknown): boolean {
+    const text = [
+        error instanceof Error ? error.message : String(error),
+        String((error as { stderr?: unknown })?.stderr ?? ""),
+        String((error as { output?: unknown })?.output ?? ""),
+    ].join("\n");
+    return text.includes("database is locked") || text.includes("SQLITE_BUSY");
+}
+
+/**
+ * 执行一条 wrangler D1 命令（worker 模式专用）。
+ * 上一个测试文件刚结束时，workerd 可能还占着本地 D1 的写锁，wrangler 会报
+ * `SQLITE_BUSY / database is locked`；不重试的话紧接着的建规则会撞 UNIQUE。
+ * 只对锁类错误重试（6 次、250ms 递增），其它错误立刻抛。详见 shared/gateway-plugin-t7/report.md
  */
 function runD1Command(args: string[]): string {
-    return execFileSync(
-        "npx",
-        ["wrangler", "d1", "execute", TEST_DB_NAME, "--local", "--config", TEST_WRANGLER_CONFIG, ...args],
-        { encoding: "utf-8", stdio: "pipe" },
-    );
+    for (let attempt = 1; ; attempt += 1) {
+        try {
+            d1SpawnCount += 1;
+            return execFileSync(
+                "npx",
+                ["wrangler", "d1", "execute", TEST_DB_NAME, "--local", "--config", TEST_WRANGLER_CONFIG, ...args],
+                { encoding: "utf-8", stdio: "pipe" },
+            );
+        } catch (error) {
+            if (attempt >= D1_LOCK_RETRY_ATTEMPTS || !isD1LockError(error)) {
+                throw error;
+            }
+            const delay = D1_LOCK_RETRY_BASE_DELAY_MS * attempt;
+            console.warn(`[WORKER_SETUP] D1 被锁（第 ${attempt} 次），${delay}ms 后重试`);
+            sleepSync(delay);
+        }
+    }
 }
 
 /**
@@ -208,28 +261,6 @@ async function clearD1LocalDatabase(): Promise<void> {
         console.log(`[WORKER_SETUP] Dropped ${tables.length} tables: ${tables.map((t) => t.name).join(", ")}`);
     } catch (e) {
         console.error("[WORKER_SETUP] Failed to clear D1 test database:", e);
-    }
-}
-
-/**
- * 清空 D1 本地表数据（保留表结构与 `_migrations`）——worker 模式专用
- */
-async function clearD1Tables(): Promise<void> {
-    console.log("[WORKER_SETUP] Clearing D1 database tables...");
-
-    try {
-        const tables = await listBusinessTables(true);
-
-        if (tables.length === 0) {
-            console.log("[WORKER_SETUP] No tables to clear");
-            return;
-        }
-
-        // Combine all DELETE statements into a single command for better performance
-        runD1Command(["--command", tables.map((t) => `DELETE FROM ${t.name};`).join(" ")]);
-        console.log(`[WORKER_SETUP] Cleared ${tables.length} tables`);
-    } catch (e) {
-        console.error("[WORKER_SETUP] Failed to clear D1 tables:", e);
     }
 }
 
@@ -276,7 +307,7 @@ async function listAllMysqlTables(): Promise<{ name: string }[]> {
  * 返回 { name }[]，供 cleanup / truncate / clearD1* 使用。
  *
  * `excludeMigrations`：是否排除 `_migrations`
- * - 批量清数据（truncate / clearD1Tables）→ true，保留迁移记录
+ * - 批量清数据（truncate）→ true，保留迁移记录
  * - 重置 schema（cleanup / clearD1LocalDatabase）→ false，连迁移记录一起删，下一轮重跑迁移
  *
  * 注意：mysql 分支下划线开头的表（含 `_migrations`）统一不算业务表，故该参数在 mysql 下无额外作用；
@@ -422,6 +453,48 @@ async function cleanup(): Promise<void> {
 }
 
 /**
+ * 重建系统规则：**直接调用服务进程里的生产实现** `ensureSystemRules()`
+ * （`src/plugin/systemRulesSync.ts`，经测试专用路由 `POST /test/ensure-system-rules`）。
+ *
+ * 为什么走 HTTP 而不是在测试进程里再写一份 SQL（2026-11-28，#382）：
+ * `ensureSystemRules()` 依赖 ORM（SgRule），而 API 测试进程里 ORM 没连、只有服务进程里连着，
+ * 所以测试必须把「执行」交回服务进程，才能测到真正的生产路径（与 #378 把 truncate 挪到
+ * `/test/reset` 同一个理由）。清表后不重建，插件规则就整体不执行（实测删掉本调用会有 23 例红）。
+ */
+async function seedSystemRules(): Promise<{ created: number; updated: number; unchanged: number }> {
+    const url = `http://127.0.0.1:${config.SERVER_CONFIG.port}/test/ensure-system-rules`;
+    let lastError: unknown;
+
+    for (let i = 0; i < 3; i++) {
+        try {
+            const response = await fetch(url, { method: "POST" });
+            if (!response.ok) {
+                throw Object.assign(
+                    new Error(
+                        `POST /test/ensure-system-rules 返回 ${response.status}：系统规则未重建`
+                        + `（测试入口没挂上测试路由？检查 TEST_MODE 与 LOCAL_EXTEND_MODULE）`,
+                    ),
+                    { fatal: true },
+                );
+            }
+            return (await response.json()) as { created: number; updated: number; unchanged: number };
+        } catch (e) {
+            lastError = e;
+            if ((e as { fatal?: boolean })?.fatal) {
+                throw e;
+            }
+            if (i < 2) {
+                await new Promise((r) => setTimeout(r, 100));
+            }
+        }
+    }
+
+    throw lastError instanceof Error
+        ? lastError
+        : new Error(`POST /test/ensure-system-rules 失败：${String(lastError)}`);
+}
+
+/**
  * 清表后重建 main 主租户（多租户隔离）：truncate 会清掉 tenant 表，不重建则
  * tenantService.getMainTenantId() 失败，所有租户逻辑在测试里不可用。
  */
@@ -446,23 +519,100 @@ async function seedMainTenant(): Promise<void> {
 }
 
 /**
- * 清除测试服务端进程的缓存（带重试处理 worker 本地重载的连接瞬断）
+ * 清除测试服务端进程的缓存（带重试处理 worker 本地重载的连接瞬断）。
+ *
+ * **非 2xx 必须抛错**（#378 验收 ⑩）：以前只 `fetch` 不看状态码，端点不存在（404）时会被静默吞掉，
+ * 表现为「用例之间缓存不清、个别用例莫名红/绿」，排查成本极高。现在把状态码当错误抛出，
+ * 只对**连接类**失败重试（404/500 这类立刻抛，重试没有意义）。
  */
 async function clearServerCache(): Promise<void> {
+    const url = `http://127.0.0.1:${config.SERVER_CONFIG.port}/test/cache/clear`;
+    let lastError: unknown;
+
     for (let i = 0; i < 3; i++) {
         try {
-            await fetch(`http://127.0.0.1:${config.SERVER_CONFIG.port}/test/cache/clear`, {
-                method: "DELETE",
-            });
-            break;
+            const response = await fetch(url, { method: "DELETE" });
+            if (!response.ok) {
+                throw Object.assign(
+                    new Error(
+                        `DELETE /test/cache/clear 返回 ${response.status}：服务端缓存未清理`
+                        + `（测试入口没挂上测试路由？检查 TEST_MODE 与 LOCAL_EXTEND_MODULE）`,
+                    ),
+                    { fatal: true },
+                );
+            }
+            return;
         } catch (e) {
-            if (i === 2) {
-                console.error("Failed to clear server cache:", e);
-            } else {
+            lastError = e;
+            if ((e as { fatal?: boolean })?.fatal) {
+                throw e;
+            }
+            if (i < 2) {
                 await new Promise((r) => setTimeout(r, 100));
             }
         }
     }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+/** POST /test/reset 的 HTTP 重试次数与退避基数（只重试连接类/5xx，4xx 是语句本身的错不重试） */
+const TEST_RESET_HTTP_ATTEMPTS = 3;
+const TEST_RESET_HTTP_RETRY_BASE_DELAY_MS = 100;
+
+/**
+ * worker 模式下调用测试端点的 `POST /test/reset`：一次调用完成
+ * 「清业务表 + 重建 main 租户 + 重建系统规则 + 清服务端缓存」，全程 0 次子进程（#378）。
+ *
+ * 语句构造放在端点里而非这里，是因为「开关现值必须在清表之后读」——放测试侧拼语句就得多一轮
+ * HTTP（先清表 → 再读 → 再写），端点内做可以一次调用内按序完成，且失败时能直接报出
+ * 「阶段 + 第几条 + 原文」。
+ */
+async function resetViaTestEndpoint(): Promise<void> {
+    const url = `http://127.0.0.1:${config.SERVER_CONFIG.port}/test/reset`;
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= TEST_RESET_HTTP_ATTEMPTS; attempt += 1) {
+        try {
+            const response = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: "{}",
+            });
+            const text = await response.text();
+            const parsed = (text ? JSON.parse(text) : {}) as {
+                error?: string;
+                phase?: string;
+                failedIndex?: number | null;
+                failedStatement?: string | null;
+            };
+
+            if (!response.ok) {
+                const located = parsed.failedIndex === null || parsed.failedIndex === undefined
+                    ? ""
+                    : `；失败语句[${parsed.failedIndex}]: ${parsed.failedStatement}`;
+                const failure = new Error(
+                    `POST /test/reset 失败 (${response.status}, 阶段 ${parsed.phase ?? "?"}): `
+                    + `${parsed.error ?? response.statusText}${located}`,
+                );
+                // 4xx = 语句本身的问题，重试无意义
+                if (response.status >= 400 && response.status < 500) {
+                    throw Object.assign(failure, { fatal: true });
+                }
+                throw failure;
+            }
+
+            return;
+        } catch (error) {
+            lastError = error;
+            if ((error as { fatal?: boolean })?.fatal) break;
+            if (attempt < TEST_RESET_HTTP_ATTEMPTS) {
+                await new Promise((r) => setTimeout(r, TEST_RESET_HTTP_RETRY_BASE_DELAY_MS * attempt));
+            }
+        }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 /**
@@ -474,15 +624,18 @@ async function truncate(): Promise<void> {
         adapter = createAdapter();
     }
 
+    // 限流桶 / 上游冷却 / 版本检查缓存都收口在 StateStore 里：清表时一并重置，
+    // 否则用例之间的额度与冷却状态会互相污染（服务端进程那一份由 clearServerCache() 走
+    // DELETE /test/cache/clear 重置）。
+    stateStoreService.reset();
+
     if (isWorkerMode) {
-        // In worker mode, clear D1 tables only (admin user created via API)
-        await clearD1Tables();
-        await seedMainTenant();
+        // worker 模式：一次 POST /test/reset 完成清表+播种（0 次子进程，见 #378）
+        await resetViaTestEndpoint();
 
         // Clear in-memory config cache so tests don't leak state across runs
+        // （测试进程自己那份；服务端那份由端点里的 clearServerCaches() 清）
         configService.clearCache();
-
-        await clearServerCache();
         return;
     }
 
@@ -517,8 +670,12 @@ async function truncate(): Promise<void> {
     // Clear config cache to ensure test isolation
     configService.clearCache();
 
-    // Also clear the server process's config cache
+    // 先清服务端缓存，再重建系统规则：ensure 在服务进程里读 config 取 enabled 初值，
+    // 若服务端还留着上一个用例的 config 缓存，会把旧开关值带进新库（#382）
     await clearServerCache();
+
+    // 系统规则是运行期真源，清表后必须重建（见 seedSystemRules 注释）
+    await seedSystemRules();
 
     console.log("Tables truncated");
 }
@@ -609,6 +766,11 @@ async function close(): Promise<void> {
     }
 }
 
+export {
+    getD1SpawnCount,
+    resetD1SpawnCount,
+};
+
 export default {
     initDatabase,   // Unified database initialization
     clearDatabase,  // Unified database cleanup
@@ -617,6 +779,9 @@ export default {
     truncate,       // DELETE cleanup
     query,
     execute,
+    seedSystemRules,
+    getD1SpawnCount,
+    resetD1SpawnCount,
     getAdapter,
     close,
 };

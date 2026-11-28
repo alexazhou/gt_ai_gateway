@@ -1,43 +1,31 @@
 import SgRule from "../model/sgRule";
 import customError from "../customError";
-import memoryRateLimitStore from "../util/rule/memoryRateLimitStore";
-import type { RateLimitStore, RequestContext } from "../util/rule/types";
+import stateStoreService from "./stateStoreService";
+import { StateStoreUnavailableError } from "../util/stateStore";
+import type { RequestContext } from "../util/rule/types";
 
 // rpm 的补液窗口：1 分钟（补液速率 = rpm / 60s）
-const WINDOW_MS = 60_000;
+const WINDOW_SECONDS = 60;
 // rpm = 0（硬性阻断）时的重试建议：规则不可用，给出保守值供客户端退避
 const RETRY_AFTER_OFFLINE_SECONDS = 60;
-
-// 注入的计数器存储实现（测试可替换）
-let storeOverride: RateLimitStore | null = null;
+// Key 命名空间：限流 / 上游冷却 / 更新缓存共用同一个 StateStore 键空间，靠前缀隔离（方案 §2.1）
+const RL_KEY_PREFIX = "rl:rule:";
 
 /**
- * 解析当前应使用的限流存储：**一律内存令牌桶**。
+ * 限流计数器落在全局 `StateStore`（`stateStoreService.getStore()`）。
  *
  * 2026-11-16 Operator 决定（#287）：限流不用数据库。原先 Worker 走 D1 上的
- * `rate_limit_bucket` 表以跨 isolate 共享（P0-2），该方案连同 migrate_0033 一并撤销。
+ * `rate_limit_bucket` 表跨 isolate 共享（P0-2），该方案连同 migrate_0033 一并撤销。
  *
- * 代价要说清：Worker 每个 isolate 各有一份桶，N 个 isolate 下实际 rpm 上限约为
- * N × 配置值。这是有意接受的取舍 —— 限流是保护上游的软性措施，不值得为它维护一张
- * 只在 Worker 路径读写的表；需要精确全局配额时应改 Durable Object / Redis
- * （`src/util/stateStore/` 已留 `durable_object` / `redis` 后端位，实现为空壳会抛错）。
+ * 现状与代价（与迁移前等价，不是本轮引入）：`memory` 后端是 **per-isolate** 的，
+ * Worker 下每个 isolate 各有一份桶，N 个 isolate 下实际 rpm 上限约为 N × 配置值。
+ * 这是有意接受的取舍 —— 限流是保护上游的软性措施；要跨 isolate 精确共享需换
+ * `durable_object` / `redis` 后端（`src/util/stateStore/` 已留后端位，当前为空壳会抛错）。
  */
-function resolveStore(): RateLimitStore {
-    return storeOverride ?? memoryRateLimitStore;
-}
-
-function setStore(implementation: RateLimitStore | null): void {
-    storeOverride = implementation;
-}
 
 interface CheckAndAdmitOptions {
     /** 阶段二（供应商级限流）传 true：抛出的 RateLimitError 带 failover 标记，供路由循环识别换上游 */
     failoverEligible?: boolean;
-}
-
-/** 由 rpm 推导令牌桶参数：容量 = rpm（瞬时突发上限），补液速率 = rpm / 60s */
-function tokenBucketParams(rpm: number): { capacity: number; refillPerMs: number } {
-    return { capacity: rpm, refillPerMs: rpm / WINDOW_MS };
 }
 
 /**
@@ -46,6 +34,9 @@ function tokenBucketParams(rpm: number): { capacity: number; refillPerMs: number
  * - config.rpm 为 0 → 不可用（无请求额度，所有命中请求一律 429，可作硬性阻断）
  * - config.rpm 为 N（N > 0）→ 令牌桶容量 N、补液 N 个/分钟：瞬时突发 ≤ N，
  *   长时间平均速率 = N 请求/分钟；桶空时按当前令牌数给出精确的 Retry-After
+ *
+ * 状态后端不可用（`StateStoreUnavailableError`）时 **fail-closed**：转成 429 拒绝放行，
+ * 绝不因为「算不清额度」而放开限流（契约见 `src/util/stateStore/types.ts` 第 2 条）。
  */
 async function checkAndAdmit(rule: SgRule, ctx: RequestContext, opts: CheckAndAdmitOptions = {}): Promise<void> {
     const failoverEligible = opts.failoverEligible ?? false;
@@ -65,13 +56,34 @@ async function checkAndAdmit(rule: SgRule, ctx: RequestContext, opts: CheckAndAd
         );
     }
 
-    const now = Date.now();
-    const { capacity, refillPerMs } = tokenBucketParams(rpm);
-    // consume 可能是异步实现，await 对同步实现同样安全
-    const result = await resolveStore().consume(`rule:${rule.id}:rpm`, now, capacity, refillPerMs);
+    const key = `${RL_KEY_PREFIX}${rule.id}:rpm`;
+    let result;
+    try {
+        result = await stateStoreService.getStore().consume(key, {
+            capacity: rpm,
+            refillPerSec: rpm / WINDOW_SECONDS,
+            cost: 1,
+        });
+    } catch (err) {
+        if (err instanceof StateStoreUnavailableError) {
+            // fail-closed：状态后端算不出额度时宁可误拒，不可误放
+            throw new customError.RateLimitError(
+                `Rate limit store unavailable for rule "${rule.name}"`,
+                RETRY_AFTER_OFFLINE_SECONDS,
+                failoverEligible,
+                Number(rule.id),
+                rule.name,
+            );
+        }
+        throw err;
+    }
+
     if (!result.allowed) {
-        // 精确重试时间：补足 (1 - remaining) 个令牌所需毫秒，换算成秒向上取整（最小 1s）
-        const waitSeconds = Math.max(1, Math.ceil((1 - result.remaining) / refillPerMs / 1000));
+        // 精确重试时间由 StateStore 算好（retryAfterMs，向上取整到毫秒）；
+        // null = 等多久都不会放行（refillPerSec <= 0 或 capacity < cost），给保守退避值
+        const waitSeconds = result.retryAfterMs !== null
+            ? Math.max(1, Math.ceil(result.retryAfterMs / 1000))
+            : RETRY_AFTER_OFFLINE_SECONDS;
         throw new customError.RateLimitError(
             `Rate limit exceeded for rule "${rule.name}" (rpm = ${rpm})`,
             waitSeconds,
@@ -84,5 +96,4 @@ async function checkAndAdmit(rule: SgRule, ctx: RequestContext, opts: CheckAndAd
 
 export default {
     checkAndAdmit,
-    setStore,
 };

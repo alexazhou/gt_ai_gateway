@@ -43,6 +43,8 @@ interface RunSSELoopOptions {
     accumulator: AccumulatorBase;
     converter: BaseConverter | null;
     upstreamUsageCollector: InstanceType<typeof usageUtils.UpstreamUsageCollector>;
+    /** 记录 id：只用于流式 chunk 日志（debug 逐条输出时要能指认是哪条请求） */
+    recordId: number;
 }
 
 // 流式读循环日志前缀（runSSELoop 只被 handleStreamResponse 一处调用，直接固化）
@@ -136,6 +138,8 @@ async function runSSELoop(
     const upstreamReader = upstreamRes.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    // 上游 chunk 序号（跨 decode 调用累加）：debug 级别逐条输出原文，info 级别按它采样
+    let upstreamChunkIndex = 0;
     let failedCode: string | null = null;
     let errorMessage: string | null = null;
 
@@ -193,7 +197,8 @@ async function runSSELoop(
     async function consumeUpstreamText(text: string): Promise<void> {
         if (!text) return;
 
-        streamLogService.appendStreamLog(logStream, text);
+        upstreamChunkIndex += 1;
+        streamLogService.recordUpstreamChunk(opts.recordId, upstreamChunkIndex, text, logStream);
         buffer += text;
 
         const splitResult = sseEventUtil.splitEvents(buffer);
@@ -709,6 +714,7 @@ export async function handleStreamResponse(
             accumulator,
             converter,
             upstreamUsageCollector,
+            recordId: Number(record.id),
         });
         console.log(`[responseHandlerService] Stream ended, completed: ${state.accumulator.isCompleted()}, failedCode: ${state.failedCode}`);
         finalizeStreamResult(c, record, model, user, upstreamFormat, state, converter);

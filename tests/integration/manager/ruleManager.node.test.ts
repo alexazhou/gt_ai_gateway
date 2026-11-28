@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import ruleManager from "../../../src/manager/ruleManager";
 import tenantService from "../../../src/service/tenantService";
-import type { TenantScope } from "../../../src/middleware/tenantScopeMiddleware";
+import type { TenantScope } from "../../../src/service/tenantService";
 import dbHelper from "../../helpers/dbHelper";
 import ormTestHelper from "../../helpers/ormTestHelper";
 
@@ -44,7 +44,9 @@ describe("ruleManager (node, real db)", () => {
         await ruleManager.create(buildRule(), mainScope.tenantId);
         await ruleManager.create(buildRule({ name: "disabled", enabled: false }), mainScope.tenantId);
 
-        const rules = await ruleManager.listEnabled(mainScope.tenantId, mainScope.mainTenantId);
+        // 清表后由 dbHelper 重建的三条系统插件规则也是启用状态，这里只看用户规则
+        const rules = (await ruleManager.listEnabled(mainScope.tenantId, mainScope.mainTenantId))
+            .filter((rule) => rule.source === "user");
         expect(rules.length).toBe(1);
         expect(rules[0].name).toBe("test-rule");
     });

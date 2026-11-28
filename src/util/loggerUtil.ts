@@ -1,7 +1,25 @@
 import { existsSync, mkdirSync, writeFileSync, appendFileSync, statSync, readdirSync, renameSync, unlinkSync } from "fs";
 import { join } from "path";
 
-type LogLevel = "info" | "warn" | "error" | "debug";
+export type LogLevel = "debug" | "info" | "warn" | "error";
+
+// 级别越高越严重；低于 minLevel 的日志既不落盘也不进控制台
+const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
+    debug: 10,
+    info: 20,
+    warn: 30,
+    error: 40,
+};
+
+const DEFAULT_LOG_LEVEL: LogLevel = "info";
+
+/**
+ * 解析日志级别：大小写不敏感，空值或非法值一律回退 info（存量 config 没有该字段时不至于静默丢日志）。
+ */
+export function parseLogLevel(raw?: string | null): LogLevel {
+    const value = (raw ?? "").trim().toLowerCase();
+    return value in LOG_LEVEL_PRIORITY ? (value as LogLevel) : DEFAULT_LOG_LEVEL;
+}
 
 // 保存原始 console 方法，避免被重写导致无限递归
 const originalConsole = {
@@ -23,6 +41,8 @@ interface LoggerOptions {
     maxFileSize?: number;
     /** 保留的 app-*.log 文件数量上限，超出时删除最旧的。默认 5 */
     maxFileCount?: number;
+    /** 最小输出级别，默认取环境变量 LOG_LEVEL，再缺省则 info */
+    level?: LogLevel;
 }
 
 class Logger {
@@ -33,18 +53,43 @@ class Logger {
     private enabled: boolean;
     private readonly maxFileSize: number;
     private readonly maxFileCount: number;
+    private minLevel: LogLevel;
+    /** 跨天切换后要补一次 prune（新一天的文件此时还没建，只能等写入后清） */
+    private pendingPrune: boolean = false;
 
     constructor(logDir: string, enabled: boolean = true, options?: LoggerOptions) {
         this.logDir = logDir;
         this.enabled = enabled;
         this.maxFileSize = options?.maxFileSize ?? DEFAULT_MAX_FILE_SIZE;
         this.maxFileCount = options?.maxFileCount ?? DEFAULT_MAX_FILE_COUNT;
+        this.minLevel = options?.level ?? parseLogLevel(process.env.LOG_LEVEL);
 
         if (enabled) {
             this.ensureLogDir();
             this.logFilePath = this.getLogFilePath();
             this.currentSize = this.getFileSize(this.logFilePath);
+            // 启动时清一次：按天滚动时 rotate() 不会触发，历史文件会无限累积
+            this.pruneOldFiles();
         }
+    }
+
+    /** 当前生效的最小输出级别 */
+    getLevel(): LogLevel {
+        return this.minLevel;
+    }
+
+    setLevel(level: LogLevel): void {
+        this.minLevel = level;
+    }
+
+    /** 该级别是否达到输出阈值 */
+    shouldLog(level: LogLevel): boolean {
+        return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[this.minLevel];
+    }
+
+    /** 是否开启了 debug：流式 chunk 的逐条原文输出靠它判定 */
+    isDebugEnabled(): boolean {
+        return this.minLevel === "debug";
     }
 
     private ensureLogDir(): void {
@@ -181,10 +226,11 @@ class Logger {
         }
         this.logFilePath = this.getLogFilePath();
         this.currentSize = this.getFileSize(this.logFilePath);
+        this.pendingPrune = true;
     }
 
     private write(level: LogLevel, message: string, ...args: unknown[]): void {
-        if (!this.enabled) {
+        if (!this.enabled || !this.shouldLog(level)) {
             return;
         }
 
@@ -205,24 +251,34 @@ class Logger {
 
         appendFileSync(this.logFilePath, logLine);
         this.currentSize += Buffer.byteLength(logLine, "utf8");
+
+        // 跨天后的第一条日志落盘时文件才存在，这时清理才能把新文件算进保留名额
+        if (this.pendingPrune) {
+            this.pendingPrune = false;
+            this.pruneOldFiles();
+        }
     }
 
     info(message: string, ...args: unknown[]): void {
+        if (!this.shouldLog("info")) return;
         this.write("info", message, ...args);
         originalConsole.log(`[INFO] ${message}`, ...args);
     }
 
     warn(message: string, ...args: unknown[]): void {
+        if (!this.shouldLog("warn")) return;
         this.write("warn", message, ...args);
         originalConsole.warn(`[WARN] ${message}`, ...args);
     }
 
     error(message: string, ...args: unknown[]): void {
+        if (!this.shouldLog("error")) return;
         this.write("error", message, ...args);
         originalConsole.error(`[ERROR] ${message}`, ...args);
     }
 
     debug(message: string, ...args: unknown[]): void {
+        if (!this.shouldLog("debug")) return;
         this.write("debug", message, ...args);
         originalConsole.debug(`[DEBUG] ${message}`, ...args);
     }
@@ -269,4 +325,4 @@ function getLogDir(): string {
 }
 
 export default initLogger;
-export { getLogger, Logger, resetLogger, getLogDir };
+export { getLogger, Logger, resetLogger, getLogDir, LOG_LEVEL_PRIORITY, DEFAULT_LOG_LEVEL };

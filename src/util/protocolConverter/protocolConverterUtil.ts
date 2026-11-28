@@ -137,12 +137,13 @@ function openAIUsageToResponses(raw: RawOpenAIUsage): ResponsesUsage {
 
 
 /**
- * Anthropic usage → OpenAI Chat usage（prompt_tokens = 非缓存输入 + 缓存命中）
+ * Anthropic usage → OpenAI Chat usage
+ * （prompt_tokens = 非缓存输入 + 缓存命中 + 缓存写入；Anthropic 三个字段互不包含）
  */
 function anthropicUsageToOpenAI(raw: RawAnthropicUsage): OpenAIUsage {
     const cached = raw.cache_read_input_tokens;
     const cacheWrite = raw.cache_creation_input_tokens;
-    const promptTokens = (raw.input_tokens ?? 0) + (cached ?? 0);
+    const promptTokens = (raw.input_tokens ?? 0) + (cached ?? 0) + (cacheWrite ?? 0);
     const completionTokens = raw.output_tokens ?? 0;
     const usage: OpenAIUsage = {
         prompt_tokens: promptTokens,
@@ -160,11 +161,14 @@ function anthropicUsageToOpenAI(raw: RawAnthropicUsage): OpenAIUsage {
 
 
 /**
- * Anthropic usage → Responses usage（input_tokens = 非缓存输入 + 缓存命中）
+ * Anthropic usage → Responses usage
+ * （input_tokens = 非缓存输入 + 缓存命中 + 缓存写入；Anthropic 三个字段互不包含）
+ * 注意：这里只改总量口径，不新增 cache 写入的明细字段（Responses 侧透出记 backlog）。
  */
 function anthropicUsageToResponses(raw: RawAnthropicUsage): ResponsesUsage {
     const cached = raw.cache_read_input_tokens;
-    const inputTokens = (raw.input_tokens ?? 0) + (cached ?? 0);
+    const cacheWrite = raw.cache_creation_input_tokens;
+    const inputTokens = (raw.input_tokens ?? 0) + (cached ?? 0) + (cacheWrite ?? 0);
     const outputTokens = raw.output_tokens ?? 0;
     const usage: ResponsesUsage = {
         input_tokens: inputTokens,

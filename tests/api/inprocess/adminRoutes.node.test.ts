@@ -78,7 +78,7 @@ describe("进程内 API 冒烟（routes → middleware → controller → servic
             expect(res.status, `${path} 期望 200，实际 ${res.status}`).toBe(200);
         }
 
-        // 租户列表只对 root 开放（assertRoot），单独用 root 凭证走一遍
+        // 租户列表只对系统管理员开放（authMiddleware.requireSystemAdmin），单独用 root 凭证走一遍
         const tenants = await getWithToken("/tenant.json", ROOT_TOKEN);
         expect(tenants.status, "/tenant.json（root）期望 200").toBe(200);
     });

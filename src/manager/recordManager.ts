@@ -1,10 +1,9 @@
 import { SgRecord, RECORD_SUMMARY_COLUMNS } from "../model/sgRecord";
 import { SgRecordStatus, FailedCode, RequestActivityStage, ActivityLevel } from "../constants";
-import billingUtil from "../util/protocolUtil/billingUtil";
 import requestActivityService from "../service/requestActivityService";
 import { bindParamBatchSize } from "../util/db/bindParamUtil";
 import ormService from "../service/ormService";
-import type { TenantScope } from "../middleware/tenantScopeMiddleware";
+import type { TenantScope } from "../service/tenantService";
 import type { SqlStatement } from "../util/dbAdapterUtil";
 
 interface RecordListOptions {
@@ -51,14 +50,11 @@ async function create(data: RecordCreateData) {
 
 /**
  * 更新 record 表字段。response_data 不是 record 表列（存在对象存储），写入表前必须剥离。
- * cost 以"元"传入；裸 query().update() 不走模型 cast，这里手动换算成整数微元存储；
+ * cost 以「整数微元」传入（与 user.balance 同口径），不再做元→微元换算。
  * usage 同样直接以存储串写入（见 RecordUpdateData）。
  */
 async function update(recordId: number, data: RecordUpdateData) {
     const { response_data: _omit, ...tableData } = data;
-    if (tableData.cost !== undefined) {
-        tableData.cost = billingUtil.toUnits(tableData.cost);
-    }
     return SgRecord.query().where("id", recordId).update(tableData);
 }
 

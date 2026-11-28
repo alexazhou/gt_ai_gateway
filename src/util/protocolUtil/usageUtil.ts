@@ -50,13 +50,17 @@ export function normalizeUsage(format: ApiFormat, usage: Dict | null | undefined
         const inputRaw = usage.input_tokens as number | undefined;
         const cacheBase = (usage.cache_read_input_tokens as number | undefined)
             ?? (usage.cache_read_tokens as number | undefined);
-        // Anthropic input_tokens 不含缓存命中，总量 = input_tokens + cache_read_input_tokens
-        promptTotal = inputRaw != null ? (inputRaw + (cacheBase ?? 0)) : null;
+        const cacheWrite = (usage.cache_creation_input_tokens as number | undefined)
+            ?? (usage.cache_creation_tokens as number | undefined);
+        // Anthropic 三个字段**互不包含**（Bedrock prompt-caching 文档：inputTokens 既不含 cache read 也不含
+        // cache write）：总输入 = input_tokens + cache_read_input_tokens + cache_creation_input_tokens。
+        // 单个字段缺失按 0 相加；**只有三者全缺**才落 null —— 保住「缺失 = null / 明确 0 = 0」的落库区分，
+        // 又不把「给了 cache 但没给 input_tokens」这种上游残缺样例误判成「整段用量缺失」。
+        const hasAnyAnthropicInput = inputRaw != null || cacheBase != null || cacheWrite != null;
+        promptTotal = hasAnyAnthropicInput ? ((inputRaw ?? 0) + (cacheBase ?? 0) + (cacheWrite ?? 0)) : null;
         completionRaw = (usage.output_tokens as number | undefined) ?? null;
         cacheReadRaw = cacheBase ?? null;
-        cacheWriteRaw = (usage.cache_creation_input_tokens as number | undefined)
-            ?? (usage.cache_creation_tokens as number | undefined)
-            ?? null;
+        cacheWriteRaw = cacheWrite ?? null;
     }
 
     if (format === ApiFormat.RESPONSES) {
@@ -77,9 +81,10 @@ export function normalizeUsage(format: ApiFormat, usage: Dict | null | undefined
     const outputTokens = completionRaw ?? 0;
     const cacheReadTokens = cacheReadRaw ?? 0;
 
-    // 构造即归一：SgRecordUsage 实例内部为展示口径（prompt_tokens = 非缓存输入）
+    // 构造即归一：SgRecordUsage 实例内部为 OpenAI 口径（prompt_tokens = 含缓存的总量）
     const recordUsage = new SgRecordUsage({
-        version: 2,
+        // v3：Anthropic 的 prompt_tokens 起包含 cache_creation（v2 只含 cache_read）；读取侧 v>=2 一律原样返回
+        version: 3,
         prompt_tokens: promptTotal,
         completion_tokens: completionRaw,
         cache_read_tokens: cacheReadRaw,
@@ -91,7 +96,7 @@ export function normalizeUsage(format: ApiFormat, usage: Dict | null | undefined
 
 
 /**
- * 把规整后的 recordUsage 序列化为落库存储串（v2 总量口径 + usage_version 标记）。
+ * 把规整后的 recordUsage 序列化为落库存储串（v3 总量口径 + usage_version 标记）。
  * 写侧统一走这里（裸 query().update() 不走模型 cast，不能依赖 SgRecordUsage.set()）。
  */
 export function serializeStoredUsage(recordUsage: SgRecordUsage | null | undefined): string | null {

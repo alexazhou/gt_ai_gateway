@@ -4,6 +4,7 @@ export type RechargeRecordType = 'recharge' | 'adjustment';
 
 export interface RechargeRecord extends BaseEntity {
     user_id: number;
+    /** 整数微元（1 元 = 1_000_000 微元），负数表示扣减；展示时除以 BALANCE_SCALE */
     amount: number;
     type: RechargeRecordType;
     remark: string | null;

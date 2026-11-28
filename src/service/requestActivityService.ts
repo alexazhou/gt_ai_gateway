@@ -1,6 +1,9 @@
 import { RequestActivityStage, ActivityLevel } from "../constants";
 import requestActivityManager from "../manager/requestActivityManager";
+import recordManager from "../manager/recordManager";
 import type { SqlStatement } from "../util/dbAdapterUtil";
+import { adapterDialectOf } from "../util/dbAdapterUtil";
+import ormService from "./ormService";
 
 
 export interface RequestActivityEntry {
@@ -86,9 +89,35 @@ async function append(
 }
 
 
+/**
+ * 活动写入前的「record 仍存在」守卫（#332）。
+ *
+ * 为什么需要：收尾 / 结算可能由 `waitUntil` 在请求结束很久之后才触发（流式请求要等上游
+ * 空闲超时，实测迟到 ≈185s），那时 `record` 可能已被删除或被清表清掉。而
+ * `request_activity.record_id` 只与 `record` 逻辑关联、没有外键，删除路径也只按「现存 record id」
+ * 清活动行 —— 于是给已删记录补写进去的行就是一条再也清不掉的孤儿，表现为「删掉记录后
+ * 活动行又长回来」，也是 `recordDelete` 全表 COUNT 偶发 +1 的根因。
+ *
+ * 约定：返回 false 时**已经打过 warn**（含 record id 与阶段，便于定位是哪条链路迟到了），
+ * 调用方直接跳过写入即可，不要静默吞掉。只用于收尾链路（每次请求至多一两次）；
+ * 请求热路径上的 `append` 不要逐次调用它（会每次多一次读）。
+ */
+async function recordStillExists(recordId: number, stage: RequestActivityStage): Promise<boolean> {
+    const record = await recordManager.findById(recordId);
+    if (record) {
+        return true;
+    }
+    console.warn(
+        `[requestActivityService] record ${recordId} 已被删除，跳过活动时间线写入（stage=${stage}）`,
+    );
+    return false;
+}
+
+
 async function getByRecordId(recordId: number): Promise<RequestActivityEntry[]> {
     return await readActivities(recordId);
 }
+
 
 
 /**
@@ -102,9 +131,9 @@ async function clearByRecordIds(recordIds: number[]): Promise<number> {
     return await requestActivityManager.deleteByRecordIds(recordIds);
 }
 
-/** 当前是否 MySQL 方言（UPSERT 语法不同）；worker/D1 与 node/sqlite 同走 SQLite 语法 */
+/** 当前 SQL 方言：跟着实际执行它的适配器走（不看环境变量，见 adapterDialectOf 注释） */
 function isMysqlDialect(): boolean {
-    return process.env.DB_DRIVER === "mysql";
+    return adapterDialectOf(ormService.dbAdapter) === "mysql";
 }
 
 
@@ -186,4 +215,5 @@ export default {
     buildAppendedStatements,
     getByRecordId,
     clearByRecordIds,
+    recordStillExists,
 };

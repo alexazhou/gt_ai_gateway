@@ -59,6 +59,8 @@ npm run tauri dev
 | 日志目录 | `~/Library/Application Support/GtCoder/AiGateway/logs/` |
 | 配置文件 | `~/Library/Application Support/GtCoder/AiGateway/config.json` |
 
+> 两种模式的数据目录都可用 `GT_AI_GATEWAY_DATA_DIR` 整体替换，见「自定义数据目录」。
+
 ## 启动流程
 
 ```mermaid
@@ -68,7 +70,8 @@ sequenceDiagram
     participant Backend as Backend (Node.js)
     participant Main as Main Window (Vue)
 
-    Tauri->>Tauri: 读取/生成 config.json (port, host, root_token)
+    Tauri->>Tauri: 解析数据目录（GT_AI_GATEWAY_DATA_DIR 或系统默认）
+    Tauri->>Tauri: 读取/生成 config.json (port, host, root_token, log_level)
     Tauri->>Backend: 通过 PTY 启动 sidecar，传入环境变量
     Tauri->>Splash: 打开 splashscreen 窗口 (splash.html)
     
@@ -103,9 +106,51 @@ Tauri Rust 在启动 sidecar 时传入以下环境变量：
 | `PORT` | `config.json` 或默认 `6722` | 后端监听端口 |
 | `HOST` | `config.json` 或默认 `127.0.0.1` | 后端监听地址 |
 | `LOG_DIR` | `app_data_dir/logs` | 日志输出目录 |
+| `LOG_LEVEL` | `config.json` 的 `log_level`（默认 `info`） | 应用日志级别，见下文「日志级别」 |
 | `ROOT_TOKEN` | `config.json`（首次自动生成） | 管理员认证令牌 |
-| `DESKTOP_MODE` | 固定值 `"1"` | 标识桌面模式 |
 | `MIGRATION_DIR` | `resource_dir/migrate` | 数据库迁移文件目录 |
+
+> 冷知识：桌面模式靠命令行参数 `--desktop-mode` 传给后端（`src/local.ts` 读 `process.argv`），**不是**环境变量 `DESKTOP_MODE`。
+
+## 自定义数据目录（`GT_AI_GATEWAY_DATA_DIR`）
+
+默认数据目录见文末「App 数据目录」。想换地方（比如 dev / 正式两套数据互不污染）时，在启动前设置环境变量：
+
+```bash
+mkdir -p ~/gt-dev-data
+GT_AI_GATEWAY_DATA_DIR=~/gt-dev-data npm run tauri dev
+```
+
+`config.json`、`gateway.db`、`logs/` 全部跟随该目录派生。支持 `~` 展开。
+
+| 情况 | 行为 |
+|------|------|
+| 未设置 / 空 / 全空白 | 用系统默认目录，与设置该变量之前完全一致（不存在会自动创建） |
+| 指向已存在的目录 | 以它为数据目录 |
+| 指向不存在的路径，或指向一个文件 | **启动直接失败并报错**，不自动创建，也不回退默认目录（否则会悄悄连到一个空库，看着像数据丢了） |
+
+## 日志级别（`config.json` 的 `log_level`）
+
+`config.json` 支持 `log_level` 字段，Tauri 读取后通过环境变量 `LOG_LEVEL` 传给后端：
+
+```json
+{
+    "port": 6722,
+    "host": "127.0.0.1",
+    "root_token": "xxxx",
+    "log_level": "info"
+}
+```
+
+| 值 | 行为 |
+|----|------|
+| `debug` | 每个上游流式 chunk 都输出完整原文（排查上游分帧 / 字段缺失），**不依赖** `stream_log_enabled` |
+| `info`（默认） | chunk 只采样摘要（第 1 个 + 每 200 个），不含正文 |
+| `warn` / `error` | 只留对应及以上级别，chunk 摘要一条不打 |
+
+- 大小写不敏感（`DEBUG` 等同 `debug`）；缺省或填了非法值（如 `verbose`）一律按 `info` 运行，不影响已有配置。
+- 低于生效级别的日志**既不落盘也不进控制台**。
+- 纯 Node 模式（`npm run backend:dev:local`）可直接设 `LOG_LEVEL` 环境变量，语义相同。
 
 ## 前端环境变量
 
@@ -237,7 +282,7 @@ Tauri 通过 **PTY (伪终端)** 管理后端进程的生命周期：
 
 ```
 GtCoder/AiGateway/
-├── config.json     # 服务配置（port, host, root_token）
+├── config.json     # 服务配置（port, host, root_token, log_level）
 ├── gateway.db      # SQLite 数据库
 └── logs/
     └── app-YYYY-MM-DD.log   # 应用日志
@@ -245,3 +290,5 @@ GtCoder/AiGateway/
 
 > [!NOTE]
 > 这个目录与项目根目录的 `local.db` 和 `log/` 是完全独立的。Desktop 模式始终使用 app data 目录，本地 Node 开发模式（`npm run backend:dev:local`）使用项目根目录。
+>
+> 设了 `GT_AI_GATEWAY_DATA_DIR` 时，上面这个目录整体换成该变量指向的目录（详见「自定义数据目录」）。

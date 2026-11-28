@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import rateLimitService from "../../../src/service/rateLimitService";
-import memoryRateLimitStore from "../../../src/util/rule/memoryRateLimitStore";
+import stateStoreService from "../../../src/service/stateStoreService";
 import customError from "../../../src/customError";
+import { StateStoreUnavailableError, type StateStore } from "../../../src/util/stateStore";
 import type { RequestContext } from "../../../src/util/rule/types";
 import type SgRule from "../../../src/model/sgRule";
 
@@ -17,13 +18,33 @@ function advance(ms: number): void {
     vi.mocked(Date.now).mockReturnValue(BASE + ms);
 }
 
+/**
+ * 注入一个「后端不可用」的 StateStore：所有异步方法抛 StateStoreUnavailableError。
+ * 用来验证限流链路的 fail-closed（宁可误拒，不可误放）。
+ */
+function unavailableStore(): StateStore {
+    const fail = async (): Promise<never> => {
+        throw new StateStoreUnavailableError("injected: backend down");
+    };
+    return {
+        consume: fail,
+        incrBy: fail,
+        compareAndSet: fail,
+        get: fail,
+        set: fail,
+        delete: fail,
+    } as unknown as StateStore;
+}
+
 describe("rateLimitService", () => {
     beforeEach(() => {
-        memoryRateLimitStore.clear();
+        // 令牌桶已落在全局 StateStore，测试隔离统一用 stateStoreService.reset()
+        stateStoreService.reset();
         vi.spyOn(Date, "now").mockReturnValue(BASE);
     });
 
     afterEach(() => {
+        stateStoreService.reset();
         vi.restoreAllMocks();
     });
 
@@ -85,5 +106,37 @@ describe("rateLimitService", () => {
         const err = await rateLimitService.checkAndAdmit(r, ctx).catch(e => e);
         expect(err).toBeInstanceOf(customError.RateLimitError);
         expect(err.retryAfterSeconds).toBe(15);
+    });
+
+    // ---- fail-closed：状态后端不可用时宁可误拒，不可误放 ----
+
+    it("StateStore 不可用时 fail-closed：转成 429（Retry-After = 60）", async () => {
+        stateStoreService.setStore(unavailableStore());
+
+        const err = await rateLimitService.checkAndAdmit(rule(1, { rpm: 100 }), ctx).catch(e => e);
+        expect(err).toBeInstanceOf(customError.RateLimitError);
+        expect(err).not.toBeInstanceOf(StateStoreUnavailableError);
+        expect(err.statusCode).toBe(429);
+        expect(err.retryAfterSeconds).toBe(60);
+        expect(err.message).toContain("unavailable");
+    });
+
+    it("StateStore 不可用时的 fail-closed 也保留 failoverEligible 标记", async () => {
+        stateStoreService.setStore(unavailableStore());
+
+        const err = await rateLimitService.checkAndAdmit(rule(1, { rpm: 100 }), ctx, { failoverEligible: true }).catch(e => e);
+        expect(err).toBeInstanceOf(customError.RateLimitError);
+        expect(err.failoverEligible).toBe(true);
+    });
+
+    it("非 StateStoreUnavailableError 的异常原样抛出（不伪装成限流）", async () => {
+        const boom = new TypeError("cross-semantic key");
+        stateStoreService.setStore({
+            consume: async () => {
+                throw boom;
+            },
+        } as unknown as StateStore);
+
+        await expect(rateLimitService.checkAndAdmit(rule(1, { rpm: 100 }), ctx)).rejects.toBe(boom);
     });
 });

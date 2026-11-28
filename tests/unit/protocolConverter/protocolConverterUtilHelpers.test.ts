@@ -195,3 +195,53 @@ describe("验签凭据的段结构校验", () => {
         expect(protocolConverterUtil.unsealThinkingSignature("other.a.b", "anthropic")).toBeNull();
     });
 });
+
+/**
+ * #379：Anthropic 的 input_tokens 既不含 cache read 也不含 cache write（AWS Bedrock prompt-caching 文档），
+ * 转成 OpenAI / Responses 口径时两个缓存字段都要加进输入总量。
+ */
+describe("Anthropic usage → OpenAI / Responses 总量口径（含 cache_creation）", () => {
+    const raw = {
+        input_tokens: 100,
+        output_tokens: 20,
+        cache_read_input_tokens: 40,
+        cache_creation_input_tokens: 15,
+    };
+
+    it("anthropicUsageToOpenAI：prompt_tokens = input + cache_read + cache_creation，明细字段原样透出", () => {
+        const usage = protocolConverterUtil.anthropicUsageToOpenAI(raw);
+
+        expect(usage.prompt_tokens).toBe(155);
+        expect(usage.completion_tokens).toBe(20);
+        expect(usage.total_tokens).toBe(175);
+        // 明细仍然是「子集」的原始值，不因为总量里算了它们而被改写
+        expect(usage.prompt_tokens_details).toMatchObject({ cached_tokens: 40, cache_write_tokens: 15 });
+    });
+
+    it("anthropicUsageToResponses：input_tokens = input + cache_read + cache_creation，不新增明细字段", () => {
+        const usage = protocolConverterUtil.anthropicUsageToResponses(raw);
+
+        expect(usage.input_tokens).toBe(155);
+        expect(usage.output_tokens).toBe(20);
+        expect(usage.total_tokens).toBe(175);
+        expect(usage.input_tokens_details).toEqual({ cached_tokens: 40 });
+        // 不新增 cache 写入明细（Responses 侧透出记 backlog）
+        expect(Object.keys(usage.input_tokens_details ?? {})).toEqual(["cached_tokens"]);
+    });
+
+    it("cache_creation 缺失时退化为「input + cache_read」（与改造前一致，不引入 undefined 参与运算）", () => {
+        const usage = protocolConverterUtil.anthropicUsageToOpenAI({
+            input_tokens: 6,
+            output_tokens: 2,
+            cache_read_input_tokens: 4,
+        });
+        expect(usage.prompt_tokens).toBe(10);
+
+        const responsesUsage = protocolConverterUtil.anthropicUsageToResponses({
+            input_tokens: 6,
+            output_tokens: 2,
+            cache_read_input_tokens: 4,
+        });
+        expect(responsesUsage.input_tokens).toBe(10);
+    });
+});

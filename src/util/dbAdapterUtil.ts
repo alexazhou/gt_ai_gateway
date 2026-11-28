@@ -18,8 +18,17 @@ export interface DatabaseAdapter {
     runAtomically(statements: SqlStatement[]): Promise<void> | void;
 }
 
-export interface StatementAdapter {
-    // 可选参数用于绑定占位符（D1 / better-sqlite3 / mysql2 均支持）；不传时保持旧行为
+/**
+ * 适配器自身的方言：需要按方言拼 SQL 时以这个为准。
+ *
+ * 不能看 `process.env.DB_DRIVER`：同一个进程里可能装的是 sqlite 适配器（单测注入真库）而环境变量是 mysql，
+ * 那样拼出来的 `ON DUPLICATE KEY UPDATE` 会在 sqlite 上直接语法错。D1 与 better-sqlite3 同为 sqlite 方言。
+ */
+export function adapterDialectOf(adapter: DatabaseAdapter): "sqlite" | "mysql" {
+    return adapter instanceof MySQLAdapter ? "mysql" : "sqlite";
+}
+
+export interface StatementAdapter {    // 可选参数用于绑定占位符（D1 / better-sqlite3 / mysql2 均支持）；不传时保持旧行为
     all(...args: any[]): Promise<any> | any;
     first(...args: any[]): Promise<any> | any;
     run(...args: any[]): Promise<any> | any;

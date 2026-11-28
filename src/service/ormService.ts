@@ -3,6 +3,7 @@ import { DatabaseAdapter, D1Adapter, SQLiteAdapter, MySQLAdapter, type SqlStatem
 import { MySQLDBAdapter } from "../util/db/mysqlDBAdapter";
 import { SQLiteDBAdapter } from "../util/db/sqliteDBAdapter";
 import dbMigrationService from "./dbMigrationService";
+import { ensureSystemRules } from "../plugin/systemRulesSync";
 import customError from "../customError";
 import { RunMode } from "../constants";
 
@@ -53,6 +54,10 @@ class ORMService {
             const migrateAdapter = new MySQLDBAdapter(conn);
             await dbMigrationService.applyStartupMigrations(migrateAdapter);
             migrateAdapter.close();
+
+            // 系统规则由运行期生成（迁移只做结构，见 src/plugin/systemRulesSync.ts）：
+            // 必须在任何请求读规则之前完成，失败即硬失败（不带病服务）
+            await ensureSystemRules();
         } else {
             if (!dbPath) {
                 throw new customError.AppError("dbPath is required for node mode", 500);
@@ -73,6 +78,9 @@ class ORMService {
             const migrateAdapter = new SQLiteDBAdapter(dbPath);
             await dbMigrationService.applyStartupMigrations(migrateAdapter);
             migrateAdapter.close();
+
+            // 同 MySQL 分支：迁移之后、对外服务之前生成/纠偏系统规则
+            await ensureSystemRules();
         }
 
         return this._dbAdapter;
@@ -80,6 +88,9 @@ class ORMService {
 
     private _workerConnected = false;
     private _connectPromise: Promise<void> | null = null;
+    /** worker 侧：系统规则是否已在本 isolate 生成过（见 _ensureSystemRulesOnce） */
+    private _systemRulesEnsured = false;
+    private _systemRulesEnsurePromise: Promise<void> | null = null;
 
     async connectWorker(db: any) {
         if (this._dbAdapter instanceof D1Adapter) {
@@ -107,6 +118,42 @@ class ORMService {
         // 解决方案：每次请求都将当前的 env.DB 更新到 Client_D1 实例上，
         // 确保 acquireRawConnection() 和 _query() 使用的是当前请求的 D1 binding。
         this._updateD1Binding(db);
+
+        // 系统规则由运行期生成：worker 没有启动钩子，挂在「每 isolate 一次的连接初始化」里。
+        // 必须在读规则之前完成；失败即让本次请求失败（并清掉缓存，下一次请求可重试）。
+        await this._ensureSystemRulesOnce();
+    }
+
+    /** 每 isolate 只跑一次 ensureSystemRules；失败时清空 promise，允许下一个请求重试 */
+    private async _ensureSystemRulesOnce(): Promise<void> {
+        if (this._systemRulesEnsured) {
+            return;
+        }
+        if (!this._systemRulesEnsurePromise) {
+            this._systemRulesEnsurePromise = ensureSystemRules()
+                .then(() => {
+                    this._systemRulesEnsured = true;
+                })
+                .catch((error) => {
+                    this._systemRulesEnsurePromise = null;
+                    throw error;
+                });
+        }
+        await this._systemRulesEnsurePromise;
+    }
+
+    /**
+     * **仅测试入口使用**（`tests/worker/testRoutes.ts` 的 `POST /test/system-rules-ensure-reset`）。
+     *
+     * worker 侧 ensure 是「每 isolate 一次」，正常测试里永远是第一个请求就把它跑完了，
+     * 于是「删掉系统规则后由下一个请求自动补齐」这条接线没有判据——把 connectWorker 里的
+     * `_ensureSystemRulesOnce()` 整行删掉，全套门仍然全绿（#382 验收实测）。
+     * 复位标记后下一个请求会重新走那条接线，判据见 `tests/api/rule/systemRulesEnsure.test.ts`。
+     * 生产代码不调用本方法（测试路由只由 tests/worker/testEntry.ts 挂载）。
+     */
+    resetSystemRulesEnsureStateForTest(): void {
+        this._systemRulesEnsured = false;
+        this._systemRulesEnsurePromise = null;
     }
 
     /**

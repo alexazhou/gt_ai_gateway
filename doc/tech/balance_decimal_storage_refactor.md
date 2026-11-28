@@ -109,6 +109,7 @@ ALTER TABLE user ADD COLUMN balance DECIMAL(10, 2) DEFAULT 0.0 NOT NULL;
 | `senderService` | 余额预检 `balance < 0` 语义不变（负微元即欠费） |
 | `userController` | **API 直接返回整数微元**（不转换），`balance` 字段全链路统一为微元 |
 | 前端 | 展示时 `formatBalance(value / BALANCE_SCALE)` 换算为"元"；调整余额仍输入"元"、后端换算 |
+| `recharge_records.amount`（2026-11-26 补齐） | 同样按**整数微元**存储与返回（与 `user.balance` 同口径，不再挂 ORM cast）：`userService.adjustBalance` 写记录时传 `toUnits(元)`；`GET /balance/recharge/list.json`、`/:id` 返回微元；前端 `RechargeRecordsTable` 与 CLI `balance list/get` 展示时除以 `1_000_000`。请求侧 `amount` 仍是"元" |
 | 测试 | 全量 node 测试 857 个通过；`billingUtils` 移除已无用的 `roundBalance`；billing 断言更新为微元 |
 
 ## 6. 设计决策（已定）

@@ -152,9 +152,9 @@ func defaultP2Routes() []stubRoute {
 		jsonStub(http.MethodPost, "/user/:id/balance/adjust.json", map[string]any{"success": true, "balance": 10.5}),
 		// 余额流水列表后端返回的是**裸数组**（不是 {list,total}），专门覆盖这条分支。
 		jsonStub(http.MethodGet, "/balance/recharge/list.json", []map[string]any{
-			{"id": 3, "user_id": 12, "amount": 10.5, "type": "recharge"},
+			{"id": 3, "user_id": 12, "amount": 10_500_000, "type": "recharge"},
 		}),
-		jsonStub(http.MethodGet, "/balance/recharge/:id", map[string]any{"id": 3, "user_id": 12, "amount": 10.5}),
+		jsonStub(http.MethodGet, "/balance/recharge/:id", map[string]any{"id": 3, "user_id": 12, "amount": 10_500_000}),
 		jsonStub(http.MethodGet, "/tenant.json", p2ListBody()),
 		jsonStub(http.MethodPost, "/tenant.json", map[string]any{"id": 3, "name": "t1"}),
 		jsonStub(http.MethodGet, "/tenant/:id", map[string]any{"id": 3, "name": "t1"}),
@@ -492,6 +492,14 @@ func TestP2CommandRoutes(t *testing.T) {
 		},
 		{name: "tenant delete -y", args: []string{"tenant", "delete", "3", "-y"}, method: http.MethodDelete, path: "/tenant/3"},
 		{name: "rule list", args: []string{"rule", "list"}, method: http.MethodGet, path: "/rule/list.json"},
+		{
+			// v3 起列表按来源切分：--source 必须原样透传成后端参数（不带 = 服务端默认只回用户规则）
+			name:   "rule list --source system",
+			args:   []string{"rule", "list", "--source", "system"},
+			method: http.MethodGet, path: "/rule/list.json",
+			query: map[string]string{"source": "system"},
+		},
+		{name: "rule plugins", args: []string{"rule", "plugins"}, method: http.MethodGet, path: "/rule/plugins.json"},
 		{name: "rule get", args: []string{"rule", "get", "5"}, method: http.MethodGet, path: "/rule/5"},
 		{
 			name:   "rule create",
@@ -765,6 +773,22 @@ func TestRecordActivityEmptyTimeline(t *testing.T) {
 	}
 }
 
+// TestRuleListSourceInvalidRejected 固化「枚举 flag 在客户端就拦住」的口径：
+// --source 非法时退出码 2 且零请求，不把脏参数发给后端（后端会 400，但 CLI 应更早失败）。
+func TestRuleListSourceInvalidRejected(t *testing.T) {
+	gw := newResourceGateway(t, nil)
+	app, _, errOut := newEnvTestApp(t, gw.URL, testToken)
+	if code := runCLI(app, "rule", "list", "--source", "all"); code != 2 {
+		t.Fatalf("退出码 = %d, 期望 2（stderr=%s）", code, errOut.String())
+	}
+	if paths := gw.rec.paths(); len(paths) != 0 {
+		t.Fatalf("非法 --source 被拒绝了却发出了请求：%v", paths)
+	}
+	if !strings.Contains(errOut.String(), "--source") {
+		t.Fatalf("错误提示应指出 --source，实际：%q", errOut.String())
+	}
+}
+
 // TestUserCreateLegacyTokenFlagRejected 固化 #257 的裁决：
 // `user create --token sk-admin-xxx` 会被误读成「设置该用户的 Token」，从而把管理员 Token
 // 写进用户记录 —— 这是最坏的静默错误。改名后**不做兼容**：旧 flag 一出现就退出码 2、零请求。
@@ -834,5 +858,26 @@ func TestUserUpdateUserTokenEmptyRegenerates(t *testing.T) {
 	}
 	if val != "" {
 		t.Fatalf("body.token = %v, 期望空串", val)
+	}
+}
+
+// TestBalanceListPrintsYuan 断言充值记录 amount 是整数微元（1 元 = 1000000 微元）：
+// 人类可读输出换算成"元"，--json 保持后端原值不动（脚本消费者看到的就是接口口径）。
+func TestBalanceListPrintsYuan(t *testing.T) {
+	gw := newResourceGateway(t, nil)
+	app, out, errOut := newEnvTestApp(t, gw.URL, testToken)
+	if code := runCLI(app, "balance", "list"); code != 0 {
+		t.Fatalf("退出码 = %d, 期望 0（stderr=%s）", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "10.5") {
+		t.Fatalf("充值金额应显示为元 10.5（后端返回 10500000 微元），实际：%q", out.String())
+	}
+
+	appJSON, outJSON, errJSON := newEnvTestApp(t, gw.URL, testToken)
+	if code := runCLI(appJSON, "balance", "list", "--json"); code != 0 {
+		t.Fatalf("--json 退出码 = %d, 期望 0（stderr=%s）", code, errJSON.String())
+	}
+	if !strings.Contains(outJSON.String(), "10500000") {
+		t.Fatalf("--json 应保持后端微元原值 10500000，实际：%q", outJSON.String())
 	}
 }

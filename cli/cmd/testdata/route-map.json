@@ -315,6 +315,14 @@
     },
     {
       "method": "GET",
+      "path": "/rule/plugins.json",
+      "command": "gtgw rule plugins",
+      "phase": "P2",
+      "reason": null,
+      "category": "covered"
+    },
+    {
+      "method": "GET",
       "path": "/stats/dashboard.json",
       "command": "gtgw dashboard",
       "phase": "P1",
@@ -376,14 +384,6 @@
       "phase": "P2",
       "reason": null,
       "category": "covered"
-    },
-    {
-      "method": "DELETE",
-      "path": "/test/cache/clear",
-      "command": null,
-      "phase": null,
-      "reason": "仅测试模式挂载的测试钩子（`TEST_MODE` 才存在，否则 404），不属于用户可见 API",
-      "category": "test-only"
     },
     {
       "method": "GET",

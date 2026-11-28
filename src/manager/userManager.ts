@@ -1,6 +1,6 @@
 import { SgUser } from "../model/sgUser";
 import { UserStatus } from "../constants";
-import type { TenantScope } from "../middleware/tenantScopeMiddleware";
+import type { TenantScope } from "../service/tenantService";
 
 interface UserListOptions {
     type?: string;

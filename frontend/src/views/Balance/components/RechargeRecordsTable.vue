@@ -41,7 +41,7 @@
             <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'amount'">
                     <span :style="{ color: record.amount >= 0 ? '#52c41a' : '#ff4d4f' }">
-                        {{ record.amount >= 0 ? '+' : '' }}¥{{ Math.abs(record.amount).toFixed(2) }}
+                        {{ record.amount >= 0 ? '+' : '' }}¥{{ formatBalance(Math.abs(record.amount) / BALANCE_SCALE) }}
                     </span>
                 </template>
                 <template v-if="column.key === 'type'">
@@ -69,6 +69,7 @@
 import { watch } from 'vue';
 import type { TableColumnsType } from 'ant-design-vue';
 import { listRechargeRecords } from '@/api/billing';
+import { formatBalance, BALANCE_SCALE } from '@/utils/format';
 import { useResourceTable } from '@/composables/useResourceTable';
 import type { RechargeRecord, RechargeRecordsQuery } from '@/types/billing';
 

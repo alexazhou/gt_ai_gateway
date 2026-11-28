@@ -1,6 +1,6 @@
 import { SgModel } from "../model/sgModel";
 import modelManager from "../manager/modelManager";
-import type { TenantScope } from "../middleware/tenantScopeMiddleware";
+import type { TenantScope } from "../service/tenantService";
 import customError from "../customError";
 import routingService from "./routingService/core";
 

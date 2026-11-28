@@ -8,6 +8,7 @@
             show-search
             :options="currentOptions"
             :placeholder="valuesPlaceholder"
+            :disabled="readonly"
             class="leaf-values-select"
         />
         <a-select
@@ -18,6 +19,7 @@
             show-search
             :options="currentOptions"
             :placeholder="valuesPlaceholder"
+            :disabled="readonly"
             class="leaf-values-select"
         />
     </template>
@@ -26,6 +28,7 @@
         :value="valuesText"
         size="small"
         :placeholder="valuesPlaceholder"
+        :disabled="readonly"
         class="leaf-values-input"
         @change="handleValuesChange"
     />
@@ -44,8 +47,11 @@ const props = withDefaults(defineProps<{
     options?: ScopeOptions;
     /** 当前已选值（v-model） */
     values: number[];
+    /** 只读：禁用输入（系统规则查看） */
+    readonly?: boolean;
 }>(), {
     options: () => ({ models: [], users: [], vendors: [] }),
+    readonly: false,
 });
 
 const emit = defineEmits<{

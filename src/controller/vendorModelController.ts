@@ -4,7 +4,7 @@ import { SgVendor } from "../model/sgVendor";
 import vendorManager from "../manager/vendorManager";
 import vendorModelManager from "../manager/vendorModelManager";
 import vendorService from "../service/vendorService";
-import type { TenantScope } from "../middleware/tenantScopeMiddleware";
+import type { TenantScope } from "../service/tenantService";
 import customError from "../customError";
 import { ApiFormat } from "../constants";
 

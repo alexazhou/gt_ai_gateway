@@ -4,12 +4,13 @@ import type RoutingContext from "../routingContext";
 import upstreamHealthService, { UpstreamHealthState } from "../../upstreamHealthService";
 
 abstract class BaseRoutingStrategy {
+    // 返回 Promise：健康状态查询已转 StateStore（异步契约），选路结果随之异步
     abstract selectUpstream(
         model: SgModel,
         candidates: ModelRoutingResult[],
         routingContext?: RoutingContext,
         seed?: number,
-    ): ModelRoutingResult;
+    ): Promise<ModelRoutingResult>;
 
     // 判断单个上游是否本请求已试过，避免 failover 重试死循环（所有模式都需遵守，含 SINGLE）
     protected isTried(
@@ -23,15 +24,16 @@ abstract class BaseRoutingStrategy {
     }
 
     // 判断单个上游是否健康状态为 DOWN（冷却中）。
-    // SINGLE 模式只有唯一固定上游、没有备用可切，不使用此判断，始终返回该上游
-    protected isDown(
+    // SINGLE 模式只有唯一固定上游、没有备用可切，不使用此判断，始终返回该上游。
+    // async：健康状态存在 StateStore 里，读取是异步的（memory 后端下也只是 Promise 包装）
+    protected async isDown(
         candidate: ModelRoutingResult,
         now: number = Date.now(),
-    ): boolean {
+    ): Promise<boolean> {
         if (!candidate.hasUpstream()) {
             return true;
         }
-        const healthStatus = upstreamHealthService.getHealthStatus(
+        const healthStatus = await upstreamHealthService.getHealthStatus(
             candidate.vendor.id,
             candidate.vendorModelName,
             candidate.upstreamFormat,

@@ -75,7 +75,7 @@
                             <div v-if="usageTokens" class="token-row">
                                 <span class="token-item" title="输入 Token">
                                     <ArrowUpOutlined class="token-icon input" />
-                                    {{ usageTokens.prompt }}<template v-if="usageTokens.cacheReadTokens !== null"> (+ {{ usageTokens.cacheReadTokens!.toLocaleString() }})</template>
+                                    {{ usageTokens.prompt }}<template v-if="usageTokens.cacheReadTokens !== null">（缓存 {{ usageTokens.cacheReadTokens!.toLocaleString() }}）</template>
                                 </span>
                                 <span class="token-divider">/</span>
                                 <span class="token-item" title="输出 Token">
@@ -347,8 +347,8 @@ const usageTokens = computed(() => {
     const cacheRead = u.cache_read_tokens;
     let cacheHitRate: number | null = null;
     if (cacheRead != null) {
-        const total = prompt + cacheRead;
-        cacheHitRate = total > 0 ? Math.floor(cacheRead / total * 1000) / 10 : 0;
+        // prompt_tokens 按 OpenAI 口径已含缓存命中，缓存是其子集
+        cacheHitRate = prompt > 0 ? Math.floor(cacheRead / prompt * 1000) / 10 : 0;
     }
     return { prompt, output, cacheHitRate, cacheReadTokens: cacheRead ?? null };
 });

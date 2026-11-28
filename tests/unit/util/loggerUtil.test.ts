@@ -67,7 +67,8 @@ describe("Logger", () => {
     });
 
     it("应该正确记录 debug 级别日志并写入文件", () => {
-        const logger = new Logger(testLogDir, true);
+        // 默认级别是 info，debug 会被过滤；这条用例要验证 debug 落盘，必须显式放开级别
+        const logger = new Logger(testLogDir, true, { level: "debug" });
         const testMessage = "Test debug message";
 
         logger.debug(testMessage);
