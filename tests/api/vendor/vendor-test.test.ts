@@ -287,3 +287,84 @@ describe('Vendor Test API', () => {
         }
     });
 });
+
+/**
+ * #392 回归：供应商连通性测试（网页「测试」按钮走的这条）必须与真实代理请求走**同一套插件链**。
+ *
+ * 修复前的实测事实：开关「自动生成 session header」打开、系统规则 `SYS:setting:session_header`
+ * enab=1 的情况下，`/vendor/:id/test.json` 打到上游的请求**一个 session 头都没有**
+ * （`vendorTestService` 自己 buildHeaders + 裸 fetch，整段绕过 pluginService），
+ * 而上游 OpenCode Go 用 MissingSessionID 拒绝这种请求 —— 于是「网页测试报错、真实请求正常」。
+ */
+describe('Vendor Test 走插件链（#392 自动生成 session header）', () => {
+    const rootToken = 'root-token-123';
+
+    async function setSessionHeaderSwitch(on: boolean): Promise<void> {
+        const response = await requestHelper.put('/config.json', {
+            session_header_enabled: on ? 'true' : 'false',
+        }, rootToken);
+        expect(response.status).toBe(200);
+    }
+
+    async function createEchoVendor(name: string): Promise<number> {
+        const vendor = await requestHelper.post('/vendor/create.json', {
+            type: 'other',
+            name,
+            token: 'test-token',
+            urls: { openai: 'http://localhost:9999/v1/chat/completions' },
+        }, rootToken);
+        expect(vendor.status).toBe(200);
+        return vendor.body.id as number;
+    }
+
+    /** 取 mock 上游最近一条某个模型名对应的请求（按模型名隔离，不受其它用例的历史请求干扰） */
+    async function lastCapturedForModel(model: string) {
+        const requests = await upstreamCaptureHelper.list();
+        const hits = requests.filter(
+            (request) => request.url.includes('/chat/completions') && request.json?.model === model,
+        );
+        return hits[hits.length - 1];
+    }
+
+    function sessionHeaderNames(headers: Record<string, string>): string[] {
+        return Object.keys(headers).filter((name) => name.toLowerCase().includes('session'));
+    }
+
+    it('开关打开：出站请求带 session 头（修复前这里一个都没有）', async () => {
+        await dbHelper.truncate();
+        await setSessionHeaderSwitch(true);
+        const vendorId = await createEchoVendor('Plugin Chain On');
+
+        const response = await requestHelper.post(`/vendor/${vendorId}/test.json`, {
+            format: 'openai',
+            model: 'plugin-chain-on',
+        }, rootToken);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+
+        const captured = await lastCapturedForModel('plugin-chain-on');
+        expect(captured, '上游没有收到这次测试请求').toBeDefined();
+        const names = sessionHeaderNames(captured!.headers);
+        expect(names.length, `上游收到的头：${Object.keys(captured!.headers).join(',')}`).toBeGreaterThan(0);
+
+        const sessionId = captured!.headers[names[0]];
+        expect(sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    });
+
+    it('开关关闭：出站请求没有任何 session 头（与修复前行为一致）', async () => {
+        await dbHelper.truncate();
+        await setSessionHeaderSwitch(false);
+        const vendorId = await createEchoVendor('Plugin Chain Off');
+
+        const response = await requestHelper.post(`/vendor/${vendorId}/test.json`, {
+            format: 'openai',
+            model: 'plugin-chain-off',
+        }, rootToken);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+
+        const captured = await lastCapturedForModel('plugin-chain-off');
+        expect(captured, '上游没有收到这次测试请求').toBeDefined();
+        expect(sessionHeaderNames(captured!.headers)).toEqual([]);
+    });
+});

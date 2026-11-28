@@ -100,7 +100,7 @@
                         <div class="setting-item">
                             <div class="setting-info">
                                 <div class="setting-title">自动生成 session header</div>
-                                <div class="setting-desc">启用后，会给上游请求注入 <code>X-Session-Id</code> 头：按「用户 + system prompt + 第一条消息」生成会话 id，同一会话内保持不变，便于上游按会话聚合缓存</div>
+                                <div class="setting-desc">启用后，会给上游请求注入 <code>X-Session-Id</code> 头：按「用户 + system prompt + 第一条消息」生成会话 id，同一会话内保持不变，便于上游按会话聚合缓存。网页「测试」按钮发出的请求同样生效；OpenCode Go 上游实测也认这个头名（其文档推荐的 <code>x-opencode-session</code> 与它都被接受）。</div>
                             </div>
                             <div class="setting-action">
                                 <a-switch

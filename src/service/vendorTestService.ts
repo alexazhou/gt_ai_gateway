@@ -1,4 +1,10 @@
 import { SgVendor } from "../model/sgVendor";
+import type { SgUser } from "../model/sgUser";
+import type { SgModel } from "../model/sgModel";
+import type { TenantScope } from "./tenantService";
+import ruleService from "./ruleService";
+import pluginService from "./pluginService";
+import hostService from "./hostService";
 import { resolveUpstreamFormat } from "../util/protocolUtil/protocolUtil";
 import fetchUtil from "../util/fetchUtil";
 import abortTimeoutUtil from "../util/abortTimeoutUtil";
@@ -11,6 +17,12 @@ export interface TestVendorOptions {
     model?: string;
     auto_convert?: boolean;
     content_mode?: TestContentMode;
+    /**
+     * 调用方身份（#392）：传入后测试请求会走与真实代理请求同一套**请求插件链**
+     * （`ruleService.matchPluginRules` + `pluginService.applyRequestPlugins`）。
+     * 不传时行为与旧版完全一致（只有鉴权头），供内部/无用户上下文的调用方使用。
+     */
+    pluginContext?: { user: SgUser; scope: TenantScope };
 }
 
 export interface TestVendorResult {
@@ -98,8 +110,43 @@ export async function testVendorConnectivity(
 
     const url = vendor.getUrlByFormat(requestFormat);
     // auto_convert 时按**最终上游协议**原生构造：多模态不会被协议转换丢掉
-    const headers = buildHeaders(vendor, requestFormat);
-    const body = buildVendorTestBody(requestFormat, model, contentMode);
+    let headers = buildHeaders(vendor, requestFormat);
+    let body = buildVendorTestBody(requestFormat, model, contentMode);
+
+    // #392：测试入口也要走与真实请求同一套插件链。
+    // 原来这里只 buildHeaders + 裸 fetch，插件链被整段绕过——「自动生成 session header」等插件
+    // 对网页「测试」静默失效（实测：开关开着，上游仍收到无 session 头的请求 ⇒ MissingSessionID）。
+    // 供应商连通性测试没有模型上下文，用 id=0 的占位模型：依赖 model_id 的规则不命中，
+    // 用户 / 租户 / 全局规则与真实请求一致。
+    if (options.pluginContext) {
+        const { user, scope } = options.pluginContext;
+        const matchedRules = await ruleService.matchPluginRules(
+            user,
+            { id: 0 } as unknown as SgModel,
+            vendor,
+            scope,
+        );
+        if (matchedRules.length > 0) {
+            // 测试请求没有协议转换阶段，故只跑 before_conversion（与真实请求 clientFormat==upstreamFormat 时的首个阶段一致）
+            const applied = await pluginService.applyRequestPlugins({
+                hook: "before_conversion",
+                body,
+                headers,
+                matchedRules,
+                context: {
+                    clientModel: model,
+                    clientFormat: requestFormat,
+                    upstreamFormat: requestFormat,
+                    currentFormat: requestFormat,
+                    hostKey: await hostService.getHostKey(),
+                    clientName: user.name,
+                    userId: Number(user.id),
+                },
+            });
+            body = applied.body;
+            headers = applied.headers;
+        }
+    }
 
     // 代理信息：原样返回存储的配置
     const proxyConfig = vendor.config.proxy;

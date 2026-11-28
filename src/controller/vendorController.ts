@@ -203,12 +203,15 @@ async function testVendor(c: Context) {
     }
 
     const bodyJson = await c.req.json().catch(() => ({}));
+    const user = c.get("user");
     const result = await vendorTestService.testVendorConnectivity(vendor, {
         format: bodyJson.format,
         model: bodyJson.model,
         auto_convert: bodyJson.auto_convert,
         // 非法值由 testVendorConnectivity 里的 normalizeContentMode 抛 400（不静默降级成 text）
         content_mode: bodyJson.content_mode,
+        // #392：测试请求与真实请求走同一套插件链（否则 session header 等插件对「测试」静默失效）
+        pluginContext: user ? { user, scope } : undefined,
     });
 
     return c.json(result);
